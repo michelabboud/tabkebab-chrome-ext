@@ -1,7 +1,7 @@
 // drive-sync.js — Google Drive connect/disconnect/sync UI
 
 import { showToast } from './toast.js';
-import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile, exportToSubfolder } from '../../core/drive-client.js';
+import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile } from '../../core/drive-client.js';
 import { Storage } from '../../core/storage.js';
 
 export class DriveSync {
@@ -102,19 +102,8 @@ export class DriveSync {
       await Storage.set('manualGroups', mergedGroups);
       await writeSyncFile({ sessions: mergedSessions, manualGroups: mergedGroups });
 
-      // Also export sessions to Drive/sessions subfolder
-      const settings = await chrome.runtime.sendMessage({ action: 'getSettings' });
-      if (settings?.autoExportSessionsToDrive && mergedSessions.length > 0) {
-        const filename = `sessions-${new Date().toISOString().slice(0, 10)}.json`;
-        await exportToSubfolder('sessions', filename, { sessions: mergedSessions, exportedAt: Date.now() });
-      }
-
-      // Also export stashes to Drive/stashes subfolder
-      if (settings?.autoExportStashesToDrive) {
-        try {
-          await chrome.runtime.sendMessage({ action: 'syncStashesToDrive' });
-        } catch {}
-      }
+      // Sync everything to Drive subfolders (sessions, stashes, bookmarks)
+      const syncResult = await chrome.runtime.sendMessage({ action: 'syncAllToDrive' });
 
       // Update sync state
       await Storage.set('driveSync', {
@@ -123,7 +112,12 @@ export class DriveSync {
         driveFileId: syncFile?.id || null
       });
 
-      showToast('Synced with Google Drive', 'success');
+      const parts = [];
+      if (syncResult.sessions > 0) parts.push(`${syncResult.sessions} sessions`);
+      if (syncResult.stashes > 0) parts.push(`${syncResult.stashes} stashes`);
+      if (syncResult.bookmarks > 0) parts.push(`${syncResult.bookmarks} bookmarks`);
+      const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+      showToast(`Synced with Google Drive${detail}`, 'success');
     } catch (err) {
       showToast('Sync failed: ' + err.message, 'error');
     }

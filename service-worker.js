@@ -1022,6 +1022,34 @@ async function handleMessage(msg) {
       return { synced: stashes.length };
     }
 
+    case 'syncAllToDrive': {
+      const results = { sessions: 0, stashes: 0, bookmarks: 0 };
+      const dateStr = new Date().toISOString().slice(0, 10);
+
+      // Sessions → Drive/sessions/
+      const sessions = (await Storage.get('sessions')) || [];
+      if (sessions.length > 0) {
+        await exportToSubfolder('sessions', `sessions-${dateStr}.json`, { sessions, exportedAt: Date.now() });
+        results.sessions = sessions.length;
+      }
+
+      // Stashes → Drive/stashes/
+      const stashes = await listStashesDB();
+      if (stashes.length > 0) {
+        await exportToSubfolder('stashes', `stashes-${dateStr}.json`, { stashes, exportedAt: Date.now() });
+        results.stashes = stashes.length;
+      }
+
+      // Bookmarks → Drive/bookmarks/
+      const bookmarks = (await Storage.get('tabkebabBookmarks')) || [];
+      if (bookmarks.length > 0) {
+        await exportToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, { bookmarks, exportedAt: Date.now() });
+        results.bookmarks = bookmarks.length;
+      }
+
+      return results;
+    }
+
     case 'cleanDriveFiles': {
       const days = msg.days || 30;
       const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
