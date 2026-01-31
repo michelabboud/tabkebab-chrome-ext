@@ -1,7 +1,6 @@
 // session-manager.js — Save/restore/delete sessions + export/import
 
 import { showToast } from './toast.js';
-import { showConfirm } from './confirm-dialog.js';
 import { exportData, exportSession, importData } from '../../core/export-import.js';
 
 export class SessionManager {
@@ -176,16 +175,20 @@ export class SessionManager {
       });
 
       const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
-        const ok = await showConfirm({
-          title: 'Delete session?',
-          message: `"${session.name}" will be permanently deleted.`,
-          confirmLabel: 'Delete',
-          danger: true,
-        });
-        if (!ok) return;
         await this.send({ action: 'deleteSession', sessionId: session.id });
-        showToast(`Deleted "${session.name}"`, 'success');
         this.refresh();
+        showToast(`Deleted "${session.name}"`, 'success', 8000, {
+          label: 'Undo',
+          callback: async () => {
+            try {
+              await this.send({ action: 'undoDeleteSession', session });
+              showToast(`Restored "${session.name}"`, 'success');
+              this.refresh();
+            } catch {
+              showToast('Undo failed', 'error');
+            }
+          },
+        });
       });
 
       actions.appendChild(restoreBtn);

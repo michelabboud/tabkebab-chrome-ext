@@ -215,13 +215,7 @@ export class StashList {
     if (!this.driveConnected) driveBtn.hidden = true;
 
     const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
-      const ok = await showConfirm({
-        title: 'Delete stash?',
-        message: `"${stash.name}" will be permanently deleted.`,
-        confirmLabel: 'Delete',
-        danger: true,
-      });
-      if (ok) await this.deleteStash(stash.id, stash.name);
+      await this.deleteStash(stash);
     });
 
     actions.appendChild(restoreBtn);
@@ -288,11 +282,22 @@ export class StashList {
     }
   }
 
-  async deleteStash(id, name) {
+  async deleteStash(stash) {
     try {
-      await this.send({ action: 'deleteStash', stashId: id });
-      showToast(`Deleted "${name}"`, 'success');
+      await this.send({ action: 'deleteStash', stashId: stash.id });
       this.refresh();
+      showToast(`Deleted "${stash.name}"`, 'success', 8000, {
+        label: 'Undo',
+        callback: async () => {
+          try {
+            await this.send({ action: 'undoDeleteStash', stash });
+            showToast(`Restored "${stash.name}"`, 'success');
+            this.refresh();
+          } catch {
+            showToast('Undo failed', 'error');
+          }
+        },
+      });
     } catch {
       showToast('Delete failed', 'error');
     }

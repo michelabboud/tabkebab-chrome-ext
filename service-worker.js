@@ -797,6 +797,19 @@ async function handleMessage(msg) {
       await closeTabs(msg.tabIds);
       return { success: true };
 
+    case 'reopenTabs': {
+      const created = [];
+      for (const url of (msg.urls || [])) {
+        try {
+          const tab = await chrome.tabs.create({ url, active: false });
+          created.push(tab.id);
+        } catch (e) {
+          console.warn('[TabKebab] Failed to reopen tab:', url, e);
+        }
+      }
+      return { created: created.length };
+    }
+
     case 'focusTab':
       await focusTab(msg.tabId);
       return { success: true };
@@ -823,6 +836,14 @@ async function handleMessage(msg) {
     case 'deleteSession':
       await deleteSession(msg.sessionId);
       return { success: true };
+
+    case 'undoDeleteSession': {
+      const sessions = (await Storage.get('sessions')) || [];
+      sessions.push(msg.session);
+      sessions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      await Storage.set('sessions', sessions);
+      return { success: true };
+    }
 
     case 'createTabGroup':
       return createNativeGroup(msg.tabIds, msg.title, msg.color);
@@ -1302,6 +1323,10 @@ async function handleMessage(msg) {
 
     case 'deleteStash':
       await deleteStashDB(msg.stashId);
+      return { success: true };
+
+    case 'undoDeleteStash':
+      await saveStash(msg.stash);
       return { success: true };
 
     case 'importStashes':

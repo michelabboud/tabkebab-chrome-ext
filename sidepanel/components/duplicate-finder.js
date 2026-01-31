@@ -1,7 +1,6 @@
 // duplicate-finder.js — Scan and close duplicate tabs
 
 import { showToast } from './toast.js';
-import { showConfirm } from './confirm-dialog.js';
 
 export class DuplicateFinder {
   constructor(rootEl) {
@@ -104,18 +103,30 @@ export class DuplicateFinder {
       return;
     }
 
-    const ok = await showConfirm({
-      title: 'Close duplicates?',
-      message: `Close ${tabIds.length} duplicate tab${tabIds.length !== 1 ? 's' : ''}? This cannot be undone.`,
-      confirmLabel: 'Close',
-      danger: true,
-    });
-    if (!ok) return;
+    // Capture URLs before closing so undo can reopen them
+    const closedUrls = [];
+    for (const group of this.duplicates) {
+      for (const tab of group.tabs) {
+        if (tabIds.includes(tab.id) && tab.url) {
+          closedUrls.push(tab.url);
+        }
+      }
+    }
 
     try {
       await this.send({ action: 'closeTabs', tabIds });
-      showToast(`Closed ${tabIds.length} duplicate tab(s)`, 'success');
       this.scan();
+      showToast(`Closed ${tabIds.length} duplicate tab(s)`, 'success', 8000, {
+        label: 'Undo',
+        callback: async () => {
+          try {
+            const result = await this.send({ action: 'reopenTabs', urls: closedUrls });
+            showToast(`Reopened ${result.created} tab(s)`, 'success');
+          } catch {
+            showToast('Undo failed', 'error');
+          }
+        },
+      });
     } catch {
       showToast('Failed to close duplicates', 'error');
     }
