@@ -30,6 +30,8 @@ export class WindowList {
     this.collapsed = new Set();
     this.initialized = false;
     this.lastWindows = [];
+    this.maxTabs = 50;
+    this.recommendedTabs = 20;
 
     // Stats elements
     this.statWindows = rootEl.querySelector('#stat-windows');
@@ -103,6 +105,15 @@ export class WindowList {
 
   async refresh() {
     try {
+      // Fetch settings for tab limit thresholds
+      try {
+        const settings = await this.send({ action: 'getSettings' });
+        if (settings) {
+          this.maxTabs = settings.maxTabsPerWindow || 50;
+          this.recommendedTabs = settings.recommendedTabsPerWindow || 20;
+        }
+      } catch {}
+
       const data = await this.send({ action: 'getWindowStats' });
       this.renderStats(data);
       this.renderWindows(data.windows);
@@ -195,7 +206,11 @@ export class WindowList {
     header.className = `window-card-header${isCollapsed ? ' collapsed' : ''}`;
 
     const statusDot = document.createElement('span');
-    statusDot.className = `window-status-dot status-${win.status}`;
+    // Override status color based on settings thresholds
+    let statusColor = 'green';
+    if (win.tabCount >= this.maxTabs) statusColor = 'red';
+    else if (win.tabCount >= this.recommendedTabs) statusColor = 'yellow';
+    statusDot.className = `window-status-dot status-${statusColor}`;
 
     const chevron = document.createElement('span');
     chevron.className = 'chevron';
@@ -213,6 +228,21 @@ export class WindowList {
     header.appendChild(chevron);
     header.appendChild(label);
     header.appendChild(count);
+
+    // Tab limit warning badge
+    if (win.tabCount >= this.maxTabs) {
+      const warnBadge = document.createElement('span');
+      warnBadge.className = 'window-warning-badge warning-red';
+      warnBadge.textContent = `${win.tabCount} tabs`;
+      warnBadge.title = `Exceeds limit of ${this.maxTabs} tabs per window`;
+      header.appendChild(warnBadge);
+    } else if (win.tabCount >= this.recommendedTabs) {
+      const warnBadge = document.createElement('span');
+      warnBadge.className = 'window-warning-badge warning-yellow';
+      warnBadge.textContent = `${win.tabCount} tabs`;
+      warnBadge.title = `Exceeds recommended ${this.recommendedTabs} tabs per window`;
+      header.appendChild(warnBadge);
+    }
 
     // Stash button
     const stashBtn = document.createElement('button');

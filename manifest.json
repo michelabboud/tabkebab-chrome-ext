@@ -10,7 +10,8 @@
     "storage",
     "sidePanel",
     "identity",
-    "alarms"
+    "alarms",
+    "bookmarks"
   ],
 
   "host_permissions": [

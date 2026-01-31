@@ -1,7 +1,7 @@
 // drive-sync.js — Google Drive connect/disconnect/sync UI
 
 import { showToast } from './toast.js';
-import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile } from '../../core/drive-client.js';
+import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile, exportToSubfolder } from '../../core/drive-client.js';
 import { Storage } from '../../core/storage.js';
 
 export class DriveSync {
@@ -23,7 +23,9 @@ export class DriveSync {
   }
 
   updateUI(state) {
-    if (state && state.connected) {
+    const connected = state && state.connected;
+
+    if (connected) {
       this.statusEl.textContent = state.lastSyncedAt
         ? `Connected. Last synced: ${new Date(state.lastSyncedAt).toLocaleString()}`
         : 'Connected. Not yet synced.';
@@ -38,6 +40,10 @@ export class DriveSync {
       this.syncBtn.disabled = true;
       this.disconnectBtn.hidden = true;
     }
+
+    // Show/hide Drive connected settings in the settings card
+    const connectedSection = this.root.querySelector('#drive-settings-connected');
+    if (connectedSection) connectedSection.hidden = !connected;
   }
 
   async connect() {
@@ -95,6 +101,20 @@ export class DriveSync {
       await Storage.set('sessions', mergedSessions);
       await Storage.set('manualGroups', mergedGroups);
       await writeSyncFile({ sessions: mergedSessions, manualGroups: mergedGroups });
+
+      // Also export sessions to Drive/sessions subfolder
+      const settings = await chrome.runtime.sendMessage({ action: 'getSettings' });
+      if (settings?.autoExportSessionsToDrive && mergedSessions.length > 0) {
+        const filename = `sessions-${new Date().toISOString().slice(0, 10)}.json`;
+        await exportToSubfolder('sessions', filename, { sessions: mergedSessions, exportedAt: Date.now() });
+      }
+
+      // Also export stashes to Drive/stashes subfolder
+      if (settings?.autoExportStashesToDrive) {
+        try {
+          await chrome.runtime.sendMessage({ action: 'syncStashesToDrive' });
+        } catch {}
+      }
 
       // Update sync state
       await Storage.set('driveSync', {

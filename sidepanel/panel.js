@@ -9,10 +9,13 @@ import { WindowList } from './components/window-list.js';
 import { AISettings } from './components/ai-settings.js';
 import { CommandBar } from './components/command-bar.js';
 import { StashList } from './components/stash-list.js';
+import { SettingsManager } from './components/settings-manager.js';
 
 // --- Initialize view controllers ---
-const driveSyncCtrl = new DriveSync(document.getElementById('view-settings'));
-const aiSettingsCtrl = new AISettings(document.getElementById('view-settings'));
+const settingsRoot = document.getElementById('view-settings');
+const driveSyncCtrl = new DriveSync(settingsRoot);
+const aiSettingsCtrl = new AISettings(settingsRoot);
+const settingsManagerCtrl = new SettingsManager(settingsRoot);
 
 const controllers = {
   tabs: new TabList(document.getElementById('sub-domains')),
@@ -25,6 +28,7 @@ const controllers = {
     refresh() {
       driveSyncCtrl.refresh();
       aiSettingsCtrl.refresh();
+      settingsManagerCtrl.refresh();
     },
   },
 };
@@ -116,6 +120,53 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+// --- Theme support ---
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'light' || theme === 'dark') {
+    html.setAttribute('data-theme', theme);
+  } else {
+    html.removeAttribute('data-theme');
+  }
+}
+
+// --- Default view ---
+function applyDefaultView(view) {
+  if (!view || view === 'tabs') return; // tabs is already the default active view
+  const targetBtn = document.querySelector(`.tab-nav [data-view="${view}"]`);
+  if (targetBtn) targetBtn.click();
+}
+
+// --- Load settings on startup ---
+async function initSettings() {
+  try {
+    const settings = await chrome.runtime.sendMessage({ action: 'getSettings' });
+    if (settings) {
+      applyTheme(settings.theme);
+      applyDefaultView(settings.defaultView);
+    }
+  } catch {
+    // Settings not available yet
+  }
+}
+
+initSettings();
+
+// --- Re-apply theme/view when settings change ---
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.tabkebabSettings) {
+      const newSettings = changes.tabkebabSettings.newValue;
+      if (newSettings) {
+        applyTheme(newSettings.theme);
+      }
+    }
+    if (changes.aiSettings) {
+      updateAIVisibility();
+    }
+  }
+});
+
 // --- Initial load ---
 controllers.tabs.refresh();
 
@@ -146,10 +197,3 @@ async function updateAIVisibility() {
 }
 
 updateAIVisibility();
-
-// Re-check when settings might change
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.aiSettings) {
-    updateAIVisibility();
-  }
-});

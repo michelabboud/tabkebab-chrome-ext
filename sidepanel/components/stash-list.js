@@ -1,11 +1,13 @@
 // stash-list.js — Stash view: list, restore, delete, export/import stashes
 
 import { showToast } from './toast.js';
+import { Storage } from '../../core/storage.js';
 
 export class StashList {
   constructor(rootEl) {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#stash-list');
+    this.driveConnected = false;
 
     rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => this.exportStashes());
     rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
@@ -13,6 +15,10 @@ export class StashList {
 
   async refresh() {
     try {
+      // Check Drive connection status
+      const driveState = await Storage.get('driveSync');
+      this.driveConnected = driveState?.connected || false;
+
       const stashes = await this.send({ action: 'listStashes' });
       this.render(stashes);
     } catch {
@@ -114,12 +120,34 @@ export class StashList {
       restoreHereBtn.textContent = 'Restore here';
     });
 
+    // Per-stash Export button (download arrow)
+    const exportBtn = this.createBtn('\u2913', 'stash-btn icon-btn', async () => {
+      await this.exportSingleStash(stash);
+    });
+    exportBtn.title = 'Export this stash as JSON';
+
+    // Per-stash Drive upload button (cloud icon, shown when Drive connected)
+    const driveBtn = this.createBtn('\u2601', 'stash-btn icon-btn', async () => {
+      driveBtn.disabled = true;
+      try {
+        await this.send({ action: 'exportStashToDrive', stashId: stash.id });
+        showToast(`"${stash.name}" saved to Drive`, 'success');
+      } catch (err) {
+        showToast('Drive upload failed: ' + err.message, 'error');
+      }
+      driveBtn.disabled = false;
+    });
+    driveBtn.title = 'Save to Google Drive';
+    if (!this.driveConnected) driveBtn.hidden = true;
+
     const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
       await this.deleteStash(stash.id, stash.name);
     });
 
     actions.appendChild(restoreBtn);
     actions.appendChild(restoreHereBtn);
+    actions.appendChild(exportBtn);
+    actions.appendChild(driveBtn);
     actions.appendChild(deleteBtn);
 
     card.appendChild(header);
@@ -131,11 +159,11 @@ export class StashList {
 
   async restoreStash(id, name, options) {
     try {
+      // Let service worker read removeStashAfterRestore from settings
       const result = await this.send({
         action: 'restoreStash',
         stashId: id,
         options,
-        deleteAfterRestore: true,
       });
 
       if (result.restoredCount === 0) {
@@ -166,6 +194,30 @@ export class StashList {
       this.refresh();
     } catch {
       showToast('Delete failed', 'error');
+    }
+  }
+
+  async exportSingleStash(stash) {
+    try {
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        stashes: [stash],
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tabkebab-stash-${stash.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast('Stash exported', 'success');
+    } catch (err) {
+      showToast('Export failed: ' + err.message, 'error');
     }
   }
 

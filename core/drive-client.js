@@ -5,6 +5,11 @@ const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_NAME = 'TabKebab';
 const SYNC_FILENAME = 'tabkebab-sync.json';
 
+// Subfolder names under TabKebab
+const SUBFOLDER_SESSIONS = 'sessions';
+const SUBFOLDER_STASHES = 'stashes';
+const SUBFOLDER_BOOKMARKS = 'bookmarks';
+
 // ── Auth ──────────────────────────────────────────────
 
 async function getToken(interactive = false) {
@@ -89,6 +94,60 @@ async function getOrCreateFolder() {
   return folder.id;
 }
 
+/**
+ * Find or create a subfolder inside a parent folder.
+ */
+async function findSubfolder(parentId, subName) {
+  const q = `name='${subName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const resp = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
+  );
+  const data = await resp.json();
+  return data.files?.[0] || null;
+}
+
+async function createSubfolder(parentId, subName) {
+  const metadata = {
+    name: subName,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentId],
+  };
+  const resp = await driveRequest(`${DRIVE_API}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(metadata)
+  });
+  return resp.json();
+}
+
+async function getOrCreateSubfolder(parentId, subName) {
+  let sub = await findSubfolder(parentId, subName);
+  if (!sub) sub = await createSubfolder(parentId, subName);
+  return sub.id;
+}
+
+/**
+ * Get the ID of a named subfolder under TabKebab root.
+ * Creates TabKebab and subfolder if needed.
+ */
+export async function getSubfolderId(subName) {
+  const rootId = await getOrCreateFolder();
+  return getOrCreateSubfolder(rootId, subName);
+}
+
+// Convenience getters for known subfolders
+export async function getSessionsFolderId() {
+  return getSubfolderId(SUBFOLDER_SESSIONS);
+}
+
+export async function getStashesFolderId() {
+  return getSubfolderId(SUBFOLDER_STASHES);
+}
+
+export async function getBookmarksFolderId() {
+  return getSubfolderId(SUBFOLDER_BOOKMARKS);
+}
+
 // ── File operations ───────────────────────────────────
 
 async function findFileInFolder(folderId, filename) {
@@ -135,6 +194,18 @@ async function deleteFileById(fileId) {
   await driveRequest(`${DRIVE_API}/files/${fileId}`, { method: 'DELETE' });
 }
 
+/**
+ * List all files in a folder.
+ */
+async function listFilesInFolder(folderId) {
+  const q = `'${folderId}' in parents and trashed=false and mimeType='application/json'`;
+  const resp = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&spaces=drive`
+  );
+  const data = await resp.json();
+  return data.files || [];
+}
+
 // ── Public API: Sync ──────────────────────────────────
 
 export async function findSyncFile() {
@@ -157,7 +228,7 @@ export async function deleteSyncFile() {
   if (file) await deleteFileById(file.id);
 }
 
-// ── Public API: Export files ──────────────────────────
+// ── Public API: Export files (root folder) ───────────
 
 export async function exportFileToDrive(filename, content) {
   const folderId = await getOrCreateFolder();
@@ -180,4 +251,56 @@ export async function readDriveExport(fileId) {
 
 export async function deleteDriveExport(fileId) {
   return deleteFileById(fileId);
+}
+
+// ── Public API: Subfolder-based export ───────────────
+
+/**
+ * Write a file to a specific subfolder under TabKebab.
+ * @param {'sessions'|'stashes'|'bookmarks'} subfolder
+ * @param {string} filename
+ * @param {object} content
+ */
+export async function exportToSubfolder(subfolder, filename, content) {
+  const folderId = await getSubfolderId(subfolder);
+  return writeFileToFolder(folderId, filename, content);
+}
+
+/**
+ * List files in a specific subfolder under TabKebab.
+ */
+export async function listSubfolderFiles(subfolder) {
+  const folderId = await getSubfolderId(subfolder);
+  return listFilesInFolder(folderId);
+}
+
+/**
+ * Delete a Drive file by ID.
+ */
+export async function deleteDriveFile(fileId) {
+  return deleteFileById(fileId);
+}
+
+/**
+ * List ALL files across all subfolders + root for cleanup.
+ * Returns files with their modifiedTime.
+ */
+export async function listAllDriveFiles() {
+  const rootId = await getOrCreateFolder();
+  const rootFiles = await listFilesInFolder(rootId);
+
+  const subfolders = [SUBFOLDER_SESSIONS, SUBFOLDER_STASHES, SUBFOLDER_BOOKMARKS];
+  const allFiles = [...rootFiles];
+
+  for (const sub of subfolders) {
+    try {
+      const subId = await getOrCreateSubfolder(rootId, sub);
+      const subFiles = await listFilesInFolder(subId);
+      allFiles.push(...subFiles);
+    } catch {
+      // Subfolder may not exist yet
+    }
+  }
+
+  return allFiles;
 }
