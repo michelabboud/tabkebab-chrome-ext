@@ -133,6 +133,11 @@ export async function saveSession(name, allWindows = true) {
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 50;
 
+// Lazy restore for large tab sets (>20 tabs)
+const LAZY_THRESHOLD = 20;
+const LAZY_BATCH_SIZE = 5;
+const LAZY_DELAY_MS = 800;
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -191,10 +196,12 @@ async function restoreGroups(savedTabs, createdTabs, groups, windowId, result) {
  * @param {string} sessionId
  * @param {Object} [options]
  * @param {string} [options.mode='windows'] - 'windows' | 'here' | 'single-window'
+ * @param {Function} [options.onProgress] - callback(current, total) called after each batch
  * @returns {Promise<Object>} RestoreResult
  */
 export async function restoreSession(sessionId, options = {}) {
   const mode = options.mode || 'windows';
+  const onProgress = options.onProgress || null;
 
   const sessions = (await Storage.get('sessions')) || [];
   let session = sessions.find(s => s.id === sessionId);
@@ -248,6 +255,12 @@ export async function restoreSession(sessionId, options = {}) {
     return result;
   }
 
+  // Choose lazy vs normal batching based on total tab count
+  const totalCount = allRestorable.length;
+  const lazy = totalCount > LAZY_THRESHOLD;
+  const batchSize = lazy ? LAZY_BATCH_SIZE : BATCH_SIZE;
+  const batchDelay = lazy ? LAZY_DELAY_MS : BATCH_DELAY_MS;
+
   if (mode === 'windows') {
     // Each saved window → new Chrome window
     for (const { tabs, groups } of windowBatches) {
@@ -256,19 +269,27 @@ export async function restoreSession(sessionId, options = {}) {
         const win = await chrome.windows.create({ url: tabs[0].url });
         result.windowsCreated++;
         result.restoredCount++;
+        if (onProgress) onProgress(result.restoredCount, totalCount);
 
         const windowId = win.id;
 
         // Add remaining tabs in batches
-        for (let i = 1; i < tabs.length; i += BATCH_SIZE) {
-          const batch = tabs.slice(i, i + BATCH_SIZE);
-          await Promise.all(
+        for (let i = 1; i < tabs.length; i += batchSize) {
+          const batch = tabs.slice(i, i + batchSize);
+          const created = await Promise.all(
             batch.map(tab =>
               chrome.tabs.create({ windowId, url: tab.url, active: false })
             )
           );
           result.restoredCount += batch.length;
-          if (i + BATCH_SIZE < tabs.length) await sleep(BATCH_DELAY_MS);
+          if (onProgress) onProgress(result.restoredCount, totalCount);
+
+          // Per-batch discard
+          for (const ct of created) {
+            try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
+          }
+
+          if (i + batchSize < tabs.length) await sleep(batchDelay);
         }
 
         // Query created tabs to get their actual IDs
@@ -293,15 +314,22 @@ export async function restoreSession(sessionId, options = {}) {
     }
   } else if (mode === 'here') {
     // All tabs in current window
-    for (let i = 0; i < allRestorable.length; i += BATCH_SIZE) {
-      const batch = allRestorable.slice(i, i + BATCH_SIZE);
-      await Promise.all(
+    for (let i = 0; i < allRestorable.length; i += batchSize) {
+      const batch = allRestorable.slice(i, i + batchSize);
+      const created = await Promise.all(
         batch.map(tab =>
           chrome.tabs.create({ url: tab.url, active: false, pinned: tab.pinned || false })
         )
       );
       result.restoredCount += batch.length;
-      if (i + BATCH_SIZE < allRestorable.length) await sleep(BATCH_DELAY_MS);
+      if (onProgress) onProgress(result.restoredCount, totalCount);
+
+      // Per-batch discard
+      for (const ct of created) {
+        try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
+      }
+
+      if (i + batchSize < allRestorable.length) await sleep(batchDelay);
     }
   } else if (mode === 'single-window') {
     // All tabs in one new window
@@ -309,17 +337,25 @@ export async function restoreSession(sessionId, options = {}) {
       const win = await chrome.windows.create({ url: allRestorable[0].url });
       result.windowsCreated++;
       result.restoredCount++;
+      if (onProgress) onProgress(result.restoredCount, totalCount);
 
       const windowId = win.id;
-      for (let i = 1; i < allRestorable.length; i += BATCH_SIZE) {
-        const batch = allRestorable.slice(i, i + BATCH_SIZE);
-        await Promise.all(
+      for (let i = 1; i < allRestorable.length; i += batchSize) {
+        const batch = allRestorable.slice(i, i + batchSize);
+        const created = await Promise.all(
           batch.map(tab =>
             chrome.tabs.create({ windowId, url: tab.url, active: false })
           )
         );
         result.restoredCount += batch.length;
-        if (i + BATCH_SIZE < allRestorable.length) await sleep(BATCH_DELAY_MS);
+        if (onProgress) onProgress(result.restoredCount, totalCount);
+
+        // Per-batch discard
+        for (const ct of created) {
+          try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
+        }
+
+        if (i + batchSize < allRestorable.length) await sleep(batchDelay);
       }
 
       // Restore pinned state

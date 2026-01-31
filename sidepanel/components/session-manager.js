@@ -1,12 +1,14 @@
 // session-manager.js — Save/restore/delete sessions + export/import
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 import { exportData, exportSession, importData } from '../../core/export-import.js';
 
 export class SessionManager {
   constructor(rootEl) {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#session-list');
+    this.activeRestoreId = null;
 
     rootEl.querySelector('#btn-save-session').addEventListener('click', () => this.saveSession());
     rootEl.querySelector('#btn-export').addEventListener('click', () => this.export());
@@ -16,6 +18,33 @@ export class SessionManager {
     rootEl.querySelector('#session-name').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.saveSession();
     });
+
+    // Listen for restore progress broadcasts from the service worker
+    this._onRestoreProgress = (message) => {
+      if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
+        this.updateProgress(message.restoreId, message.current, message.total);
+      }
+    };
+    chrome.runtime.onMessage.addListener(this._onRestoreProgress);
+  }
+
+  updateProgress(restoreId, current, total) {
+    const container = this.listEl.querySelector(`[data-restore-id="${restoreId}"] .restore-progress`);
+    if (!container) return;
+    container.classList.add('active');
+    const fill = container.querySelector('.restore-progress-fill');
+    const label = container.querySelector('.restore-progress-label');
+    if (fill) fill.style.width = `${Math.round((current / total) * 100)}%`;
+    if (label) label.textContent = `Restoring ${current} / ${total} tabs...`;
+  }
+
+  hideProgress(restoreId) {
+    const container = this.listEl.querySelector(`[data-restore-id="${restoreId}"] .restore-progress`);
+    if (container) {
+      container.classList.remove('active');
+      const fill = container.querySelector('.restore-progress-fill');
+      if (fill) fill.style.width = '0%';
+    }
   }
 
   async refresh() {
@@ -49,10 +78,16 @@ export class SessionManager {
       // v2 sessions have windows array; v1 have flat tabs array
       const meta = this.buildMetaText(session, dateStr);
 
+      card.dataset.restoreId = session.id;
+
       const autoBadge = isAutoSave ? '<span class="session-auto-badge">Auto</span>' : '';
       card.innerHTML = `
         <div class="session-name">${autoBadge}${this.escapeHtml(session.name)}</div>
         <div class="session-meta">${meta}</div>
+        <div class="restore-progress">
+          <div class="restore-progress-bar"><div class="restore-progress-fill"></div></div>
+          <div class="restore-progress-label"></div>
+        </div>
         <div class="session-actions"></div>
       `;
 
@@ -61,6 +96,7 @@ export class SessionManager {
       const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
         restoreBtn.disabled = true;
         restoreBtn.textContent = 'Restoring...';
+        this.activeRestoreId = session.id;
         try {
           const result = await this.send({
             action: 'restoreSession',
@@ -71,6 +107,8 @@ export class SessionManager {
         } catch (err) {
           showToast(`Restore failed: ${err.message}`, 'error');
         } finally {
+          this.activeRestoreId = null;
+          this.hideProgress(session.id);
           restoreBtn.disabled = false;
           restoreBtn.textContent = 'Restore';
         }
@@ -79,6 +117,7 @@ export class SessionManager {
       const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
         restoreHereBtn.disabled = true;
         restoreHereBtn.textContent = 'Restoring...';
+        this.activeRestoreId = session.id;
         try {
           const result = await this.send({
             action: 'restoreSession',
@@ -89,6 +128,8 @@ export class SessionManager {
         } catch (err) {
           showToast(`Restore failed: ${err.message}`, 'error');
         } finally {
+          this.activeRestoreId = null;
+          this.hideProgress(session.id);
           restoreHereBtn.disabled = false;
           restoreHereBtn.textContent = 'Restore here';
         }
@@ -108,6 +149,13 @@ export class SessionManager {
       });
 
       const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
+        const ok = await showConfirm({
+          title: 'Delete session?',
+          message: `"${session.name}" will be permanently deleted.`,
+          confirmLabel: 'Delete',
+          danger: true,
+        });
+        if (!ok) return;
         await this.send({ action: 'deleteSession', sessionId: session.id });
         showToast(`Deleted "${session.name}"`, 'success');
         this.refresh();

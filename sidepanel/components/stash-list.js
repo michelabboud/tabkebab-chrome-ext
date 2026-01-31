@@ -1,6 +1,7 @@
 // stash-list.js — Stash view: list, restore, delete, export/import stashes
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
 
 export class StashList {
@@ -8,9 +9,28 @@ export class StashList {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#stash-list');
     this.driveConnected = false;
+    this.activeRestoreId = null;
 
     rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => this.exportStashes());
     rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
+
+    // Listen for restore progress broadcasts from the service worker
+    this._onRestoreProgress = (message) => {
+      if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
+        this.updateProgress(message.restoreId, message.current, message.total);
+      }
+    };
+    chrome.runtime.onMessage.addListener(this._onRestoreProgress);
+  }
+
+  updateProgress(restoreId, current, total) {
+    const container = this.listEl.querySelector(`[data-restore-id="${restoreId}"] .restore-progress`);
+    if (!container) return;
+    container.classList.add('active');
+    const fill = container.querySelector('.restore-progress-fill');
+    const label = container.querySelector('.restore-progress-label');
+    if (fill) fill.style.width = `${Math.round((current / total) * 100)}%`;
+    if (label) label.textContent = `Restoring ${current} / ${total} tabs...`;
   }
 
   async refresh() {
@@ -42,8 +62,9 @@ export class StashList {
   createStashCard(stash) {
     const card = document.createElement('div');
     card.className = 'stash-card';
+    card.dataset.restoreId = stash.id;
 
-    // Header: name + source badge
+    // Header: name + source badge + restored badge
     const header = document.createElement('div');
     header.className = 'stash-card-header';
 
@@ -58,6 +79,13 @@ export class StashList {
 
     header.appendChild(name);
     header.appendChild(badge);
+
+    if (stash.restoredAt) {
+      const restoredBadge = document.createElement('span');
+      restoredBadge.className = 'stash-restored-badge';
+      restoredBadge.textContent = 'Restored';
+      header.appendChild(restoredBadge);
+    }
 
     // Favicon preview
     const allTabs = (stash.windows || []).flatMap(w => w.tabs || []);
@@ -105,17 +133,39 @@ export class StashList {
     actions.className = 'stash-actions';
 
     const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
+      if (stash.restoredAt) {
+        const ok = await showConfirm({
+          title: 'Restore again?',
+          message: 'This stash was already restored. Restore again?',
+          confirmLabel: 'Restore',
+        });
+        if (!ok) return;
+      }
       restoreBtn.disabled = true;
       restoreBtn.textContent = 'Restoring...';
+      this.activeRestoreId = stash.id;
       await this.restoreStash(stash.id, stash.name, { mode: 'windows' });
+      this.activeRestoreId = null;
+      this.hideProgress(stash.id);
       restoreBtn.disabled = false;
       restoreBtn.textContent = 'Restore';
     });
 
     const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
+      if (stash.restoredAt) {
+        const ok = await showConfirm({
+          title: 'Restore again?',
+          message: 'This stash was already restored. Restore again?',
+          confirmLabel: 'Restore',
+        });
+        if (!ok) return;
+      }
       restoreHereBtn.disabled = true;
       restoreHereBtn.textContent = 'Restoring...';
+      this.activeRestoreId = stash.id;
       await this.restoreStash(stash.id, stash.name, { mode: 'here' });
+      this.activeRestoreId = null;
+      this.hideProgress(stash.id);
       restoreHereBtn.disabled = false;
       restoreHereBtn.textContent = 'Restore here';
     });
@@ -141,7 +191,13 @@ export class StashList {
     if (!this.driveConnected) driveBtn.hidden = true;
 
     const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
-      await this.deleteStash(stash.id, stash.name);
+      const ok = await showConfirm({
+        title: 'Delete stash?',
+        message: `"${stash.name}" will be permanently deleted.`,
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (ok) await this.deleteStash(stash.id, stash.name);
     });
 
     actions.appendChild(restoreBtn);
@@ -150,11 +206,29 @@ export class StashList {
     actions.appendChild(driveBtn);
     actions.appendChild(deleteBtn);
 
+    // Progress bar (hidden by default)
+    const progressContainer = document.createElement('div');
+    progressContainer.className = 'restore-progress';
+    progressContainer.innerHTML = `
+      <div class="restore-progress-bar"><div class="restore-progress-fill"></div></div>
+      <div class="restore-progress-label"></div>
+    `;
+
     card.appendChild(header);
     card.appendChild(preview);
     card.appendChild(meta);
+    card.appendChild(progressContainer);
     card.appendChild(actions);
     return card;
+  }
+
+  hideProgress(restoreId) {
+    const container = this.listEl.querySelector(`[data-restore-id="${restoreId}"] .restore-progress`);
+    if (container) {
+      container.classList.remove('active');
+      const fill = container.querySelector('.restore-progress-fill');
+      if (fill) fill.style.width = '0%';
+    }
   }
 
   async restoreStash(id, name, options) {

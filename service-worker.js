@@ -403,10 +403,11 @@ async function saveToChromeBoomarks(bookmarkData, dateStr) {
     dateFolder = await chrome.bookmarks.create({ parentId: tkRoot.id, title: dateStr });
   }
 
-  // By Windows: TabKebab -> date -> Window N -> tabs
+  // By Windows: TabKebab -> date -> Windows -> Window N -> tabs
   if (bookmarkData.formats.byWindows) {
+    const windowsFolder = await chrome.bookmarks.create({ parentId: dateFolder.id, title: 'Windows' });
     for (const win of bookmarkData.formats.byWindows) {
-      const winFolder = await chrome.bookmarks.create({ parentId: dateFolder.id, title: win.name });
+      const winFolder = await chrome.bookmarks.create({ parentId: windowsFolder.id, title: win.name });
       for (const tab of win.tabs) {
         await chrome.bookmarks.create({ parentId: winFolder.id, title: tab.title, url: tab.url });
       }
@@ -531,8 +532,17 @@ async function handleMessage(msg) {
     case 'saveSession':
       return saveSession(msg.name);
 
-    case 'restoreSession':
-      return restoreSession(msg.sessionId, msg.options);
+    case 'restoreSession': {
+      const onProgress = (current, total) => {
+        chrome.runtime.sendMessage({
+          action: 'restoreProgress',
+          restoreId: msg.sessionId,
+          current,
+          total,
+        }).catch(() => {});
+      };
+      return restoreSession(msg.sessionId, { ...msg.options, onProgress });
+    }
 
     case 'listSessions':
       return listSessions();
@@ -978,7 +988,16 @@ async function handleMessage(msg) {
       const stash = await getStash(msg.stashId);
       if (!stash) throw new Error('Stash not found');
 
-      const restoreResult = await restoreStashTabs(stash, msg.options || {});
+      const onProgress = (current, total) => {
+        chrome.runtime.sendMessage({
+          action: 'restoreProgress',
+          restoreId: msg.stashId,
+          current,
+          total,
+        }).catch(() => {});
+      };
+
+      const restoreResult = await restoreStashTabs(stash, { ...(msg.options || {}), onProgress });
 
       // Read removeStashAfterRestore from settings if not overridden in message
       const removeOverride = msg.deleteAfterRestore;
@@ -992,6 +1011,10 @@ async function handleMessage(msg) {
 
       if (shouldRemove !== false) {
         await deleteStashDB(msg.stashId);
+      } else if (restoreResult.restoredCount > 0) {
+        // Mark stash as restored (when not deleted)
+        stash.restoredAt = Date.now();
+        await saveStash(stash);
       }
 
       return restoreResult;

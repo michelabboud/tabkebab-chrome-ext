@@ -134,6 +134,11 @@ export async function clearAllStashes() {
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 50;
 
+// Lazy restore for large tab sets (>20 tabs)
+const LAZY_THRESHOLD = 20;
+const LAZY_BATCH_SIZE = 5;
+const LAZY_DELAY_MS = 800;
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -190,10 +195,12 @@ async function restoreGroups(savedTabs, createdTabs, groups, windowId, result) {
  * @param {Object} [options]
  * @param {string} [options.mode='windows'] — 'windows' | 'here'
  * @param {boolean} [options.discarded=true] — restore tabs in discarded state (not loaded until clicked)
+ * @param {Function} [options.onProgress] — callback(current, total) called after each batch
  */
 export async function restoreStashTabs(stash, options = {}) {
   const mode = options.mode || 'windows';
   const shouldDiscard = options.discarded !== false;
+  const onProgress = options.onProgress || null;
 
   // Build set of currently open URLs for dedup
   const openTabs = await getAllTabs({ allWindows: true });
@@ -239,24 +246,45 @@ export async function restoreStashTabs(stash, options = {}) {
     return result;
   }
 
+  // Choose lazy vs normal batching based on total tab count
+  const totalCount = allRestorable.length;
+  const lazy = totalCount > LAZY_THRESHOLD;
+  const batchSize = lazy ? LAZY_BATCH_SIZE : BATCH_SIZE;
+  const batchDelay = lazy ? LAZY_DELAY_MS : BATCH_DELAY_MS;
+
   if (mode === 'windows') {
     for (const { tabs, groups } of windowBatches) {
       try {
         const win = await chrome.windows.create({ url: tabs[0].url });
         result.windowsCreated++;
         result.restoredCount++;
+        if (onProgress) onProgress(result.restoredCount, totalCount);
 
         const windowId = win.id;
+        const allCreatedIds = [];
 
-        for (let i = 1; i < tabs.length; i += BATCH_SIZE) {
-          const batch = tabs.slice(i, i + BATCH_SIZE);
-          await Promise.all(
+        // Track the first tab created with the window
+        if (win.tabs && win.tabs[0]) allCreatedIds.push(win.tabs[0].id);
+
+        for (let i = 1; i < tabs.length; i += batchSize) {
+          const batch = tabs.slice(i, i + batchSize);
+          const created = await Promise.all(
             batch.map(tab =>
               chrome.tabs.create({ windowId, url: tab.url, active: false })
             )
           );
           result.restoredCount += batch.length;
-          if (i + BATCH_SIZE < tabs.length) await sleep(BATCH_DELAY_MS);
+          if (onProgress) onProgress(result.restoredCount, totalCount);
+
+          // Per-batch discard: immediately discard newly created tabs
+          if (shouldDiscard) {
+            for (const ct of created) {
+              try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
+            }
+          }
+          for (const ct of created) allCreatedIds.push(ct.id);
+
+          if (i + batchSize < tabs.length) await sleep(batchDelay);
         }
 
         const createdTabs = await chrome.tabs.query({ windowId });
@@ -274,38 +302,29 @@ export async function restoreStashTabs(stash, options = {}) {
         if (groups.length > 0) {
           await restoreGroups(tabs, createdTabs, groups, windowId, result);
         }
-
-        // Discard restored tabs to save memory (skip the active first tab)
-        if (shouldDiscard) {
-          for (const ct of createdTabs) {
-            if (!ct.active) {
-              try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
-            }
-          }
-        }
       } catch (err) {
         result.errors.push(`Window creation failed: ${err.message}`);
       }
     }
   } else if (mode === 'here') {
-    const createdIds = [];
-    for (let i = 0; i < allRestorable.length; i += BATCH_SIZE) {
-      const batch = allRestorable.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < allRestorable.length; i += batchSize) {
+      const batch = allRestorable.slice(i, i + batchSize);
       const created = await Promise.all(
         batch.map(tab =>
           chrome.tabs.create({ url: tab.url, active: false, pinned: tab.pinned || false })
         )
       );
-      for (const t of created) createdIds.push(t.id);
       result.restoredCount += batch.length;
-      if (i + BATCH_SIZE < allRestorable.length) await sleep(BATCH_DELAY_MS);
-    }
+      if (onProgress) onProgress(result.restoredCount, totalCount);
 
-    // Discard all restored tabs to save memory
-    if (shouldDiscard) {
-      for (const id of createdIds) {
-        try { await chrome.tabs.discard(id); } catch { /* ignore */ }
+      // Per-batch discard
+      if (shouldDiscard) {
+        for (const ct of created) {
+          try { await chrome.tabs.discard(ct.id); } catch { /* ignore */ }
+        }
       }
+
+      if (i + batchSize < allRestorable.length) await sleep(batchDelay);
     }
   }
 

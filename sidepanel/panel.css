@@ -21,6 +21,9 @@
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.08);
   --warning: #f59e0b;
+  --kebab: #ea580c;
+  --kebab-hover: #c2410c;
+  --kebab-soft: rgba(234, 88, 12, 0.1);
   --border: #e5e7eb;
   --border-strong: #d1d5db;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -54,6 +57,9 @@
     --danger-soft: rgba(248, 113, 113, 0.1);
     --success: #34d399;
     --success-soft: rgba(52, 211, 153, 0.1);
+    --kebab: #f97316;
+    --kebab-hover: #fb923c;
+    --kebab-soft: rgba(249, 115, 22, 0.15);
     --border: #2a2a2e;
     --border-strong: #3f3f46;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -81,6 +87,9 @@
   --danger-soft: rgba(248, 113, 113, 0.1);
   --success: #34d399;
   --success-soft: rgba(52, 211, 153, 0.1);
+  --kebab: #f97316;
+  --kebab-hover: #fb923c;
+  --kebab-soft: rgba(249, 115, 22, 0.15);
   --border: #2a2a2e;
   --border-strong: #3f3f46;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -108,6 +117,9 @@
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.08);
   --warning: #f59e0b;
+  --kebab: #ea580c;
+  --kebab-hover: #c2410c;
+  --kebab-soft: rgba(234, 88, 12, 0.1);
   --border: #e5e7eb;
   --border-strong: #d1d5db;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -163,9 +175,9 @@ body {
 /* ── Navigation — Segmented Control ── */
 .tab-nav {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   padding: 8px 12px;
-  background: var(--bg-primary);
+  background: var(--bg-tertiary);
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
@@ -173,9 +185,9 @@ body {
 .tab-nav button {
   flex: 1;
   padding: 8px 6px;
-  border: none;
-  background: transparent;
+  background: var(--bg-secondary);
   color: var(--text-secondary);
+  border: 1px solid var(--border);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -188,14 +200,16 @@ body {
 
 .tab-nav button:hover {
   color: var(--text-primary);
-  background: var(--bg-tertiary);
+  background: var(--bg-card);
+  border-color: var(--border-strong);
 }
 
 .tab-nav button.active,
 .tab-nav button[aria-selected="true"] {
   color: #fff;
   background: var(--accent);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
 }
 
 /* ── Settings Gear Button ── */
@@ -341,6 +355,16 @@ body {
 
 .action-btn.danger:hover {
   background: var(--danger-hover);
+}
+
+.action-btn.kebab {
+  background: var(--kebab);
+  color: #fff;
+  border: none;
+}
+
+.action-btn.kebab:hover {
+  background: var(--kebab-hover);
 }
 
 .file-label {
@@ -866,6 +890,13 @@ body {
   padding: 10px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition);
+}
+
+.manual-group-header:hover {
+  background: var(--bg-tertiary);
 }
 
 .manual-group-header .color-dot {
@@ -1157,6 +1188,66 @@ body.ai-available .ai-feature {
 }
 
 /* ── Toast Notifications ── */
+/* ── Confirm Dialog ── */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: confirmFadeIn 150ms ease;
+}
+
+@keyframes confirmFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.confirm-dialog {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  padding: 20px;
+  max-width: 320px;
+  width: 100%;
+  animation: confirmSlideIn 150ms ease;
+}
+
+@keyframes confirmSlideIn {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.confirm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.confirm-message {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.confirm-actions .action-btn {
+  min-width: 80px;
+}
+
+/* ── Toasts ── */
+
 .toast-container {
   position: fixed;
   bottom: 16px;
@@ -1471,19 +1562,21 @@ body.ai-available .ai-feature {
 
 .kebab-btn {
   font-size: 11px;
-  padding: 2px 8px;
+  font-weight: 600;
+  padding: 3px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
+  border: 1px solid var(--kebab);
+  background: var(--kebab-soft);
+  color: var(--kebab);
   transition: var(--transition);
   flex-shrink: 0;
 }
 
 .kebab-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--kebab);
+  color: #fff;
+  border-color: var(--kebab-hover);
 }
 
 .keep-awake-btn {
@@ -1787,6 +1880,11 @@ body.ai-available .ai-feature {
   border-bottom: none;
 }
 
+.setting-row.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .setting-info {
   display: flex;
   flex-direction: column;
@@ -1943,6 +2041,53 @@ body.ai-available .ai-feature {
 @keyframes pulse-badge {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
+}
+
+/* ── Restore Progress ── */
+
+.restore-progress {
+  display: none;
+  margin-top: 8px;
+}
+
+.restore-progress.active {
+  display: block;
+}
+
+.restore-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.restore-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width var(--transition-slow);
+  width: 0%;
+}
+
+.restore-progress-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ── Stash Restored Badge ── */
+
+.stash-restored-badge {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 /* ── Drive connected settings ── */
