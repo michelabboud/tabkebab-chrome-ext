@@ -64,4 +64,10 @@ TabKebab is a Chrome side panel extension that tames tab chaos. Group, stash, sl
   3. Click "Load unpacked" → select the project folder
   4. Click the TabKebab icon or pin it to open the side panel
 
+  ## Credits
+
+  Created by **Michel Abboud**.
+
+  This project was built with the assistance of AI (Claude by Anthropic). In the spirit of full transparency: architecture decisions, code implementation, icon/logo design, documentation, and commit messages were produced through human–AI collaboration. Every line of code was reviewed and approved by the author.
+
   ---
