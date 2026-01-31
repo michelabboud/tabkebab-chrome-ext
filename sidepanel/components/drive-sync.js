@@ -1,7 +1,8 @@
 // drive-sync.js — Google Drive connect/disconnect/sync UI
 
 import { showToast } from './toast.js';
-import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile } from '../../core/drive-client.js';
+import { showConfirm } from './confirm-dialog.js';
+import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile, findSettingsFile, readSettingsFile, writeSettingsFile, listDriveProfiles, readSettingsFromProfile } from '../../core/drive-client.js';
 import { Storage } from '../../core/storage.js';
 
 export class DriveSync {
@@ -12,14 +13,24 @@ export class DriveSync {
     this.syncBtn = rootEl.querySelector('#btn-sync-now');
     this.disconnectBtn = rootEl.querySelector('#btn-disconnect-drive');
 
+    this.undoSettingsBtn = rootEl.querySelector('#btn-undo-drive-settings');
+
     this.connectBtn.addEventListener('click', () => this.connect());
     this.syncBtn.addEventListener('click', () => this.syncNow());
     this.disconnectBtn.addEventListener('click', () => this.disconnectDrive());
+    if (this.undoSettingsBtn) {
+      this.undoSettingsBtn.addEventListener('click', () => this.undoSettingsLoad());
+    }
   }
 
   async refresh() {
     const state = await Storage.get('driveSync');
     this.updateUI(state);
+
+    if (this.undoSettingsBtn) {
+      const prev = await Storage.get('tabkebabSettingsPrevious');
+      this.undoSettingsBtn.hidden = !prev;
+    }
   }
 
   updateUI(state) {
@@ -49,9 +60,23 @@ export class DriveSync {
   async connect() {
     try {
       await authenticate();
+
+      // Ensure a profile name is set for multi-profile isolation
+      let profileName = await Storage.get('driveProfileName');
+      if (!profileName) {
+        profileName = prompt('Enter a name for this Chrome profile (e.g., "Work", "Personal"):');
+        if (!profileName || !profileName.trim()) {
+          showToast('Profile name is required for Drive sync', 'error');
+          return;
+        }
+        profileName = profileName.trim();
+        await Storage.set('driveProfileName', profileName);
+      }
+
       await Storage.set('driveSync', { connected: true, lastSyncedAt: null, driveFileId: null });
-      showToast('Connected to Google Drive', 'success');
+      showToast(`Connected to Google Drive (profile: ${profileName})`, 'success');
       this.refresh();
+      await this.promptLoadSettings();
     } catch (err) {
       showToast('Failed to connect: ' + err.message, 'error');
     }
@@ -112,6 +137,12 @@ export class DriveSync {
         driveFileId: syncFile?.id || null
       });
 
+      // Write current settings to Drive
+      try {
+        const currentSettings = await chrome.runtime.sendMessage({ action: 'getSettings' });
+        await writeSettingsFile({ settings: currentSettings, savedAt: Date.now(), version: 1 });
+      } catch { /* non-fatal */ }
+
       const parts = [];
       if (syncResult.sessions > 0) parts.push(`${syncResult.sessions} sessions`);
       if (syncResult.stashes > 0) parts.push(`${syncResult.stashes} stashes`);
@@ -135,5 +166,89 @@ export class DriveSync {
     } catch (err) {
       showToast('Failed to disconnect: ' + err.message, 'error');
     }
+  }
+
+  async promptLoadSettings() {
+    try {
+      // 1. Check own profile for settings
+      const settingsFile = await findSettingsFile();
+      if (settingsFile) {
+        const remoteData = await readSettingsFile(settingsFile.id);
+        if (remoteData?.settings) {
+          const savedDate = remoteData.savedAt
+            ? new Date(remoteData.savedAt).toLocaleString()
+            : 'unknown date';
+
+          const ok = await showConfirm({
+            title: 'Load Drive Settings',
+            message: `Settings found on Google Drive (saved ${savedDate}). Load these settings?`,
+            confirmLabel: 'Load Settings',
+            cancelLabel: 'Keep Current',
+          });
+          if (ok) {
+            await this.#applyRemoteSettings(remoteData.settings);
+            showToast('Settings loaded from Drive. Use "Undo Last Settings Import" to revert.', 'success');
+            this.refresh();
+          }
+          return;
+        }
+      }
+
+      // 2. No own settings — check other profiles for cross-profile import
+      const profiles = await listDriveProfiles();
+      const ownName = await Storage.get('driveProfileName');
+      const otherProfiles = profiles.filter(p => p.name !== ownName);
+
+      for (const profile of otherProfiles) {
+        const data = await readSettingsFromProfile(profile.id);
+        if (data?.settings) {
+          const savedDate = data.savedAt
+            ? new Date(data.savedAt).toLocaleString()
+            : 'unknown date';
+
+          const ok = await showConfirm({
+            title: 'Import from Another Profile',
+            message: `Settings found in profile "${profile.name}" (saved ${savedDate}). Import these settings?`,
+            confirmLabel: 'Import',
+            cancelLabel: 'Skip',
+          });
+          if (ok) {
+            await this.#applyRemoteSettings(data.settings);
+            showToast(`Settings imported from "${profile.name}". Use "Undo Last Settings Import" to revert.`, 'success');
+            this.refresh();
+          }
+          return;
+        }
+      }
+    } catch {
+      // Must not break connect flow
+    }
+  }
+
+  async #applyRemoteSettings(settings) {
+    const currentSettings = await chrome.runtime.sendMessage({ action: 'getSettings' });
+    await Storage.set('tabkebabSettingsPrevious', currentSettings);
+    await chrome.runtime.sendMessage({ action: 'saveSettings', settings });
+  }
+
+  async undoSettingsLoad() {
+    const prev = await Storage.get('tabkebabSettingsPrevious');
+    if (!prev) {
+      showToast('No previous settings to restore', 'error');
+      return;
+    }
+
+    const ok = await showConfirm({
+      title: 'Undo Settings Import',
+      message: 'Restore your previous settings?',
+      confirmLabel: 'Restore',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
+
+    await chrome.runtime.sendMessage({ action: 'saveSettings', settings: prev });
+    await Storage.remove('tabkebabSettingsPrevious');
+    showToast('Previous settings restored', 'success');
+    this.refresh();
   }
 }

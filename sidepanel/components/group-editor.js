@@ -16,6 +16,29 @@ export class GroupEditor {
     });
 
     this.setupDragAndDrop();
+    this.setupSectionToggles();
+  }
+
+  setupSectionToggles() {
+    const sections = [
+      { header: '#section-chrome-groups', content: '#chrome-groups-container' },
+      { header: '#section-custom-groups', content: '#custom-groups-content' },
+      { header: '#section-ungrouped', content: '#ungrouped-tabs' },
+    ];
+
+    for (const { header, content } of sections) {
+      const headerEl = this.root.querySelector(header);
+      const contentEl = this.root.querySelector(content);
+      if (!headerEl || !contentEl) continue;
+
+      const chevron = headerEl.querySelector('.section-chevron');
+      headerEl.addEventListener('click', () => {
+        const collapsed = !contentEl.hidden;
+        contentEl.hidden = collapsed;
+        if (chevron) chevron.textContent = collapsed ? '\u25b6' : '\u25bc';
+        headerEl.classList.toggle('collapsed', collapsed);
+      });
+    }
   }
 
   async refresh() {

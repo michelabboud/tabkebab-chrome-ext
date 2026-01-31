@@ -22,20 +22,35 @@ export class SessionManager {
     // Listen for restore progress broadcasts from the service worker
     this._onRestoreProgress = (message) => {
       if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
-        this.updateProgress(message.restoreId, message.current, message.total);
+        this.updateProgress(message.restoreId, message.created, message.loaded, message.total);
       }
     };
     chrome.runtime.onMessage.addListener(this._onRestoreProgress);
   }
 
-  updateProgress(restoreId, current, total) {
+  updateProgress(restoreId, created, loaded, total) {
     const container = this.listEl.querySelector(`[data-restore-id="${restoreId}"] .restore-progress`);
     if (!container) return;
     container.classList.add('active');
     const fill = container.querySelector('.restore-progress-fill');
     const label = container.querySelector('.restore-progress-label');
-    if (fill) fill.style.width = `${Math.round((current / total) * 100)}%`;
-    if (label) label.textContent = `Restoring ${current} / ${total} tabs...`;
+    if (fill) {
+      fill.style.width = `${Math.round((loaded / total) * 100)}%`;
+      if (loaded < created) {
+        fill.classList.add('loading');
+      } else {
+        fill.classList.remove('loading');
+      }
+    }
+    if (label) {
+      if (loaded === 0 && created > 0) {
+        label.textContent = `Creating tabs... (${created} / ${total})`;
+      } else if (loaded > 0 && loaded < total) {
+        label.textContent = `Loading... ${loaded} / ${total} tabs ready`;
+      } else if (loaded >= total) {
+        label.textContent = 'Finishing up...';
+      }
+    }
   }
 
   hideProgress(restoreId) {
@@ -43,7 +58,10 @@ export class SessionManager {
     if (container) {
       container.classList.remove('active');
       const fill = container.querySelector('.restore-progress-fill');
-      if (fill) fill.style.width = '0%';
+      if (fill) {
+        fill.style.width = '0%';
+        fill.classList.remove('loading');
+      }
     }
   }
 

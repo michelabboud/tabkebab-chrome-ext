@@ -10,7 +10,7 @@ import { filterTabs, executeNLAction } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { getSettings, saveSettings } from './core/settings.js';
-import { listDriveExports, deleteDriveExport, exportToSubfolder, listAllDriveFiles, deleteDriveFile, listSubfolderFiles } from './core/drive-client.js';
+import { listDriveExports, deleteDriveExport, exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, listSubfolderFiles, writeSettingsFile } from './core/drive-client.js';
 
 // ── Keep Awake Defaults ──
 
@@ -217,6 +217,11 @@ async function autoSyncDrive() {
     }
 
     await Storage.set('driveSync', { ...driveState, lastSyncedAt: Date.now() });
+
+    // Write current settings to Drive
+    try {
+      await writeSettingsFile({ settings, savedAt: Date.now(), version: 1 });
+    } catch { /* non-fatal */ }
   } catch {}
 }
 
@@ -262,6 +267,260 @@ async function runRetentionCleanup() {
 }
 
 // ── Bookmark system ──
+
+function generateBookmarkHtml(bookmarkData) {
+  const { date, time, formats } = bookmarkData;
+
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const hostname = (url) => { try { return new URL(url).hostname; } catch { return ''; } };
+
+  // Build tab nav buttons and panels
+  const navItems = [];
+  const panels = [];
+
+  function buildGroups(items, hasColor, panelId) {
+    // Pills row
+    let html = '<div class="pills">';
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const pillDot = hasColor && item.color && item.color !== 'grey'
+        ? `<span class="pill-dot" style="background:${esc(chromeColorHex(item.color))}"></span>` : '';
+      html += `<button class="pill" data-target="${panelId}-g${i}">${pillDot}${esc(item.name)}<span class="pill-count">${item.tabs.length}</span></button>`;
+    }
+    html += '</div>';
+    // Groups
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const colorDot = hasColor && item.color && item.color !== 'grey'
+        ? `<span class="dot" style="background:${esc(chromeColorHex(item.color))}"></span>` : '';
+      html += `<div class="group" id="${panelId}-g${i}"><div class="group-header" onclick="this.parentElement.classList.toggle('collapsed')">${colorDot}<span class="chevron"></span><span class="group-title">${esc(item.name)}</span><span class="badge">${item.tabs.length}</span></div><div class="group-body">`;
+      for (const tab of item.tabs) {
+        html += `<a class="tab" href="${esc(tab.url)}" target="_blank" data-search="${esc((tab.title + ' ' + tab.url).toLowerCase())}"><img class="fav" src="https://www.google.com/s2/favicons?domain=${esc(hostname(tab.url))}&sz=16" alt=""><span class="tab-title">${esc(tab.title)}</span><span class="tab-url">${esc(tab.url)}</span></a>`;
+      }
+      html += '</div></div>';
+    }
+    return html;
+  }
+
+  if (formats.byWindows) {
+    const count = formats.byWindows.reduce((s, w) => s + w.tabs.length, 0);
+    navItems.push({ id: 'windows', label: 'Windows', count });
+    panels.push({ id: 'windows', html: buildGroups(formats.byWindows, false, 'win') });
+  }
+  if (formats.byGroups) {
+    const count = formats.byGroups.reduce((s, g) => s + g.tabs.length, 0);
+    navItems.push({ id: 'groups', label: 'Groups', count });
+    panels.push({ id: 'groups', html: buildGroups(formats.byGroups, true, 'grp') });
+  }
+  if (formats.byDomains) {
+    const count = formats.byDomains.reduce((s, d) => s + d.tabs.length, 0);
+    navItems.push({ id: 'domains', label: 'Domains', count });
+    panels.push({ id: 'domains', html: buildGroups(formats.byDomains, false, 'dom') });
+  }
+
+  const totalTabs = navItems.reduce((s, n) => s + n.count, 0);
+
+  const navHtml = navItems.map((n, i) =>
+    `<button class="nav-btn${i === 0 ? ' active' : ''}" data-panel="${n.id}">${esc(n.label)}<span class="nav-count">${n.count}</span></button>`
+  ).join('');
+
+  const panelsHtml = panels.map((p, i) =>
+    `<div class="panel${i === 0 ? ' active' : ''}" id="panel-${p.id}">${p.html}</div>`
+  ).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TabKebab Bookmarks — ${esc(date)}</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f8f9fb;--card:#fff;--border:#e5e7eb;--text:#111827;--text2:#6b7280;--text3:#9ca3af;--accent:#2563eb;--accent-soft:rgba(37,99,235,.08);--accent-med:rgba(37,99,235,.15);--radius:10px;--shadow:0 1px 3px rgba(0,0,0,.06)}
+@media(prefers-color-scheme:dark){:root{--bg:#0f0f10;--card:#1a1a1d;--border:#2a2a2e;--text:#f3f4f6;--text2:#9ca3af;--text3:#6b7280;--accent:#3b82f6;--accent-soft:rgba(59,130,246,.12);--accent-med:rgba(59,130,246,.22);--shadow:0 1px 3px rgba(0,0,0,.3)}}
+body{font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;padding:0}
+.header{position:sticky;top:0;z-index:100;background:var(--card);border-bottom:1px solid var(--border);padding:16px 24px 0;box-shadow:var(--shadow)}
+.header-inner{max-width:960px;margin:0 auto}
+.header h1{font-size:20px;font-weight:800;letter-spacing:-.02em;margin-bottom:2px}
+.header .meta{font-size:13px;color:var(--text2)}
+.search-box{margin-top:12px;position:relative}
+.search-box input{width:100%;padding:10px 14px 10px 38px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+.search-box input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search-box svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text3);pointer-events:none}
+.search-stats{font-size:12px;color:var(--text3);margin-top:6px;min-height:18px}
+.tab-nav{display:flex;gap:2px;margin-top:14px;padding:0}
+.nav-btn{flex:1;padding:10px 8px;background:none;border:none;border-bottom:3px solid transparent;color:var(--text2);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
+.nav-btn:hover{color:var(--text);background:var(--accent-soft)}
+.nav-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.nav-count{background:var(--accent-soft);color:var(--accent);border-radius:100px;padding:1px 8px;font-size:11px;font-weight:700}
+.nav-btn.active .nav-count{background:var(--accent-med)}
+main{max-width:960px;margin:0 auto;padding:20px 24px 60px}
+.panel{display:none}
+.panel.active{display:block}
+.group{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);margin-bottom:6px;overflow:hidden;transition:box-shadow .15s}
+.group:hover{box-shadow:var(--shadow)}
+.group-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;user-select:none;transition:background .15s}
+.group-header:hover{background:var(--accent-soft)}
+.group-title{flex:1;font-weight:600;font-size:14px}
+.badge{background:var(--accent-soft);color:var(--accent);border-radius:100px;padding:2px 10px;font-size:12px;font-weight:700;flex-shrink:0}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.chevron::before{content:'\\25BC';font-size:10px;color:var(--text3);transition:transform .2s;display:inline-block}
+.collapsed .chevron::before{transform:rotate(-90deg)}
+.group-body{border-top:1px solid var(--border)}
+.collapsed .group-body{display:none}
+.tab{display:flex;align-items:center;gap:10px;padding:8px 14px 8px 24px;text-decoration:none;color:var(--text);transition:background .1s;border-bottom:1px solid var(--border)}
+.tab:last-child{border-bottom:none}
+.tab:hover{background:var(--accent-soft)}
+.tab.hidden{display:none}
+.fav{width:16px;height:16px;border-radius:3px;flex-shrink:0}
+.tab-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.tab-url{color:var(--text3);font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
+mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px;padding:0 1px}
+.no-results{text-align:center;padding:40px 20px;color:var(--text3);font-size:14px;display:none}
+.group.group-hidden{display:none}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;padding:2px 0}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border:1px solid var(--border);border-radius:100px;background:var(--card);color:var(--text);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;white-space:nowrap}
+.pill:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.pill-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.pill-count{color:var(--text3);font-size:11px;font-weight:500}
+.pill:hover .pill-count{color:var(--accent)}
+.group.highlight{box-shadow:0 0 0 2px var(--accent);transition:box-shadow .3s}
+@keyframes flash-highlight{0%{box-shadow:0 0 0 2px var(--accent)}100%{box-shadow:none}}
+.group.flash{animation:flash-highlight .8s ease-out forwards;animation-delay:.4s}
+@media(max-width:600px){.tab-url{display:none}.header{padding:12px 16px 0}main{padding:16px}.pills{gap:4px}.pill{padding:4px 10px;font-size:11px}}
+</style>
+</head>
+<body>
+<div class="header">
+<div class="header-inner">
+<h1>TabKebab Bookmarks</h1>
+<div class="meta">${esc(date)} at ${esc(time)} &mdash; ${totalTabs} tabs</div>
+<div class="search-box">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+<input type="text" id="search" placeholder="Search tabs..." autocomplete="off">
+</div>
+<div class="search-stats" id="search-stats"></div>
+<nav class="tab-nav" id="tab-nav">${navHtml}</nav>
+</div>
+</div>
+<main id="main">
+${panelsHtml}
+<div class="no-results" id="no-results">No tabs match your search.</div>
+</main>
+<script>
+(function(){
+  var input=document.getElementById('search');
+  var stats=document.getElementById('search-stats');
+  var noResults=document.getElementById('no-results');
+  var allTabs=document.querySelectorAll('.tab');
+  var allGroups=document.querySelectorAll('.group');
+  var panels=document.querySelectorAll('.panel');
+  var navBtns=document.querySelectorAll('.nav-btn');
+  var navEl=document.getElementById('tab-nav');
+  var allPills=document.querySelectorAll('.pills');
+  var searching=false;
+
+  // Tab navigation
+  navBtns.forEach(function(btn){
+    btn.addEventListener('click',function(){
+      if(searching)return;
+      navBtns.forEach(function(b){b.classList.remove('active')});
+      btn.classList.add('active');
+      panels.forEach(function(p){p.classList.toggle('active',p.id==='panel-'+btn.dataset.panel)});
+    });
+  });
+
+  // Pill click → scroll to group + highlight
+  document.querySelectorAll('.pill').forEach(function(pill){
+    pill.addEventListener('click',function(){
+      var target=document.getElementById(pill.dataset.target);
+      if(!target)return;
+      target.classList.remove('collapsed');
+      target.scrollIntoView({behavior:'smooth',block:'start'});
+      target.classList.remove('flash');
+      target.classList.add('highlight');
+      void target.offsetWidth;
+      target.classList.add('flash');
+      target.addEventListener('animationend',function(){
+        target.classList.remove('highlight','flash');
+      },{once:true});
+    });
+  });
+
+  function clearHighlights(){
+    allTabs.forEach(function(t){
+      var ti=t.querySelector('.tab-title');
+      var ur=t.querySelector('.tab-url');
+      ti.innerHTML=ti.textContent;
+      ur.innerHTML=ur.textContent;
+    });
+  }
+
+  function highlightText(el,q){
+    var text=el.textContent;
+    var idx=text.toLowerCase().indexOf(q);
+    if(idx===-1)return;
+    el.innerHTML=text.slice(0,idx)+'<mark>'+text.slice(idx,idx+q.length)+'</mark>'+text.slice(idx+q.length);
+  }
+
+  input.addEventListener('input',function(){
+    var q=this.value.toLowerCase().trim();
+    clearHighlights();
+    if(!q){
+      searching=false;
+      allTabs.forEach(function(t){t.classList.remove('hidden')});
+      allGroups.forEach(function(g){g.classList.remove('collapsed');g.classList.remove('group-hidden')});
+      // Restore tab view: show only the active panel
+      panels.forEach(function(p){p.classList.remove('active')});
+      var activeBtn=document.querySelector('.nav-btn.active');
+      if(activeBtn){
+        var id='panel-'+activeBtn.dataset.panel;
+        var panel=document.getElementById(id);
+        if(panel)panel.classList.add('active');
+      }else if(panels.length>0){panels[0].classList.add('active')}
+      navEl.style.opacity='';navEl.style.pointerEvents='';
+      allPills.forEach(function(p){p.style.display=''});
+      stats.textContent='';
+      noResults.style.display='none';
+      return;
+    }
+    // Show all panels during search
+    searching=true;
+    panels.forEach(function(p){p.classList.add('active')});
+    navEl.style.opacity='.4';navEl.style.pointerEvents='none';
+    allPills.forEach(function(p){p.style.display='none'});
+    var shown=0;
+    allTabs.forEach(function(t){
+      var match=t.dataset.search.includes(q);
+      t.classList.toggle('hidden',!match);
+      if(match){
+        shown++;
+        highlightText(t.querySelector('.tab-title'),q);
+        highlightText(t.querySelector('.tab-url'),q);
+      }
+    });
+    allGroups.forEach(function(g){
+      var vis=g.querySelectorAll('.tab:not(.hidden)').length;
+      g.classList.toggle('group-hidden',vis===0);
+      if(vis>0)g.classList.remove('collapsed');
+    });
+    stats.textContent=shown+' tab'+(shown!==1?'s':'')+' found';
+    noResults.style.display=shown===0?'block':'none';
+  });
+
+  input.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){this.value='';this.dispatchEvent(new Event('input'));}
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
+function chromeColorHex(color) {
+  const map = { blue:'#1a73e8', red:'#d93025', yellow:'#f9ab00', green:'#188038', pink:'#e8305b', purple:'#a142f4', cyan:'#00796b', orange:'#e8710a' };
+  return map[color] || map.blue;
+}
 
 async function createBookmarks(options = {}) {
   const settings = await getSettings();
@@ -375,11 +634,23 @@ async function createBookmarks(options = {}) {
     try {
       const driveState = await Storage.get('driveSync');
       if (driveState?.connected) {
-        let content = bookmarkData;
         const filename = `bookmarks-${dateStr}-${Date.now()}.json`;
-        await exportToSubfolder('bookmarks', filename, content);
+        if (compressed) {
+          await exportRawToSubfolder('bookmarks', filename, JSON.stringify(bookmarkData), 'application/json');
+        } else {
+          await exportToSubfolder('bookmarks', filename, bookmarkData);
+        }
         results.created++;
         results.destinations.push('Google Drive');
+
+        // Also upload HTML version if enabled
+        if (settings.exportHtmlBookmarkToDrive) {
+          try {
+            const html = generateBookmarkHtml(bookmarkData);
+            const htmlFilename = `bookmarks-${dateStr}.html`;
+            await exportRawToSubfolder('bookmarks', htmlFilename, html, 'text/html');
+          } catch { /* non-fatal */ }
+        }
       }
     } catch {}
   }
@@ -533,11 +804,12 @@ async function handleMessage(msg) {
       return saveSession(msg.name);
 
     case 'restoreSession': {
-      const onProgress = (current, total) => {
+      const onProgress = ({ created, loaded, total }) => {
         chrome.runtime.sendMessage({
           action: 'restoreProgress',
           restoreId: msg.sessionId,
-          current,
+          created,
+          loaded,
           total,
         }).catch(() => {});
       };
@@ -988,11 +1260,12 @@ async function handleMessage(msg) {
       const stash = await getStash(msg.stashId);
       if (!stash) throw new Error('Stash not found');
 
-      const onProgress = (current, total) => {
+      const onProgress = ({ created, loaded, total }) => {
         chrome.runtime.sendMessage({
           action: 'restoreProgress',
           restoreId: msg.stashId,
-          current,
+          created,
+          loaded,
           total,
         }).catch(() => {});
       };
@@ -1064,10 +1337,24 @@ async function handleMessage(msg) {
       }
 
       // Bookmarks → Drive/bookmarks/
+      const syncSettings = await getSettings();
       const bookmarks = (await Storage.get('tabkebabBookmarks')) || [];
       if (bookmarks.length > 0) {
-        await exportToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, { bookmarks, exportedAt: Date.now() });
+        const bmPayload = { bookmarks, exportedAt: Date.now() };
+        if (syncSettings.compressedExport) {
+          await exportRawToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, JSON.stringify(bmPayload), 'application/json');
+        } else {
+          await exportToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, bmPayload);
+        }
         results.bookmarks = bookmarks.length;
+
+        // Also upload HTML from the most recent bookmark snapshot
+        if (syncSettings.exportHtmlBookmarkToDrive && bookmarks[0]?.formats) {
+          try {
+            const html = generateBookmarkHtml(bookmarks[0]);
+            await exportRawToSubfolder('bookmarks', `bookmarks-${dateStr}.html`, html, 'text/html');
+          } catch { /* non-fatal */ }
+        }
       }
 
       return results;

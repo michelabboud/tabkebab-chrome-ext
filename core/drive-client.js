@@ -4,11 +4,35 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_NAME = 'TabKebab';
 const SYNC_FILENAME = 'tabkebab-sync.json';
+const SETTINGS_FILENAME = 'tabkebab-settings.json';
 
-// Subfolder names under TabKebab
+// Subfolder names under the profile folder
 const SUBFOLDER_SESSIONS = 'sessions';
 const SUBFOLDER_STASHES = 'stashes';
 const SUBFOLDER_BOOKMARKS = 'bookmarks';
+const SUBFOLDER_ARCHIVE = 'archive';
+
+// ── Profile scoping ──────────────────────────────────
+
+let _cachedProfileName = null;
+
+async function getProfileName() {
+  if (_cachedProfileName) return _cachedProfileName;
+  const data = await chrome.storage.local.get('driveProfileName');
+  _cachedProfileName = data.driveProfileName || null;
+  return _cachedProfileName;
+}
+
+/**
+ * Get the profile-scoped root folder: TabKebab/{profileName}/
+ * All file operations use this instead of the bare TabKebab/ folder.
+ */
+async function getProfileFolderId() {
+  const name = await getProfileName();
+  if (!name) throw new Error('Drive profile not configured');
+  const rootId = await getOrCreateFolder();
+  return getOrCreateSubfolder(rootId, name);
+}
 
 // ── Auth ──────────────────────────────────────────────
 
@@ -127,12 +151,12 @@ async function getOrCreateSubfolder(parentId, subName) {
 }
 
 /**
- * Get the ID of a named subfolder under TabKebab root.
- * Creates TabKebab and subfolder if needed.
+ * Get the ID of a named subfolder under the profile folder.
+ * Creates profile folder and subfolder if needed.
  */
 export async function getSubfolderId(subName) {
-  const rootId = await getOrCreateFolder();
-  return getOrCreateSubfolder(rootId, subName);
+  const profileId = await getProfileFolderId();
+  return getOrCreateSubfolder(profileId, subName);
 }
 
 // Convenience getters for known subfolders
@@ -159,11 +183,15 @@ async function findFileInFolder(folderId, filename) {
   return data.files?.[0] || null;
 }
 
-async function writeFileToFolder(folderId, filename, content) {
+async function writeFileToFolder(folderId, filename, content, { archive: shouldArchive = false } = {}) {
   const body = JSON.stringify(content, null, 2);
   const existing = await findFileInFolder(folderId, filename);
 
   if (existing) {
+    // Archive before overwriting
+    if (shouldArchive) {
+      try { await archiveFile(existing.id, filename); } catch { /* non-fatal */ }
+    }
     await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -185,6 +213,34 @@ async function writeFileToFolder(folderId, filename, content) {
   }
 }
 
+/**
+ * Server-side copy of a file to a target folder with a new name.
+ * No download required — uses Drive's files.copy endpoint.
+ */
+async function copyFile(fileId, newName, targetFolderId) {
+  const resp = await driveRequest(`${DRIVE_API}/files/${fileId}/copy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: newName, parents: [targetFolderId] })
+  });
+  return resp.json();
+}
+
+/**
+ * Archive a file to the profile's archive subfolder before overwriting.
+ * Appends an ISO timestamp to the filename (before .json).
+ */
+async function archiveFile(fileId, originalName) {
+  const profileId = await getProfileFolderId();
+  const archiveId = await getOrCreateSubfolder(profileId, SUBFOLDER_ARCHIVE);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const dotIdx = originalName.lastIndexOf('.');
+  const ext = dotIdx > 0 ? originalName.slice(dotIdx) : '';
+  const base = ext ? originalName.slice(0, dotIdx) : originalName;
+  const archiveName = `${base}-${ts}${ext}`;
+  return copyFile(fileId, archiveName, archiveId);
+}
+
 async function readFileById(fileId) {
   const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`);
   return resp.json();
@@ -198,7 +254,7 @@ async function deleteFileById(fileId) {
  * List all files in a folder.
  */
 async function listFilesInFolder(folderId) {
-  const q = `'${folderId}' in parents and trashed=false and mimeType='application/json'`;
+  const q = `'${folderId}' in parents and trashed=false and (mimeType='application/json' or mimeType='text/html')`;
   const resp = await driveRequest(
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&spaces=drive`
   );
@@ -206,10 +262,36 @@ async function listFilesInFolder(folderId) {
   return data.files || [];
 }
 
+// ── Public API: Profiles ─────────────────────────────
+
+/**
+ * List all profile folders inside TabKebab/.
+ * Returns [{id, name}, ...] excluding legacy non-profile subfolders.
+ */
+export async function listDriveProfiles() {
+  const rootId = await getOrCreateFolder();
+  const q = `'${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const resp = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
+  );
+  const data = await resp.json();
+  const reserved = new Set([SUBFOLDER_SESSIONS, SUBFOLDER_STASHES, SUBFOLDER_BOOKMARKS, SUBFOLDER_ARCHIVE]);
+  return (data.files || []).filter(f => !reserved.has(f.name));
+}
+
+/**
+ * Read settings from another profile's folder (for cross-profile import).
+ */
+export async function readSettingsFromProfile(profileFolderId) {
+  const file = await findFileInFolder(profileFolderId, SETTINGS_FILENAME);
+  if (!file) return null;
+  return readFileById(file.id);
+}
+
 // ── Public API: Sync ──────────────────────────────────
 
 export async function findSyncFile() {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getProfileFolderId();
   return findFileInFolder(folderId, SYNC_FILENAME);
 }
 
@@ -218,25 +300,41 @@ export async function readSyncFile(fileId) {
 }
 
 export async function writeSyncFile(content) {
-  const folderId = await getOrCreateFolder();
-  return writeFileToFolder(folderId, SYNC_FILENAME, content);
+  const folderId = await getProfileFolderId();
+  return writeFileToFolder(folderId, SYNC_FILENAME, content, { archive: true });
 }
 
 export async function deleteSyncFile() {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getProfileFolderId();
   const file = await findFileInFolder(folderId, SYNC_FILENAME);
   if (file) await deleteFileById(file.id);
 }
 
-// ── Public API: Export files (root folder) ───────────
+// ── Public API: Settings ──────────────────────────────
+
+export async function findSettingsFile() {
+  const folderId = await getProfileFolderId();
+  return findFileInFolder(folderId, SETTINGS_FILENAME);
+}
+
+export async function readSettingsFile(fileId) {
+  return readFileById(fileId);
+}
+
+export async function writeSettingsFile(content) {
+  const folderId = await getProfileFolderId();
+  return writeFileToFolder(folderId, SETTINGS_FILENAME, content, { archive: true });
+}
+
+// ── Public API: Export files (profile root) ──────────
 
 export async function exportFileToDrive(filename, content) {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getProfileFolderId();
   return writeFileToFolder(folderId, filename, content);
 }
 
 export async function listDriveExports() {
-  const folderId = await getOrCreateFolder();
+  const folderId = await getProfileFolderId();
   const q = `'${folderId}' in parents and trashed=false and mimeType='application/json'`;
   const resp = await driveRequest(
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&spaces=drive`
@@ -256,18 +354,52 @@ export async function deleteDriveExport(fileId) {
 // ── Public API: Subfolder-based export ───────────────
 
 /**
- * Write a file to a specific subfolder under TabKebab.
+ * Write a file to a specific subfolder under the profile folder.
  * @param {'sessions'|'stashes'|'bookmarks'} subfolder
  * @param {string} filename
  * @param {object} content
  */
 export async function exportToSubfolder(subfolder, filename, content) {
   const folderId = await getSubfolderId(subfolder);
-  return writeFileToFolder(folderId, filename, content);
+  return writeFileToFolder(folderId, filename, content, { archive: true });
 }
 
 /**
- * List files in a specific subfolder under TabKebab.
+ * Write a raw string file (e.g. HTML) to a specific subfolder.
+ * @param {'sessions'|'stashes'|'bookmarks'} subfolder
+ * @param {string} filename
+ * @param {string} rawContent — raw file body (not JSON-stringified)
+ * @param {string} mimeType — e.g. 'text/html'
+ */
+export async function exportRawToSubfolder(subfolder, filename, rawContent, mimeType) {
+  const folderId = await getSubfolderId(subfolder);
+  const existing = await findFileInFolder(folderId, filename);
+
+  if (existing) {
+    try { await archiveFile(existing.id, filename); } catch { /* non-fatal */ }
+    await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': mimeType },
+      body: rawContent
+    });
+    return existing.id;
+  } else {
+    const metadata = { name: filename, parents: [folderId] };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', new Blob([rawContent], { type: mimeType }));
+
+    const resp = await driveRequest(`${UPLOAD_API}/files?uploadType=multipart`, {
+      method: 'POST',
+      body: form
+    });
+    const data = await resp.json();
+    return data.id;
+  }
+}
+
+/**
+ * List files in a specific subfolder under the profile folder.
  */
 export async function listSubfolderFiles(subfolder) {
   const folderId = await getSubfolderId(subfolder);
@@ -282,19 +414,19 @@ export async function deleteDriveFile(fileId) {
 }
 
 /**
- * List ALL files across all subfolders + root for cleanup.
+ * List ALL files across profile folder + its subfolders for cleanup.
  * Returns files with their modifiedTime.
  */
 export async function listAllDriveFiles() {
-  const rootId = await getOrCreateFolder();
-  const rootFiles = await listFilesInFolder(rootId);
+  const profileId = await getProfileFolderId();
+  const profileFiles = await listFilesInFolder(profileId);
 
-  const subfolders = [SUBFOLDER_SESSIONS, SUBFOLDER_STASHES, SUBFOLDER_BOOKMARKS];
-  const allFiles = [...rootFiles];
+  const subfolders = [SUBFOLDER_SESSIONS, SUBFOLDER_STASHES, SUBFOLDER_BOOKMARKS, SUBFOLDER_ARCHIVE];
+  const allFiles = [...profileFiles];
 
   for (const sub of subfolders) {
     try {
-      const subId = await getOrCreateSubfolder(rootId, sub);
+      const subId = await getOrCreateSubfolder(profileId, sub);
       const subFiles = await listFilesInFolder(subId);
       allFiles.push(...subFiles);
     } catch {

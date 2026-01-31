@@ -27,6 +27,7 @@ export const SETTINGS_DEFAULTS = {
   bookmarkDestination: 'chrome',   // chrome | indexeddb | drive | all
   autoBookmarkOnStash: false,
   compressedExport: false,
+  exportHtmlBookmarkToDrive: false,
 
   // Google Drive
   autoExportSessionsToDrive: false,

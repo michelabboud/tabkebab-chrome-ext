@@ -285,7 +285,7 @@ export class TabList {
       // Kebab (discard) button
       const kebabBtn = document.createElement('button');
       kebabBtn.className = 'kebab-btn';
-      kebabBtn.textContent = 'Zzz';
+      kebabBtn.textContent = 'Kebab';
       kebabBtn.title = 'Kebab this domain (discard tabs)';
       kebabBtn.addEventListener('click', (e) => {
         e.stopPropagation();

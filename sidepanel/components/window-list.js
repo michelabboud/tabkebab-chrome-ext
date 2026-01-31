@@ -220,16 +220,11 @@ export class WindowList {
     label.className = 'window-card-label';
     label.textContent = `Window ${win.windowNumber}`;
 
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = win.tabCount;
-
     header.appendChild(statusDot);
     header.appendChild(chevron);
     header.appendChild(label);
-    header.appendChild(count);
 
-    // Tab limit warning badge
+    // Show either a warning badge (with count) or a plain count — never both
     if (win.tabCount >= this.maxTabs) {
       const warnBadge = document.createElement('span');
       warnBadge.className = 'window-warning-badge warning-red';
@@ -242,6 +237,11 @@ export class WindowList {
       warnBadge.textContent = `${win.tabCount} tabs`;
       warnBadge.title = `Exceeds recommended ${this.recommendedTabs} tabs per window`;
       header.appendChild(warnBadge);
+    } else {
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = win.tabCount;
+      header.appendChild(count);
     }
 
     // Stash button

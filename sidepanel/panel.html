@@ -152,26 +152,28 @@
 
       <!-- Groups sub-view -->
       <div id="sub-groups" class="sub-view hidden">
-        <h3 class="section-title">Chrome Tab Groups</h3>
+        <h3 class="section-title section-collapsible" id="section-chrome-groups"><span class="section-chevron">&#x25bc;</span> Chrome Tab Groups</h3>
         <div id="chrome-groups-container" class="chrome-groups"></div>
 
-        <h3 class="section-title">Custom Groups</h3>
-        <div class="toolbar">
-          <input type="text" id="new-group-name" placeholder="New group name..." class="input">
-          <select id="new-group-color" class="input color-select">
-            <option value="blue">Blue</option>
-            <option value="red">Red</option>
-            <option value="yellow">Yellow</option>
-            <option value="green">Green</option>
-            <option value="pink">Pink</option>
-            <option value="purple">Purple</option>
-            <option value="cyan">Cyan</option>
-            <option value="orange">Orange</option>
-          </select>
-          <button id="btn-create-group" class="action-btn">Create</button>
+        <h3 class="section-title section-collapsible" id="section-custom-groups"><span class="section-chevron">&#x25bc;</span> Custom Groups</h3>
+        <div id="custom-groups-content">
+          <div class="toolbar">
+            <input type="text" id="new-group-name" placeholder="New group name..." class="input">
+            <select id="new-group-color" class="input color-select">
+              <option value="blue">Blue</option>
+              <option value="red">Red</option>
+              <option value="yellow">Yellow</option>
+              <option value="green">Green</option>
+              <option value="pink">Pink</option>
+              <option value="purple">Purple</option>
+              <option value="cyan">Cyan</option>
+              <option value="orange">Orange</option>
+            </select>
+            <button id="btn-create-group" class="action-btn">Create</button>
+          </div>
+          <div id="manual-groups-container" class="manual-groups"></div>
         </div>
-        <div id="manual-groups-container" class="manual-groups"></div>
-        <h3 class="section-title">Ungrouped Tabs</h3>
+        <h3 class="section-title section-collapsible" id="section-ungrouped"><span class="section-chevron">&#x25bc;</span> Ungrouped Tabs</h3>
         <div id="ungrouped-tabs" class="tab-list" data-dropzone="ungrouped"></div>
       </div>
 
@@ -378,6 +380,16 @@
               <span class="toggle-slider"></span>
             </label>
           </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">HTML bookmarks to Drive</span>
+              <span class="setting-hint">Upload a browsable HTML page with search to Google Drive alongside JSON</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-exportHtmlBookmarkToDrive" data-setting="exportHtmlBookmarkToDrive">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
           <div class="setting-divider"></div>
           <div class="toolbar">
             <button id="btn-bookmark-now" class="action-btn secondary">Bookmark Now</button>
@@ -452,6 +464,8 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
+            <button id="btn-undo-drive-settings" class="action-btn secondary" hidden
+                    style="margin-bottom: 8px;">Undo Last Settings Import</button>
             <div class="setting-divider"></div>
             <div class="toolbar">
               <input type="number" id="drive-cleanup-days" class="setting-number" value="30" min="1" max="365" style="width: 64px; flex: 0;">
@@ -620,6 +634,36 @@
           </div>
 
           <div id="keep-awake-suggestions" class="keep-awake-suggestions" hidden></div>
+        </div>
+      </div>
+
+      <!-- ─── About ─── -->
+      <div class="settings-section settings-card about-section">
+        <div class="settings-card-body" style="text-align:center; padding: 20px 16px;">
+          <svg class="about-logo" width="48" height="48" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="58" y="10" width="12" height="100" rx="6" fill="#404040"/>
+            <polygon points="58,104 70,104 64,120" fill="#404040"/>
+            <circle cx="64" cy="10" r="8" fill="#404040"/>
+            <circle cx="64" cy="10" r="4" fill="#ef4444"/>
+            <g transform="rotate(-3, 64, 30)"><rect x="32" y="20" width="64" height="20" rx="7" fill="#ef4444"/></g>
+            <g transform="rotate(2, 64, 54)"><rect x="34" y="44" width="60" height="20" rx="7" fill="#f59e0b"/></g>
+            <g transform="rotate(-2, 64, 78)"><rect x="36" y="68" width="56" height="20" rx="7" fill="#14b8a6"/></g>
+            <g transform="rotate(1, 64, 98)"><rect x="40" y="90" width="48" height="16" rx="6" fill="#8b5cf6"/></g>
+          </svg>
+          <div class="about-title">TabKebab</div>
+          <div class="about-version">v1.0.0</div>
+          <div class="about-credit">Created by <strong>Michel Abboud</strong></div>
+          <div class="about-ai-credit">Built with the assistance of AI (Claude by Anthropic)</div>
+          <div class="about-links">
+            <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy Policy</a>
+            <span class="about-sep">|</span>
+            <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/TERMS.md" target="_blank" rel="noopener">Terms of Service</a>
+          </div>
+          <div class="about-links">
+            <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">GitHub</a>
+            <span class="about-sep">|</span>
+            <a href="https://github.com/michelabboud/tabkebab-chrome-ext/issues" target="_blank" rel="noopener">Report an Issue</a>
+          </div>
         </div>
       </div>
     </section>
