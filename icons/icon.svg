@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2563eb" />
+
+  <!-- Kebab skewer (vertical stick) -->
+  <rect x="60" y="14" width="8" height="100" rx="4" fill="#f8f9fa" />
+
+  <!-- Pointed tip at bottom -->
+  <polygon points="60,108 68,108 64,122" fill="#f8f9fa" />
+
+  <!-- Tab chunk 1 (top) — red/coral -->
+  <g transform="translate(64,30)">
+    <rect x="-22" y="-10" width="44" height="20" rx="5" fill="#f87171" />
+    <rect x="-18" y="-10" width="14" height="6" rx="2" fill="#fca5a5" />
+  </g>
+
+  <!-- Tab chunk 2 — amber/yellow -->
+  <g transform="translate(64,54)">
+    <rect x="-22" y="-10" width="44" height="20" rx="5" fill="#fbbf24" />
+    <rect x="-18" y="-10" width="14" height="6" rx="2" fill="#fde68a" />
+  </g>
+
+  <!-- Tab chunk 3 — green -->
+  <g transform="translate(64,78)">
+    <rect x="-22" y="-10" width="44" height="20" rx="5" fill="#34d399" />
+    <rect x="-18" y="-10" width="14" height="6" rx="2" fill="#6ee7b7" />
+  </g>
+
+  <!-- Tab chunk 4 (bottom) — purple -->
+  <g transform="translate(64,100)">
+    <rect x="-18" y="-8" width="36" height="16" rx="4" fill="#a78bfa" />
+    <rect x="-14" y="-8" width="11" height="5" rx="2" fill="#c4b5fd" />
+  </g>
+
+  <!-- Skewer knob on top -->
+  <circle cx="64" cy="14" r="6" fill="#f8f9fa" />
+  <circle cx="64" cy="14" r="3" fill="#2563eb" />
+</svg>

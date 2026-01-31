@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TabKebab</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="app-header">
+    <svg class="logo" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Skewer stick -->
+      <rect x="11" y="2" width="2" height="19" rx="1" fill="currentColor"/>
+      <!-- Pointed tip -->
+      <polygon points="11,20 13,20 12,23" fill="currentColor"/>
+      <!-- Tab chunk 1 -->
+      <rect x="7" y="4" width="10" height="4" rx="1.5" fill="#f87171"/>
+      <!-- Tab chunk 2 -->
+      <rect x="7" y="9.5" width="10" height="4" rx="1.5" fill="#fbbf24"/>
+      <!-- Tab chunk 3 -->
+      <rect x="7" y="15" width="10" height="4" rx="1.5" fill="#34d399"/>
+      <!-- Knob -->
+      <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+    </svg>
+    <h1>TabKebab</h1>
+    <button id="btn-settings" class="settings-btn" aria-label="Settings" title="Settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <nav class="tab-nav" role="tablist">
+    <button role="tab" data-view="windows" aria-selected="false">Windows</button>
+    <button role="tab" data-view="tabs" class="active" aria-selected="true">Tabs</button>
+    <button role="tab" data-view="stash" aria-selected="false">Stash</button>
+    <button role="tab" data-view="sessions" aria-selected="false">Sessions</button>
+  </nav>
+
+  <main class="view-container">
+    <!-- AI Command Bar -->
+    <div id="command-bar" class="command-bar" hidden>
+      <div class="command-bar-row">
+        <input type="text" id="ai-command-input" class="input" placeholder="Ask AI... (e.g., 'close YouTube tabs')">
+        <button id="btn-ai-command" class="action-btn">Go</button>
+      </div>
+      <div id="command-results" class="command-results"></div>
+    </div>
+
+    <!-- Sessions view -->
+    <section id="view-sessions" class="view hidden">
+      <div class="toolbar">
+        <input type="text" id="session-name" placeholder="Session name..." class="input">
+        <button id="btn-save-session" class="action-btn">Save</button>
+      </div>
+      <div id="session-list" class="session-list"></div>
+      <div class="toolbar" style="margin-top: 12px;">
+        <button id="btn-export" class="action-btn secondary">Export JSON</button>
+        <label class="action-btn secondary file-label">
+          Import JSON
+          <input type="file" id="btn-import" accept=".json" hidden>
+        </label>
+      </div>
+    </section>
+
+    <!-- Windows view -->
+    <section id="view-windows" class="view hidden">
+      <div class="window-stats-bar">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-windows">0</div>
+          <div class="stat-label">Windows</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-tabs">0</div>
+          <div class="stat-label">Tabs</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-avg">0</div>
+          <div class="stat-label">Avg/Window</div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="btn-consolidate-windows" class="action-btn">Consolidate Windows</button>
+        <button id="btn-collapse-all" class="action-btn secondary">Collapse All</button>
+        <button id="btn-expand-all" class="action-btn secondary">Expand All</button>
+      </div>
+      <div id="consolidation-progress" class="pipeline-progress">
+        <div class="phase-label">
+          <span class="phase-badge" id="consolidation-phase">SNAPSHOT</span>
+          <span id="consolidation-title">Scanning windows...</span>
+        </div>
+        <div class="phase-detail" id="consolidation-detail"></div>
+        <div class="progress-bar">
+          <div class="progress-bar-fill indeterminate" id="consolidation-fill"></div>
+        </div>
+      </div>
+      <div id="window-list"></div>
+    </section>
+
+    <!-- Stash view -->
+    <section id="view-stash" class="view hidden">
+      <div id="stash-list" class="stash-list"></div>
+      <div class="toolbar" style="margin-top: 12px;">
+        <button id="btn-export-stashes" class="action-btn secondary">Export Stashes</button>
+        <label class="action-btn secondary file-label">
+          Import Stashes
+          <input type="file" id="btn-import-stashes" accept=".json" hidden>
+        </label>
+      </div>
+    </section>
+
+    <!-- Tabs view (with sub-tabs: Domains, Groups, Duplicates) -->
+    <section id="view-tabs" class="view active">
+      <nav class="sub-nav" role="tablist">
+        <button role="tab" data-subtab="domains" class="active" aria-selected="true">Domains</button>
+        <button role="tab" data-subtab="groups" aria-selected="false">Groups</button>
+        <button role="tab" data-subtab="duplicates" aria-selected="false">Duplicates</button>
+      </nav>
+
+      <!-- Domains sub-view -->
+      <div id="sub-domains" class="sub-view">
+        <div class="toolbar">
+          <button id="btn-group-by-domain" class="action-btn">Group by Domain</button>
+          <button id="btn-smart-group" class="action-btn" hidden>Smart Group</button>
+          <button id="btn-ungroup-all" class="action-btn secondary">Ungroup All</button>
+          <button id="btn-kebab-all" class="action-btn secondary">Kebab All</button>
+          <button id="btn-collapse-all-tabs" class="action-btn secondary">Collapse All</button>
+          <button id="btn-expand-all-tabs" class="action-btn secondary">Expand All</button>
+        </div>
+        <div id="pipeline-progress" class="pipeline-progress">
+          <div class="phase-label">
+            <span class="phase-badge" id="progress-phase">SNAPSHOT</span>
+            <span id="progress-title">Reading tabs...</span>
+          </div>
+          <div class="phase-detail" id="progress-detail"></div>
+          <div class="progress-bar">
+            <div class="progress-bar-fill indeterminate" id="progress-fill"></div>
+          </div>
+        </div>
+        <div id="tab-list" class="tab-list"></div>
+      </div>
+
+      <!-- Groups sub-view -->
+      <div id="sub-groups" class="sub-view hidden">
+        <h3 class="section-title">Chrome Tab Groups</h3>
+        <div id="chrome-groups-container" class="chrome-groups"></div>
+
+        <h3 class="section-title">Custom Groups</h3>
+        <div class="toolbar">
+          <input type="text" id="new-group-name" placeholder="New group name..." class="input">
+          <select id="new-group-color" class="input color-select">
+            <option value="blue">Blue</option>
+            <option value="red">Red</option>
+            <option value="yellow">Yellow</option>
+            <option value="green">Green</option>
+            <option value="pink">Pink</option>
+            <option value="purple">Purple</option>
+            <option value="cyan">Cyan</option>
+            <option value="orange">Orange</option>
+          </select>
+          <button id="btn-create-group" class="action-btn">Create</button>
+        </div>
+        <div id="manual-groups-container" class="manual-groups"></div>
+        <h3 class="section-title">Ungrouped Tabs</h3>
+        <div id="ungrouped-tabs" class="tab-list" data-dropzone="ungrouped"></div>
+      </div>
+
+      <!-- Duplicates sub-view -->
+      <div id="sub-duplicates" class="sub-view hidden">
+        <div class="toolbar">
+          <button id="btn-scan-dupes" class="action-btn">Scan for Duplicates</button>
+          <button id="btn-close-all-dupes" class="action-btn danger" disabled>Close All Duplicates</button>
+        </div>
+        <div id="duplicate-list" class="duplicate-list">
+          <p class="empty-state">Click "Scan" to find duplicate tabs.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings view -->
+    <section id="view-settings" class="view hidden">
+      <!-- AI Settings -->
+      <div class="settings-section">
+        <h3 class="section-title">AI Features</h3>
+        <p class="description">Enable AI-powered smart grouping, tab summaries, and natural language commands. Your API keys are encrypted and stored locally.</p>
+
+        <label class="ai-toggle">
+          <input type="checkbox" id="ai-enabled">
+          <span>Enable AI Features</span>
+        </label>
+
+        <div id="ai-config" class="ai-config" hidden>
+          <label class="input-label">AI Provider</label>
+          <select id="ai-provider" class="input" style="margin-bottom: 12px;">
+            <option value="">Select a provider...</option>
+            <option value="openai">OpenAI (GPT)</option>
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="chrome-ai">Chrome Built-in AI (Experimental)</option>
+            <option value="custom">Custom (OpenAI-Compatible)</option>
+          </select>
+
+          <!-- OpenAI config -->
+          <div id="ai-config-openai" class="provider-config" hidden>
+            <label class="input-label">API Key</label>
+            <div class="toolbar" style="margin-bottom: 8px;">
+              <input type="password" id="openai-api-key" class="input" placeholder="sk-...">
+              <button id="btn-toggle-openai-key" class="action-btn secondary" style="flex:0">Show</button>
+            </div>
+            <label class="input-label">Model</label>
+            <div class="toolbar" style="margin-bottom: 12px;">
+              <select id="openai-model" class="input">
+                <option value="gpt-4.1-nano">GPT-4.1 Nano (fastest)</option>
+                <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                <option value="gpt-4.1">GPT-4.1</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5.2">GPT-5.2</option>
+                <option value="o4-mini">o4-mini (reasoning)</option>
+              </select>
+              <button class="action-btn secondary btn-load-models" data-provider="openai" style="flex:0">Load</button>
+            </div>
+          </div>
+
+          <!-- Claude config -->
+          <div id="ai-config-claude" class="provider-config" hidden>
+            <label class="input-label">API Key</label>
+            <div class="toolbar" style="margin-bottom: 8px;">
+              <input type="password" id="claude-api-key" class="input" placeholder="sk-ant-...">
+              <button id="btn-toggle-claude-key" class="action-btn secondary" style="flex:0">Show</button>
+            </div>
+            <label class="input-label">Model</label>
+            <div class="toolbar" style="margin-bottom: 12px;">
+              <select id="claude-model" class="input">
+                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                <option value="claude-opus-4-20250514">Claude Opus 4</option>
+              </select>
+              <button class="action-btn secondary btn-load-models" data-provider="claude" style="flex:0">Load</button>
+            </div>
+          </div>
+
+          <!-- Gemini config -->
+          <div id="ai-config-gemini" class="provider-config" hidden>
+            <label class="input-label">API Key</label>
+            <div class="toolbar" style="margin-bottom: 8px;">
+              <input type="password" id="gemini-api-key" class="input" placeholder="AIza...">
+              <button id="btn-toggle-gemini-key" class="action-btn secondary" style="flex:0">Show</button>
+            </div>
+            <label class="input-label">Model</label>
+            <div class="toolbar" style="margin-bottom: 12px;">
+              <select id="gemini-model" class="input">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (fastest)</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-3-flash-preview">Gemini 3 Flash (preview)</option>
+                <option value="gemini-3-pro-preview">Gemini 3 Pro (preview)</option>
+              </select>
+              <button class="action-btn secondary btn-load-models" data-provider="gemini" style="flex:0">Load</button>
+            </div>
+          </div>
+
+          <!-- Chrome AI config -->
+          <div id="ai-config-chrome-ai" class="provider-config" hidden>
+            <p class="description">Chrome Built-in AI uses Gemini Nano on-device. Requires Chrome 138+ with the Prompt API origin trial. No API key needed.</p>
+            <div id="chrome-ai-availability" class="drive-status">Checking availability...</div>
+          </div>
+
+          <!-- Custom (OpenAI-compatible) config -->
+          <div id="ai-config-custom" class="provider-config" hidden>
+            <p class="description">Connect to any OpenAI-compatible API: Ollama, LM Studio, vLLM, Together AI, Groq, etc.</p>
+            <label class="input-label">Base URL</label>
+            <input type="text" id="custom-base-url" class="input" placeholder="http://localhost:11434/v1" style="margin-bottom: 8px;">
+            <label class="input-label">API Key (optional)</label>
+            <div class="toolbar" style="margin-bottom: 8px;">
+              <input type="password" id="custom-api-key" class="input" placeholder="(leave blank if not needed)">
+              <button id="btn-toggle-custom-key" class="action-btn secondary" style="flex:0">Show</button>
+            </div>
+            <label class="input-label">Model</label>
+            <div class="toolbar" style="margin-bottom: 12px;">
+              <select id="custom-model" class="input">
+                <option value="default">default</option>
+              </select>
+              <button class="action-btn secondary btn-load-models" data-provider="custom" style="flex:0">Load</button>
+            </div>
+          </div>
+
+          <!-- Passphrase -->
+          <div class="passphrase-area">
+            <label class="ai-toggle">
+              <input type="checkbox" id="ai-passphrase-enabled">
+              <span>Protect API key with passphrase</span>
+            </label>
+            <div id="ai-passphrase-section" class="passphrase-section" hidden>
+              <p class="description">You'll need to enter this passphrase once per browser session to unlock AI features.</p>
+              <input type="password" id="ai-passphrase" class="input" placeholder="Enter passphrase...">
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="toolbar">
+            <button id="btn-test-ai" class="action-btn secondary">Test Connection</button>
+            <button id="btn-save-ai" class="action-btn">Save Settings</button>
+          </div>
+
+          <div id="ai-test-result" class="drive-status" hidden></div>
+
+          <div class="toolbar" style="margin-top: 12px;">
+            <button id="btn-clear-ai-cache" class="action-btn secondary">Clear AI Cache</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Sleep (Kebab) -->
+      <div class="settings-section">
+        <h3 class="section-title">Tab Sleep (Kebab)</h3>
+        <p class="description">Domains in the keep-awake list are never discarded when you "Kebab" tabs. Email, calendars, and AI tools are included by default.</p>
+
+        <div class="toolbar" style="margin-bottom: 8px;">
+          <input type="text" id="keep-awake-domain-input" class="input" placeholder="Add domain (e.g. slack.com)">
+          <button id="btn-add-keep-awake" class="action-btn secondary">Add</button>
+        </div>
+
+        <div id="keep-awake-domain-list" class="keep-awake-domain-list"></div>
+
+        <div class="toolbar" style="margin-top: 8px;">
+          <button id="btn-suggest-keep-awake" class="action-btn secondary ai-feature" hidden>Suggest (AI)</button>
+          <button id="btn-reset-keep-awake" class="action-btn secondary">Reset to Defaults</button>
+        </div>
+
+        <div id="keep-awake-suggestions" class="keep-awake-suggestions" hidden></div>
+      </div>
+
+      <!-- Google Drive Sync -->
+      <div class="settings-section">
+        <h3 class="section-title">Google Drive Sync</h3>
+        <p class="description">Sync your sessions to Google Drive. Your data stays local until you enable this.</p>
+        <div id="drive-status" class="drive-status">Not connected</div>
+        <div class="toolbar">
+          <button id="btn-connect-drive" class="action-btn">Connect Google Drive</button>
+          <button id="btn-sync-now" class="action-btn secondary" disabled>Sync Now</button>
+        </div>
+        <button id="btn-disconnect-drive" class="action-btn danger" hidden>Disconnect</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
