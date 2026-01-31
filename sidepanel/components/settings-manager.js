@@ -35,6 +35,16 @@ export class SettingsManager {
     if (cleanBtn) {
       cleanBtn.addEventListener('click', () => this.cleanDriveFiles());
     }
+
+    // Export/Import settings
+    const exportSettingsBtn = rootEl.querySelector('#btn-export-settings');
+    if (exportSettingsBtn) {
+      exportSettingsBtn.addEventListener('click', () => this.exportSettings());
+    }
+    const importSettingsInput = rootEl.querySelector('#btn-import-settings');
+    if (importSettingsInput) {
+      importSettingsInput.addEventListener('change', (e) => this.importSettings(e));
+    }
   }
 
   async refresh() {
@@ -165,6 +175,51 @@ export class SettingsManager {
       btn.disabled = false;
       btn.textContent = 'Clean Drive Files';
     }
+  }
+
+  async exportSettings() {
+    try {
+      const settings = await this.send({ action: 'getSettings' });
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tabkebab-settings-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Settings exported', 'success');
+    } catch (err) {
+      showToast('Export failed: ' + err.message, 'error');
+    }
+  }
+
+  async importSettings(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.settings || typeof data.settings !== 'object') {
+        throw new Error('No valid settings found in file');
+      }
+
+      await this.send({ action: 'saveSettings', settings: data.settings });
+      showToast('Settings imported', 'success');
+      this.refresh();
+    } catch (err) {
+      showToast('Import failed: ' + err.message, 'error');
+    }
+
+    e.target.value = '';
   }
 
   send(msg) {
