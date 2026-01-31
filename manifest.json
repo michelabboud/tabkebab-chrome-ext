@@ -20,7 +20,7 @@
   ],
 
   "oauth2": {
-    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_id": "873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/drive.file"
     ]
