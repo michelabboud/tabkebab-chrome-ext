@@ -8,19 +8,28 @@
 </head>
 <body>
   <header class="app-header">
-    <svg class="logo" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg class="logo" width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
       <!-- Skewer stick -->
-      <rect x="11" y="2" width="2" height="19" rx="1" fill="currentColor"/>
-      <!-- Pointed tip -->
-      <polygon points="11,20 13,20 12,23" fill="currentColor"/>
-      <!-- Tab chunk 1 -->
-      <rect x="7" y="4" width="10" height="4" rx="1.5" fill="#f87171"/>
-      <!-- Tab chunk 2 -->
-      <rect x="7" y="9.5" width="10" height="4" rx="1.5" fill="#fbbf24"/>
-      <!-- Tab chunk 3 -->
-      <rect x="7" y="15" width="10" height="4" rx="1.5" fill="#34d399"/>
-      <!-- Knob -->
-      <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+      <rect x="58" y="10" width="12" height="100" rx="6" fill="currentColor"/>
+      <polygon points="58,104 70,104 64,120" fill="currentColor"/>
+      <circle cx="64" cy="10" r="8" fill="currentColor"/>
+      <circle cx="64" cy="10" r="4" fill="#ef4444"/>
+      <!-- Tab chunk 1 — red -->
+      <g transform="rotate(-3, 64, 30)">
+        <rect x="32" y="20" width="64" height="20" rx="7" fill="#ef4444"/>
+      </g>
+      <!-- Tab chunk 2 — amber -->
+      <g transform="rotate(2, 64, 54)">
+        <rect x="34" y="44" width="60" height="20" rx="7" fill="#f59e0b"/>
+      </g>
+      <!-- Tab chunk 3 — teal -->
+      <g transform="rotate(-2, 64, 78)">
+        <rect x="36" y="68" width="56" height="20" rx="7" fill="#14b8a6"/>
+      </g>
+      <!-- Tab chunk 4 — purple -->
+      <g transform="rotate(1, 64, 98)">
+        <rect x="40" y="90" width="48" height="16" rx="6" fill="#8b5cf6"/>
+      </g>
     </svg>
     <h1>TabKebab</h1>
     <button id="btn-settings" class="settings-btn" aria-label="Settings" title="Settings">

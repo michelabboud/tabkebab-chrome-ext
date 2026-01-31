@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120">
+  <!-- TabKebab Logo: Transparent icon with colorful kebab + bold text -->
+
+  <!-- Icon — no background -->
+  <rect x="40" y="10" width="8" height="82" rx="4" fill="#404040" />
+  <polygon points="40,88 48,88 44,100" fill="#404040" />
+  <circle cx="44" cy="10" r="6" fill="#404040" />
+
+  <g transform="rotate(-3, 44, 24)">
+    <rect x="18" y="16" width="52" height="16" rx="6" fill="#ef4444" />
+  </g>
+  <g transform="rotate(2, 44, 42)">
+    <rect x="20" y="34" width="48" height="16" rx="6" fill="#f59e0b" />
+  </g>
+  <g transform="rotate(-2, 44, 60)">
+    <rect x="22" y="52" width="44" height="16" rx="6" fill="#14b8a6" />
+  </g>
+  <g transform="rotate(1, 44, 78)">
+    <rect x="24" y="70" width="40" height="13" rx="5" fill="#8b5cf6" />
+  </g>
+
+  <!-- Text -->
+  <text x="95" y="58" font-family="Segoe UI, -apple-system, sans-serif" font-size="44" font-weight="900" fill="#18181b" letter-spacing="-1.5">Tab</text>
+  <text x="192" y="58" font-family="Segoe UI, -apple-system, sans-serif" font-size="44" font-weight="900" letter-spacing="-1.5">
+    <tspan fill="#ef4444">K</tspan><tspan fill="#f59e0b">e</tspan><tspan fill="#14b8a6">b</tspan><tspan fill="#14b8a6">a</tspan><tspan fill="#8b5cf6">b</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="96" y="82" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="500" fill="#a1a1aa" letter-spacing="0.5">Stack and organize your tabs</text>
+</svg>

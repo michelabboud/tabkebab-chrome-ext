@@ -1,8 +1,12 @@
-  # TabKebab 🍢
+<p align="center">
+  <img src="icons/logo.svg" alt="TabKebab" width="400">
+</p>
 
-  Stack and organize your browser tabs like a kebab skewer.
+<p align="center">
+  <strong>Stack and organize your browser tabs like a kebab skewer.</strong>
+</p>
 
-  TabKebab is a Chrome side panel extension that tames tab chaos. Group, stash, sleep, and restore tabs across windows — manually or with AI.
+TabKebab is a Chrome side panel extension that tames tab chaos. Group, stash, sleep, and restore tabs across windows — manually or with AI.
 
   ## Features
 
