@@ -1,8 +1,11 @@
-// core/drive-client.js — Google Drive REST v3 client (appDataFolder only)
+// core/drive-client.js — Google Drive REST v3 client (visible TabKebab folder)
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
-const SYNC_FILENAME = 'taborganizer-sync.json';
+const FOLDER_NAME = 'TabKebab';
+const SYNC_FILENAME = 'tabkebab-sync.json';
+
+// ── Auth ──────────────────────────────────────────────
 
 async function getToken(interactive = false) {
   return new Promise((resolve, reject) => {
@@ -56,22 +59,50 @@ export async function disconnect() {
   }
 }
 
-export async function findSyncFile() {
+// ── Folder management ─────────────────────────────────
+
+async function findFolder() {
+  const q = `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
   const resp = await driveRequest(
-    `${DRIVE_API}/files?spaces=appDataFolder&q=name='${SYNC_FILENAME}'&fields=files(id,name,modifiedTime)`
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
   );
   const data = await resp.json();
   return data.files?.[0] || null;
 }
 
-export async function readSyncFile(fileId) {
-  const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`);
+async function createFolder() {
+  const metadata = {
+    name: FOLDER_NAME,
+    mimeType: 'application/vnd.google-apps.folder'
+  };
+  const resp = await driveRequest(`${DRIVE_API}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(metadata)
+  });
   return resp.json();
 }
 
-export async function writeSyncFile(content) {
-  const existing = await findSyncFile();
-  const body = JSON.stringify(content);
+async function getOrCreateFolder() {
+  let folder = await findFolder();
+  if (!folder) folder = await createFolder();
+  return folder.id;
+}
+
+// ── File operations ───────────────────────────────────
+
+async function findFileInFolder(folderId, filename) {
+  const q = `name='${filename}' and '${folderId}' in parents and trashed=false`;
+  const resp = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&spaces=drive`
+  );
+  const data = await resp.json();
+  return data.files?.[0] || null;
+}
+
+async function writeFileToFolder(folderId, filename, content) {
+  const body = JSON.stringify(content, null, 2);
+  const existing = await findFileInFolder(folderId, filename);
 
   if (existing) {
     await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
@@ -79,22 +110,74 @@ export async function writeSyncFile(content) {
       headers: { 'Content-Type': 'application/json' },
       body
     });
+    return existing.id;
   } else {
-    const metadata = { name: SYNC_FILENAME, parents: ['appDataFolder'] };
+    const metadata = { name: filename, parents: [folderId] };
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
     form.append('file', new Blob([body], { type: 'application/json' }));
 
-    await driveRequest(`${UPLOAD_API}/files?uploadType=multipart`, {
+    const resp = await driveRequest(`${UPLOAD_API}/files?uploadType=multipart`, {
       method: 'POST',
       body: form
     });
+    const data = await resp.json();
+    return data.id;
   }
 }
 
+async function readFileById(fileId) {
+  const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`);
+  return resp.json();
+}
+
+async function deleteFileById(fileId) {
+  await driveRequest(`${DRIVE_API}/files/${fileId}`, { method: 'DELETE' });
+}
+
+// ── Public API: Sync ──────────────────────────────────
+
+export async function findSyncFile() {
+  const folderId = await getOrCreateFolder();
+  return findFileInFolder(folderId, SYNC_FILENAME);
+}
+
+export async function readSyncFile(fileId) {
+  return readFileById(fileId);
+}
+
+export async function writeSyncFile(content) {
+  const folderId = await getOrCreateFolder();
+  return writeFileToFolder(folderId, SYNC_FILENAME, content);
+}
+
 export async function deleteSyncFile() {
-  const existing = await findSyncFile();
-  if (existing) {
-    await driveRequest(`${DRIVE_API}/files/${existing.id}`, { method: 'DELETE' });
-  }
+  const folderId = await getOrCreateFolder();
+  const file = await findFileInFolder(folderId, SYNC_FILENAME);
+  if (file) await deleteFileById(file.id);
+}
+
+// ── Public API: Export files ──────────────────────────
+
+export async function exportFileToDrive(filename, content) {
+  const folderId = await getOrCreateFolder();
+  return writeFileToFolder(folderId, filename, content);
+}
+
+export async function listDriveExports() {
+  const folderId = await getOrCreateFolder();
+  const q = `'${folderId}' in parents and trashed=false and mimeType='application/json'`;
+  const resp = await driveRequest(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&spaces=drive`
+  );
+  const data = await resp.json();
+  return data.files || [];
+}
+
+export async function readDriveExport(fileId) {
+  return readFileById(fileId);
+}
+
+export async function deleteDriveExport(fileId) {
+  return deleteFileById(fileId);
 }

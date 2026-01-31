@@ -64,7 +64,7 @@ Each provider has its own privacy policy that governs how they handle the data y
 
 ### Google Drive sync (opt-in only)
 
-If you connect Google Drive, the extension stores a single JSON file in your Google Drive **appDataFolder** (a private, app-specific folder invisible in your Drive UI). This file contains your saved sessions and manual groups. The sync uses a `drive.appdata` OAuth scope — the extension cannot see or touch any other file in your Drive.
+If you connect Google Drive, the extension creates a **TabKebab** folder in your Drive and stores JSON files there (sync data, exported sessions, exported stashes). The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. The sync uses a `drive.file` OAuth scope — the extension can only access files it created, never any other file in your Drive. This also lets you sync across multiple computers logged into the same Google account.
 
 Google's own privacy practices apply to data stored on Google Drive.
 
