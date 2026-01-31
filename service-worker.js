@@ -10,7 +10,7 @@ import { filterTabs, executeNLAction } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { getSettings, saveSettings } from './core/settings.js';
-import { listDriveExports, deleteDriveExport, exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, listSubfolderFiles, writeSettingsFile } from './core/drive-client.js';
+import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
 
 // ── Keep Awake Defaults ──
 
@@ -271,7 +271,8 @@ async function runRetentionCleanup() {
 function generateBookmarkHtml(bookmarkData) {
   const { date, time, formats } = bookmarkData;
 
-  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // Security-critical: escapes user-controlled data for safe HTML insertion
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const hostname = (url) => { try { return new URL(url).hostname; } catch { return ''; } };
 
   // Build tab nav buttons and panels
@@ -845,8 +846,15 @@ async function handleMessage(msg) {
       return { success: true };
     }
 
-    case 'createTabGroup':
-      return createNativeGroup(msg.tabIds, msg.title, msg.color);
+    case 'createTabGroup': {
+      if (!Array.isArray(msg.tabIds) || msg.tabIds.length === 0 || !msg.tabIds.every(id => Number.isInteger(id))) {
+        throw new Error('Invalid tabIds: expected non-empty array of integers');
+      }
+      const validColors = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
+      const groupColor = validColors.includes(msg.color) ? msg.color : 'blue';
+      const groupTitle = typeof msg.title === 'string' ? msg.title.slice(0, 200) : '';
+      return createNativeGroup(msg.tabIds, groupTitle, groupColor);
+    }
 
     case 'ungroupTabs':
       await ungroupTabs(msg.tabIds);

@@ -150,6 +150,20 @@ function isRestorableUrl(url) {
   return !blocked.some(prefix => url.startsWith(prefix));
 }
 
+function sanitizeTab(tab) {
+  if (tab.title && tab.title.length > 500) {
+    tab.title = tab.title.slice(0, 500);
+  }
+  if (tab.favIconUrl) {
+    const scheme = tab.favIconUrl.split(':')[0];
+    if (!['http', 'https', 'chrome', 'data'].includes(scheme)) {
+      tab.favIconUrl = '';
+    }
+  }
+  tab.pinned = Boolean(tab.pinned);
+  return tab;
+}
+
 async function waitForTabsLoaded(tabIds) {
   await Promise.all(tabIds.map(async (id) => {
     const start = Date.now();
@@ -243,6 +257,7 @@ export async function restoreStashTabs(stash, options = {}) {
   for (const win of stash.windows) {
     const restorable = [];
     for (const tab of win.tabs) {
+      sanitizeTab(tab);
       if (!isRestorableUrl(tab.url)) {
         result.skippedInvalid++;
         continue;

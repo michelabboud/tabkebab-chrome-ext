@@ -18,6 +18,23 @@ function isRestorableUrl(url) {
 }
 
 /**
+ * Sanitize a tab object before restore: truncate title, validate favicon, coerce pinned.
+ */
+function sanitizeTab(tab) {
+  if (tab.title && tab.title.length > 500) {
+    tab.title = tab.title.slice(0, 500);
+  }
+  if (tab.favIconUrl) {
+    const scheme = tab.favIconUrl.split(':')[0];
+    if (!['http', 'https', 'chrome', 'data'].includes(scheme)) {
+      tab.favIconUrl = '';
+    }
+  }
+  tab.pinned = Boolean(tab.pinned);
+  return tab;
+}
+
+/**
  * Migrate a v1 session (flat tabs array) to v2 (windows array).
  * Pure function — does not write to storage.
  */
@@ -255,6 +272,7 @@ export async function restoreSession(sessionId, options = {}) {
   for (const win of session.windows) {
     const restorable = [];
     for (const tab of win.tabs) {
+      sanitizeTab(tab);
       if (!isRestorableUrl(tab.url)) {
         result.skippedInvalid++;
         continue;
