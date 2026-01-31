@@ -198,3 +198,120 @@ async function updateAIVisibility() {
 }
 
 updateAIVisibility();
+
+// --- Help button ---
+document.getElementById('btn-help').addEventListener('click', () => toggleHelp());
+
+// --- Keyboard shortcuts ---
+document.addEventListener('keydown', (e) => {
+  // Skip when typing in inputs
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    if (e.key === 'Escape') {
+      e.target.blur();
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // 1-4: switch main tabs
+  const tabKeys = { '1': 'windows', '2': 'tabs', '3': 'stash', '4': 'sessions' };
+  if (tabKeys[e.key]) {
+    e.preventDefault();
+    const btn = document.querySelector(`.tab-nav [data-view="${tabKeys[e.key]}"]`);
+    if (btn) btn.click();
+    return;
+  }
+
+  // /: focus AI command bar
+  if (e.key === '/') {
+    e.preventDefault();
+    const aiInput = document.getElementById('ai-command-input');
+    if (aiInput && !aiInput.closest('[hidden]')) {
+      aiInput.focus();
+    }
+    return;
+  }
+
+  // Escape: close settings or help
+  if (e.key === 'Escape') {
+    const helpOverlay = document.getElementById('help-overlay');
+    if (helpOverlay) { helpOverlay.remove(); return; }
+    const settingsView = document.getElementById('view-settings');
+    if (settingsView && !settingsView.classList.contains('hidden')) {
+      const tabsBtn = document.querySelector('.tab-nav [data-view="tabs"]');
+      if (tabsBtn) tabsBtn.click();
+    }
+    return;
+  }
+
+  // ?: show help overlay
+  if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    toggleHelp();
+    return;
+  }
+});
+
+// --- Help overlay ---
+function toggleHelp() {
+  let overlay = document.getElementById('help-overlay');
+  if (overlay) {
+    overlay.remove();
+    return;
+  }
+  overlay = document.createElement('div');
+  overlay.id = 'help-overlay';
+  overlay.className = 'help-overlay';
+  overlay.innerHTML = `
+    <div class="help-panel">
+      <div class="help-header">
+        <h2>TabKebab Help</h2>
+        <button class="help-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="help-body">
+        <div class="help-group">
+          <h3>Views</h3>
+          <div class="help-feature"><strong>Windows</strong> &mdash; See all open windows, tab counts, health indicators, and consolidate windows.</div>
+          <div class="help-feature"><strong>Tabs</strong> &mdash; Group tabs by domain or AI, manage custom groups, find duplicates.</div>
+          <div class="help-feature"><strong>Stash</strong> &mdash; Save and close tabs to free memory. Restore them later.</div>
+          <div class="help-feature"><strong>Sessions</strong> &mdash; Snapshot all windows and restore entire sessions.</div>
+        </div>
+        <div class="help-group">
+          <h3>Key Features</h3>
+          <div class="help-feature"><strong>Kebab</strong> &mdash; Discard inactive tabs to save memory. Keep-awake domains are protected.</div>
+          <div class="help-feature"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain (requires AI setup in Settings).</div>
+          <div class="help-feature"><strong>Drive Sync</strong> &mdash; Back up sessions, stashes, and bookmarks to Google Drive.</div>
+          <div class="help-feature"><strong>Bookmarks</strong> &mdash; Export tabs as Chrome bookmarks, local JSON, or Drive HTML.</div>
+        </div>
+        <div class="help-group">
+          <h3>Keyboard Shortcuts</h3>
+          <div class="help-row"><kbd>1</kbd><span>Windows view</span></div>
+          <div class="help-row"><kbd>2</kbd><span>Tabs view</span></div>
+          <div class="help-row"><kbd>3</kbd><span>Stash view</span></div>
+          <div class="help-row"><kbd>4</kbd><span>Sessions view</span></div>
+          <div class="help-row"><kbd>/</kbd><span>Focus AI command bar</span></div>
+          <div class="help-row"><kbd>Esc</kbd><span>Close / unfocus</span></div>
+          <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
+        </div>
+        <div class="help-group">
+          <h3>Tips</h3>
+          <div class="help-feature">Click any tab to switch to it. Click the &times; to close it.</div>
+          <div class="help-feature">Drag tabs between custom groups in the Groups sub-view.</div>
+          <div class="help-feature">Use the AI command bar to run natural language actions like &ldquo;close YouTube tabs&rdquo;.</div>
+          <div class="help-feature">Stashed tabs are stored in IndexedDB and survive extension updates.</div>
+        </div>
+        <div class="help-footer">
+          <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/GUIDE.md" target="_blank" rel="noopener">Full Guide</a>
+          <span class="about-sep">|</span>
+          <a href="https://github.com/michelabboud/tabkebab-chrome-ext/issues" target="_blank" rel="noopener">Report Issue</a>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.help-close').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+}
