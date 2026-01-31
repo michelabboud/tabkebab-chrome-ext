@@ -1,6 +1,7 @@
 // group-editor.js — Chrome native groups + manual groups with drag-and-drop
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 
 export class GroupEditor {
   constructor(rootEl) {
@@ -63,7 +64,7 @@ export class GroupEditor {
     });
 
     const kebabAllBtn = document.createElement('button');
-    kebabAllBtn.className = 'action-btn secondary';
+    kebabAllBtn.className = 'action-btn kebab';
     kebabAllBtn.textContent = 'Kebab All';
     kebabAllBtn.addEventListener('click', async () => {
       kebabAllBtn.disabled = true;
@@ -206,6 +207,13 @@ export class GroupEditor {
       closeBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const tabIds = group.tabs.map(t => t.id);
+        const ok = await showConfirm({
+          title: 'Close group?',
+          message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from "${group.title}"? This cannot be undone.`,
+          confirmLabel: 'Close',
+          danger: true,
+        });
+        if (!ok) return;
         await this.send({ action: 'closeTabs', tabIds });
         showToast(`Closed ${tabIds.length} tabs from "${group.title}"`, 'success');
         this.refresh();
@@ -274,19 +282,42 @@ export class GroupEditor {
       const groupEl = document.createElement('div');
       groupEl.className = 'manual-group';
 
-      // Header
+      // Header (clickable to collapse/expand)
       const header = document.createElement('div');
       header.className = 'manual-group-header';
-      header.innerHTML = `
-        <span class="color-dot" style="background: ${this.chromeColor(group.color)}"></span>
-        <span class="group-name">${this.escapeHtml(group.name)}</span>
-        <span class="group-count">${group.tabUrls.length} tabs</span>
-      `;
+      header.style.cursor = 'pointer';
+
+      const chevron = document.createElement('span');
+      chevron.className = 'chrome-group-chevron';
+      chevron.textContent = '\u25bc';
+
+      const dot = document.createElement('span');
+      dot.className = 'color-dot';
+      dot.style.background = this.chromeColor(group.color);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'group-name';
+      nameSpan.textContent = this.escapeHtml(group.name);
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'group-count';
+      countSpan.textContent = `${group.tabUrls.length} tab${group.tabUrls.length !== 1 ? 's' : ''}`;
+
+      header.appendChild(chevron);
+      header.appendChild(dot);
+      header.appendChild(nameSpan);
+      header.appendChild(countSpan);
 
       // Drop zone body
       const body = document.createElement('div');
       body.className = 'manual-group-body';
       body.dataset.dropzone = groupId;
+
+      // Toggle collapse/expand on header click
+      header.addEventListener('click', () => {
+        body.hidden = !body.hidden;
+        chevron.textContent = body.hidden ? '\u25b6' : '\u25bc';
+      });
 
       const matchingTabs = tabs.filter(t => group.tabUrls.includes(t.url));
       if (matchingTabs.length === 0) {
@@ -311,7 +342,15 @@ export class GroupEditor {
       deleteBtn.className = 'action-btn danger';
       deleteBtn.textContent = 'Delete Group';
       deleteBtn.style.fontSize = '11px';
-      deleteBtn.addEventListener('click', () => this.deleteGroup(groupId, group.name));
+      deleteBtn.addEventListener('click', async () => {
+        const ok = await showConfirm({
+          title: 'Delete group?',
+          message: `"${group.name}" will be permanently deleted.`,
+          confirmLabel: 'Delete',
+          danger: true,
+        });
+        if (ok) this.deleteGroup(groupId, group.name);
+      });
 
       actions.appendChild(applyBtn);
       actions.appendChild(deleteBtn);

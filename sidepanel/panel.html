@@ -133,7 +133,7 @@
           <button id="btn-group-by-domain" class="action-btn">Group by Domain</button>
           <button id="btn-smart-group" class="action-btn" hidden>Smart Group</button>
           <button id="btn-ungroup-all" class="action-btn secondary">Ungroup All</button>
-          <button id="btn-kebab-all" class="action-btn secondary">Kebab All</button>
+          <button id="btn-kebab-all" class="action-btn kebab">Kebab All</button>
           <button id="btn-collapse-all-tabs" class="action-btn secondary">Collapse All</button>
           <button id="btn-expand-all-tabs" class="action-btn secondary">Expand All</button>
         </div>
@@ -318,7 +318,7 @@
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">By Windows</span>
-              <span class="setting-hint">TabKebab / date / Window 1..N / tabs</span>
+              <span class="setting-hint">TabKebab / date / Windows / Window 1..N / tabs</span>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="setting-bookmarkByWindows" data-setting="bookmarkByWindows">
@@ -432,7 +432,7 @@
                 <span class="setting-unit">hrs</span>
               </div>
             </div>
-            <div class="setting-row">
+            <div class="setting-row" id="drive-retention-row">
               <div class="setting-info">
                 <span class="setting-label">Drive retention</span>
                 <span class="setting-hint">Auto-delete Drive files older than this</span>
@@ -625,6 +625,7 @@
     </section>
   </main>
 
+  <div id="confirm-overlay" class="confirm-overlay" hidden></div>
   <div id="toast-container" class="toast-container"></div>
 
   <script type="module" src="panel.js"></script>

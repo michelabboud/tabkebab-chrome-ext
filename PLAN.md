@@ -31,6 +31,12 @@ TabKebab/
 │       ├── duplicate-finder.js      # Scan & close duplicates
 │       ├── group-editor.js          # Manual groups + drag-and-drop
 │       ├── drive-sync.js            # Google Drive connect/sync UI
+│       ├── window-list.js           # Window management and consolidation
+│       ├── ai-settings.js           # AI provider configuration UI
+│       ├── command-bar.js           # AI natural language command bar
+│       ├── stash-list.js            # Stash view with restore progress
+│       ├── settings-manager.js      # Settings UI controller
+│       ├── confirm-dialog.js        # Inline confirmation dialogs
 │       └── toast.js                 # Notification toasts
 ├── core/
 │   ├── storage.js                   # chrome.storage.local wrapper
@@ -39,7 +45,8 @@ TabKebab/
 │   ├── duplicates.js                # Duplicate detection
 │   ├── grouping.js                  # Domain + manual grouping logic
 │   ├── drive-client.js              # Google Drive REST v3 client
-│   └── export-import.js             # JSON file export/import
+│   ├── export-import.js             # JSON file export/import
+│   └── stash-db.js                  # IndexedDB stash storage with lazy restore
 └── icons/
     ├── icon16.png
     ├── icon32.png
@@ -84,6 +91,14 @@ TabKebab/
 - Create `core/drive-client.js` — OAuth via `chrome.identity`, Drive REST v3, appDataFolder
 - Create `sidepanel/components/drive-sync.js` — connect/disconnect/sync UI
 - Note: Requires Google Cloud Console project setup (user must provide client ID)
+
+### Phase 8: Stash, Confirm Dialogs & Restore UX
+- Create `core/stash-db.js` — IndexedDB-backed stash storage with lazy restore (adaptive batching, per-batch discard, progress callbacks)
+- Create `sidepanel/components/stash-list.js` — stash cards with restore progress bar, "Restored" badge, re-restore confirmation
+- Create `sidepanel/components/confirm-dialog.js` — inline confirmation dialogs replacing `window.confirm`
+- Add confirmation dialogs to destructive actions (close duplicates, delete groups, clean Drive files)
+- Add lazy restore + progress reporting to session restore (`core/sessions.js`)
+- Service worker broadcasts `restoreProgress` messages for live UI updates
 
 ## Key Technical Decisions
 - **Manifest V3** with ES modules (`"type": "module"` on service worker)

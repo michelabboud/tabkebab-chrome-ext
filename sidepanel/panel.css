@@ -1195,11 +1195,15 @@ body.ai-available .ai-feature {
   inset: 0;
   z-index: 2000;
   background: rgba(0, 0, 0, 0.45);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   padding: 24px;
   animation: confirmFadeIn 150ms ease;
+}
+
+.confirm-overlay:not([hidden]) {
+  display: flex;
 }
 
 @keyframes confirmFadeIn {

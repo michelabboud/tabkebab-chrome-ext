@@ -1,6 +1,7 @@
 // duplicate-finder.js — Scan and close duplicate tabs
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 
 export class DuplicateFinder {
   constructor(rootEl) {
@@ -102,6 +103,14 @@ export class DuplicateFinder {
       showToast('No duplicates selected', 'error');
       return;
     }
+
+    const ok = await showConfirm({
+      title: 'Close duplicates?',
+      message: `Close ${tabIds.length} duplicate tab${tabIds.length !== 1 ? 's' : ''}? This cannot be undone.`,
+      confirmLabel: 'Close',
+      danger: true,
+    });
+    if (!ok) return;
 
     try {
       await this.send({ action: 'closeTabs', tabIds });

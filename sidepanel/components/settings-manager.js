@@ -1,6 +1,7 @@
 // settings-manager.js — Settings UI controller: loads, renders, and saves settings
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
 
 export class SettingsManager {
@@ -14,6 +15,14 @@ export class SettingsManager {
     this.inputs.forEach(input => {
       input.addEventListener('change', () => this.saveFromUI());
     });
+
+    // When "never delete from Drive" is toggled, gray out retention + reset its value
+    const neverDeleteInput = rootEl.querySelector('#setting-neverDeleteFromDrive');
+    if (neverDeleteInput) {
+      neverDeleteInput.addEventListener('change', () => {
+        this.updateRetentionState(neverDeleteInput.checked);
+      });
+    }
 
     // Bookmark Now button
     const bookmarkBtn = rootEl.querySelector('#btn-bookmark-now');
@@ -58,6 +67,26 @@ export class SettingsManager {
         input.value = value;
       }
     });
+
+    // Apply retention disabled state based on never-delete toggle
+    this.updateRetentionState(settings.neverDeleteFromDrive);
+  }
+
+  /** Gray out Drive retention row when "never delete" is ON, and reset counter on toggle. */
+  updateRetentionState(neverDelete) {
+    const retentionRow = this.root.querySelector('#drive-retention-row');
+    const retentionInput = this.root.querySelector('#setting-driveRetentionDays');
+    if (!retentionRow || !retentionInput) return;
+
+    if (neverDelete) {
+      retentionRow.classList.add('disabled');
+      retentionInput.disabled = true;
+      // Reset to default when toggling ON
+      retentionInput.value = 30;
+    } else {
+      retentionRow.classList.remove('disabled');
+      retentionInput.disabled = false;
+    }
   }
 
   async saveFromUI() {
@@ -111,6 +140,14 @@ export class SettingsManager {
     const daysInput = this.root.querySelector('#drive-cleanup-days');
     const days = Number(daysInput?.value) || 30;
     const btn = this.root.querySelector('#btn-clean-drive');
+
+    const ok = await showConfirm({
+      title: 'Clean Drive files?',
+      message: `Delete Drive files older than ${days} days? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
 
     if (btn) {
       btn.disabled = true;
