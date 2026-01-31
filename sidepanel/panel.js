@@ -12,7 +12,6 @@ import { StashList } from './components/stash-list.js';
 import { SettingsManager } from './components/settings-manager.js';
 
 // --- Initialize view controllers ---
-console.log('[TabKebab] panel.js module loaded');
 
 const settingsRoot = document.getElementById('view-settings');
 const driveSyncCtrl = new DriveSync(settingsRoot);
@@ -34,7 +33,6 @@ const controllers = {
     },
   },
 };
-console.log('[TabKebab] controllers initialized');
 
 // --- AI command bar ---
 const commandBar = new CommandBar(document.getElementById('command-bar'));

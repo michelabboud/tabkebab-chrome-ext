@@ -165,7 +165,7 @@ async function waitForTabsLoaded(tabIds) {
 
 async function discardTabs(tabIds) {
   for (const id of tabIds) {
-    try { await chrome.tabs.discard(id); } catch {}
+    try { await chrome.tabs.discard(id); } catch (e) { /* tab may be active or protected */ }
   }
 }
 

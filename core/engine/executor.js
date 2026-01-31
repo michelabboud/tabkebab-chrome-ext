@@ -187,8 +187,8 @@ export async function moveTabsInBatches(tabIds, windowId) {
         moved += batch.length;
         success = true;
         break;
-      } catch {
-        // Wait longer before retrying
+      } catch (e) {
+        console.warn('[TabKebab] batch tab move failed, retrying:', e);
         await delay(BATCH_DELAY_MS * (attempt + 1));
       }
     }

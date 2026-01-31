@@ -52,7 +52,7 @@ export async function solveWithAI(snapshot, onProgress) {
       responseFormat: 'json',
     });
 
-    if (!response.parsed?.groups) {
+    if (!response.parsed?.groups || !Array.isArray(response.parsed.groups)) {
       return null; // Malformed response — fall back
     }
 

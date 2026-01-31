@@ -54,10 +54,19 @@ export class TabList {
       this.kebabAllBtn.addEventListener('click', () => this.kebabAll());
     }
 
-    // Listen for progress updates from the service worker
+    // Listen for progress updates from the service worker (throttled to rAF)
+    this._progressPending = null;
+    this._progressRafId = null;
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'groupingProgress') {
-        this.updateProgress(msg.phase, msg.detail);
+        this._progressPending = msg;
+        if (!this._progressRafId) {
+          this._progressRafId = requestAnimationFrame(() => {
+            this._progressRafId = null;
+            const m = this._progressPending;
+            if (m) this.updateProgress(m.phase, m.detail);
+          });
+        }
       }
     });
   }

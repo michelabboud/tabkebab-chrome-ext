@@ -69,7 +69,11 @@ export class DriveSync {
           showToast('Profile name is required for Drive sync', 'error');
           return;
         }
-        profileName = profileName.trim();
+        profileName = profileName.trim().replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 50);
+        if (!profileName) {
+          showToast('Profile name must contain letters or numbers', 'error');
+          return;
+        }
         await Storage.set('driveProfileName', profileName);
       }
 
@@ -141,7 +145,7 @@ export class DriveSync {
       try {
         const currentSettings = await chrome.runtime.sendMessage({ action: 'getSettings' });
         await writeSettingsFile({ settings: currentSettings, savedAt: Date.now(), version: 1 });
-      } catch { /* non-fatal */ }
+      } catch (e) { console.warn('[TabKebab] cross-profile settings import failed:', e); }
 
       const parts = [];
       if (syncResult.sessions > 0) parts.push(`${syncResult.sessions} sessions`);
@@ -220,8 +224,8 @@ export class DriveSync {
           return;
         }
       }
-    } catch {
-      // Must not break connect flow
+    } catch (e) {
+      console.warn('[TabKebab] post-connect settings sync failed:', e);
     }
   }
 

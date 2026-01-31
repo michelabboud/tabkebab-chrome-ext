@@ -49,30 +49,46 @@ async function getToken(interactive = false) {
 }
 
 async function driveRequest(url, options = {}, interactive = false) {
-  let token = await getToken(interactive);
+  const MAX_RETRIES = 3;
 
-  let resp = await fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      ...(options.headers || {})
-    }
-  });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    let token = await getToken(interactive);
 
-  if (resp.status === 401) {
-    await chrome.identity.removeCachedAuthToken({ token });
-    token = await getToken(interactive);
-    resp = await fetch(url, {
+    let resp = await fetch(url, {
       ...options,
       headers: {
         'Authorization': `Bearer ${token}`,
         ...(options.headers || {})
       }
     });
-  }
 
-  if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
-  return resp;
+    // Re-auth on 401
+    if (resp.status === 401) {
+      await chrome.identity.removeCachedAuthToken({ token });
+      token = await getToken(interactive);
+      resp = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          ...(options.headers || {})
+        }
+      });
+    }
+
+    if (resp.ok) return resp;
+
+    // Retry on transient errors (429, 500, 502, 503)
+    const retryable = [429, 500, 502, 503];
+    if (retryable.includes(resp.status) && attempt < MAX_RETRIES) {
+      const retryAfter = resp.headers.get('Retry-After');
+      const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : (1000 * Math.pow(2, attempt));
+      console.warn(`[TabKebab] Drive API ${resp.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
+      await new Promise(r => setTimeout(r, delayMs));
+      continue;
+    }
+
+    throw new Error(`Drive API error: ${resp.status}`);
+  }
 }
 
 export async function authenticate() {
@@ -83,8 +99,8 @@ export async function disconnect() {
   try {
     const token = await getToken(false);
     await chrome.identity.removeCachedAuthToken({ token });
-  } catch {
-    // Already disconnected
+  } catch (e) {
+    console.warn('[TabKebab] disconnect cleanup:', e);
   }
 }
 
@@ -190,7 +206,7 @@ async function writeFileToFolder(folderId, filename, content, { archive: shouldA
   if (existing) {
     // Archive before overwriting
     if (shouldArchive) {
-      try { await archiveFile(existing.id, filename); } catch { /* non-fatal */ }
+      try { await archiveFile(existing.id, filename); } catch (e) { console.warn('[TabKebab] archive before overwrite failed:', filename, e); }
     }
     await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
       method: 'PATCH',
@@ -376,7 +392,7 @@ export async function exportRawToSubfolder(subfolder, filename, rawContent, mime
   const existing = await findFileInFolder(folderId, filename);
 
   if (existing) {
-    try { await archiveFile(existing.id, filename); } catch { /* non-fatal */ }
+    try { await archiveFile(existing.id, filename); } catch (e) { console.warn('[TabKebab] archive before overwrite failed:', filename, e); }
     await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
       method: 'PATCH',
       headers: { 'Content-Type': mimeType },
@@ -429,8 +445,8 @@ export async function listAllDriveFiles() {
       const subId = await getOrCreateSubfolder(profileId, sub);
       const subFiles = await listFilesInFolder(subId);
       allFiles.push(...subFiles);
-    } catch {
-      // Subfolder may not exist yet
+    } catch (e) {
+      console.warn('[TabKebab] subfolder listing skipped:', sub, e);
     }
   }
 

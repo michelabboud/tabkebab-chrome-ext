@@ -112,7 +112,7 @@ export class WindowList {
           this.maxTabs = settings.maxTabsPerWindow || 50;
           this.recommendedTabs = settings.recommendedTabsPerWindow || 20;
         }
-      } catch {}
+      } catch (e) { console.warn('[TabKebab] settings fetch for tab limits failed:', e); }
 
       const data = await this.send({ action: 'getWindowStats' });
       this.renderStats(data);

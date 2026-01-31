@@ -15,9 +15,18 @@ export class StashList {
     rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
 
     // Listen for restore progress broadcasts from the service worker
+    this._progressPending = null;
+    this._progressRafId = null;
     this._onRestoreProgress = (message) => {
       if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
-        this.updateProgress(message.restoreId, message.created, message.loaded, message.total);
+        this._progressPending = message;
+        if (!this._progressRafId) {
+          this._progressRafId = requestAnimationFrame(() => {
+            this._progressRafId = null;
+            const m = this._progressPending;
+            if (m) this.updateProgress(m.restoreId, m.created, m.loaded, m.total);
+          });
+        }
       }
     };
     chrome.runtime.onMessage.addListener(this._onRestoreProgress);

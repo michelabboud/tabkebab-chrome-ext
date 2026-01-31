@@ -70,7 +70,7 @@ async function autoSaveSession() {
       const filtered = sessions.filter(s => !idsToDelete.has(s.id));
       await Storage.set('sessions', filtered);
     }
-  } catch {
+  } catch (e) { console.warn('[TabKebab] auto-save failed:', e);
     // Auto-save should never crash the service worker
   }
 }
@@ -92,7 +92,7 @@ async function reconfigureAlarms(settings) {
   // Clear all managed alarms
   const alarmNames = [ALARM_AUTO_SAVE, ALARM_AUTO_KEBAB, ALARM_AUTO_STASH, ALARM_AUTO_SYNC_DRIVE, ALARM_RETENTION_CLEANUP, ALARM_AUTO_BOOKMARK];
   for (const name of alarmNames) {
-    try { await chrome.alarms.clear(name); } catch {}
+    try { await chrome.alarms.clear(name); } catch (e) { console.warn('[TabKebab] alarm clear failed:', name, e); }
   }
 
   // Auto-save session
@@ -141,9 +141,9 @@ async function autoKebabOldTabs() {
       if (keepAwake.has(extractDomain(tab.url))) continue;
       if ((tab.lastAccessed || Date.now()) > cutoff) continue;
 
-      try { await chrome.tabs.discard(tab.id); } catch {}
+      try { await chrome.tabs.discard(tab.id); } catch (e) { /* tab may be active or protected */ }
     }
-  } catch {}
+  } catch (e) { console.warn('[TabKebab] auto-kebab failed:', e); }
 }
 
 async function autoStashOldTabs() {
@@ -189,7 +189,7 @@ async function autoStashOldTabs() {
       await saveStash(stash);
       await closeTabs(oldTabs.map(t => t.id));
     }
-  } catch {}
+  } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
 }
 
 async function autoSyncDrive() {
@@ -221,8 +221,8 @@ async function autoSyncDrive() {
     // Write current settings to Drive
     try {
       await writeSettingsFile({ settings, savedAt: Date.now(), version: 1 });
-    } catch { /* non-fatal */ }
-  } catch {}
+    } catch (e) { console.warn('[TabKebab] settings write to Drive failed:', e); }
+  } catch (e) { console.warn('[TabKebab] auto Drive sync failed:', e); }
 }
 
 async function runRetentionCleanup() {
@@ -257,13 +257,13 @@ async function runRetentionCleanup() {
           for (const file of allFiles) {
             const fileTime = new Date(file.modifiedTime).getTime();
             if (fileTime < driveCutoff) {
-              try { await deleteDriveFile(file.id); } catch {}
+              try { await deleteDriveFile(file.id); } catch (e) { console.warn('[TabKebab] Drive file cleanup failed:', file.id, e); }
             }
           }
-        } catch {}
+        } catch (e) { console.warn('[TabKebab] Drive retention cleanup failed:', e); }
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[TabKebab] Drive retention cleanup failed:', e); }
 }
 
 // ── Bookmark system ──
@@ -573,7 +573,7 @@ async function createBookmarks(options = {}) {
           tabs: groupTabs.map(t => ({ title: t.title, url: t.url })),
         });
       }
-    } catch {}
+    } catch (e) { console.warn('[TabKebab] tabGroups query failed:', e); }
 
     // Ungrouped tabs
     const ungrouped = tabs.filter(t => !t.groupId || t.groupId === -1);
@@ -626,7 +626,7 @@ async function createBookmarks(options = {}) {
       await Storage.set('tabkebabBookmarks', existing);
       results.created++;
       results.destinations.push('Local Storage');
-    } catch {}
+    } catch (e) { console.warn('[TabKebab] bookmark local save failed:', e); }
   }
 
   // Save to Google Drive
@@ -649,10 +649,10 @@ async function createBookmarks(options = {}) {
             const html = generateBookmarkHtml(bookmarkData);
             const htmlFilename = `bookmarks-${dateStr}.html`;
             await exportRawToSubfolder('bookmarks', htmlFilename, html, 'text/html');
-          } catch { /* non-fatal */ }
+          } catch (e) { console.warn('[TabKebab] HTML bookmark export failed:', e); }
         }
       }
-    } catch {}
+    } catch (e) { console.warn('[TabKebab] bookmark Drive save failed:', e); }
   }
 
   return results;
@@ -765,7 +765,8 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
 // Message handler — side panel communicates via chrome.runtime.sendMessage
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message).then(sendResponse).catch(err => {
-    sendResponse({ error: err.message });
+    console.warn(`[TabKebab] handler error (${message?.action}):`, err);
+    sendResponse({ error: err?.message || String(err) });
   });
   return true; // keep channel open for async response
 });
@@ -943,10 +944,11 @@ async function handleMessage(msg) {
           responseFormat: 'json',
         });
 
-        if (response.parsed?.summaries) {
+        if (response.parsed?.summaries && Array.isArray(response.parsed.summaries)) {
           for (const s of response.parsed.summaries) {
+            if (typeof s.index !== 'number' || s.index < 0 || s.index >= batch.length) continue;
             const tab = batch[s.index];
-            if (tab) {
+            if (tab && typeof s.summary === 'string') {
               allSummaries.push({ tabId: tab.id, summary: s.summary });
             }
           }
@@ -970,11 +972,14 @@ async function handleMessage(msg) {
         responseFormat: 'json',
       });
 
-      if (!response.parsed) {
+      if (!response.parsed || typeof response.parsed !== 'object') {
         return { error: 'Could not understand that command' };
       }
 
       const parsed = response.parsed;
+      if (!parsed.action || typeof parsed.action !== 'string') {
+        return { error: 'AI returned an invalid action' };
+      }
       const matchingTabs = filterTabs(allTabs, parsed.filter || {});
 
       if (matchingTabs.length === 0) {
@@ -1105,7 +1110,7 @@ async function handleMessage(msg) {
         responseFormat: 'json',
       });
 
-      if (!response.parsed?.keepAwake) {
+      if (!response.parsed?.keepAwake || !Array.isArray(response.parsed.keepAwake)) {
         return { suggestions: [] };
       }
 
@@ -1113,8 +1118,10 @@ async function handleMessage(msg) {
       const seen = new Set();
       const suggestions = [];
       for (const item of response.parsed.keepAwake) {
-        const tab = allTabs[item.index];
-        const domain = tab ? extractDomain(tab.url) : item.domain;
+        if (!item || typeof item !== 'object') continue;
+        const tab = (typeof item.index === 'number' && item.index >= 0 && item.index < allTabs.length)
+          ? allTabs[item.index] : null;
+        const domain = tab ? extractDomain(tab.url) : (typeof item.domain === 'string' ? item.domain : null);
         if (domain && !seen.has(domain)) {
           seen.add(domain);
           suggestions.push({ domain, reason: item.reason || '' });
@@ -1132,7 +1139,7 @@ async function handleMessage(msg) {
       if (windowTabs.length === 0) return { error: 'No tabs in window' };
 
       let chromeGroups = [];
-      try { chromeGroups = await chrome.tabGroups.query({ windowId: msg.windowId }); } catch {}
+      try { chromeGroups = await chrome.tabGroups.query({ windowId: msg.windowId }); } catch (e) { console.warn('[TabKebab] tabGroups query failed:', e); }
 
       const groupMeta = new Map();
       for (const g of chromeGroups) {
@@ -1174,7 +1181,7 @@ async function handleMessage(msg) {
       // Auto-bookmark on stash if enabled
       const settings = await getSettings();
       if (settings.autoBookmarkOnStash && (settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains)) {
-        try { await createBookmarks(); } catch {}
+        try { await createBookmarks(); } catch (e) { console.warn('[TabKebab] auto-bookmark on stash failed:', e); }
       }
 
       return { success: true, stash };
@@ -1188,7 +1195,7 @@ async function handleMessage(msg) {
       try {
         const g = await chrome.tabGroups.get(msg.groupId);
         groupInfo = { title: g.title || 'Untitled', color: g.color || 'grey', collapsed: g.collapsed || false };
-      } catch {}
+      } catch (e) { console.warn('[TabKebab] stash failed:', e); }
 
       const stashTabs = groupTabs.map(t => ({
         url: t.url, title: t.title, favIconUrl: t.favIconUrl,
@@ -1353,7 +1360,7 @@ async function handleMessage(msg) {
           try {
             const html = generateBookmarkHtml(bookmarks[0]);
             await exportRawToSubfolder('bookmarks', `bookmarks-${dateStr}.html`, html, 'text/html');
-          } catch { /* non-fatal */ }
+          } catch (e) { console.warn('[TabKebab] HTML bookmark export in sync failed:', e); }
         }
       }
 
@@ -1371,7 +1378,7 @@ async function handleMessage(msg) {
           try {
             await deleteDriveFile(file.id);
             deleted++;
-          } catch {}
+          } catch (e) { console.warn('[TabKebab] Drive file delete failed:', file.id, e); }
         }
       }
       return { deleted };

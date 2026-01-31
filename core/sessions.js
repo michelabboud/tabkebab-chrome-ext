@@ -162,7 +162,7 @@ async function waitForTabsLoaded(tabIds) {
 
 async function discardTabs(tabIds) {
   for (const id of tabIds) {
-    try { await chrome.tabs.discard(id); } catch {}
+    try { await chrome.tabs.discard(id); } catch (e) { /* tab may be active or protected */ }
   }
 }
 
@@ -209,8 +209,8 @@ async function restoreGroups(savedTabs, createdTabs, groups, windowId, result) {
       }
 
       result.groupsRestored++;
-    } catch {
-      // Group creation can fail if tabs were closed in the meantime
+    } catch (e) {
+      console.warn('[TabKebab] group recreation failed:', e);
     }
   }
 }
@@ -345,7 +345,7 @@ export async function restoreSession(sessionId, options = {}) {
           if (tabs[i].pinned) {
             try {
               await chrome.tabs.update(windowTabs[i].id, { pinned: true });
-            } catch { /* Tab may have been closed */ }
+            } catch (e) { /* Tab may have been closed */ }
           }
         }
 
@@ -447,7 +447,7 @@ export async function restoreSession(sessionId, options = {}) {
         if (allRestorable[i].pinned) {
           try {
             await chrome.tabs.update(windowTabs[i].id, { pinned: true });
-          } catch {
+          } catch (e) {
             // Tab may have been closed
           }
         }
