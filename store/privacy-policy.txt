@@ -1,0 +1,32 @@
+============================================================
+  TabKebab — Privacy Policy (for Chrome Web Store)
+============================================================
+
+Paste this into the "Privacy practices" section of your
+Chrome Web Store listing. Also link to the full policy:
+https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/PRIVACY.md
+
+------------------------------------------------------------
+
+TabKebab collects zero data. No telemetry, no analytics, no tracking, no cookies, no fingerprinting — nothing. We have no servers and no backend infrastructure.
+
+DATA STORED LOCALLY:
+All extension data lives inside your browser profile:
+• Sessions (window/tab snapshots) — chrome.storage.local
+• Custom tab groups — chrome.storage.local
+• Keep-awake domain list — chrome.storage.local
+• AI settings and encrypted API keys — chrome.storage.local
+• Stashed tabs — IndexedDB (TabKebabStash)
+• Decrypted API keys (temporary) — chrome.storage.session (wiped on restart)
+
+API keys are encrypted with AES-GCM 256-bit using PBKDF2 key derivation. Plaintext keys are never written to disk.
+
+DATA THAT LEAVES YOUR DEVICE:
+• AI providers (opt-in only): If you enable AI features and provide an API key, tab titles and URLs are sent to your chosen provider (OpenAI, Anthropic, Google Gemini, or a custom endpoint). Chrome Built-in AI runs entirely on-device.
+• Google Drive sync (opt-in only): If you connect Google Drive, sessions, stashes, and groups are stored in a visible "TabKebab" folder on your Drive. The extension can only access files it created. Works across multiple computers.
+• Export files: JSON files downloaded to your computer when you choose to export.
+
+No data is sent anywhere else. There is no analytics endpoint, error reporting service, or update mechanism that contacts any server.
+
+SINGLE PURPOSE:
+TabKebab's single purpose is browser tab organization and management.

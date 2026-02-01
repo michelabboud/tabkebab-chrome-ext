@@ -1,0 +1,67 @@
+============================================================
+  TabKebab — Chrome Web Store Listing
+============================================================
+
+EXTENSION NAME:
+TabKebab
+
+SHORT DESCRIPTION (132 chars max):
+Stack and organize your tabs — group by domain or AI, stash and restore, save sessions, close duplicates, sleep idle tabs.
+
+DETAILED DESCRIPTION:
+TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, and restore tabs across windows — manually or with AI.
+
+🗂 ORGANIZE
+• Group tabs by domain into native Chrome tab groups with one click
+• AI-powered smart grouping that understands context (research, shopping, work)
+• Drag-and-drop custom groups with color coding
+• Consolidate scattered windows into fewer, organized ones
+
+📦 STASH
+• Save and close tabs by window, Chrome group, or domain
+• Tabs are offloaded to local IndexedDB — no cloud, no size limits
+• Restore later in discarded mode so tabs don't all load at once
+• Favicon previews, source badges, and one-click restore or delete
+
+💾 SESSIONS
+• Save full snapshots of every window, tab, and group layout
+• Restore with automatic deduplication — already-open tabs are skipped
+• Auto-saves on browser start and every 24 hours, keeping the last 2
+• Per-session export for sharing or backup
+
+😴 TAB SLEEP (KEBAB)
+• Discard tabs to free memory while keeping them in the tab strip
+• Per-domain keep-awake exceptions (email, calendars, AI tools protected by default)
+• AI-assisted classification suggests which domains to protect
+• Sleep by domain, group, window, or everything at once
+
+🔍 FIND & CLEAN
+• Duplicate detection and bulk close across all windows
+• Natural language commands: "close YouTube tabs", "find my GitHub tabs", "group by project"
+
+📤 EXPORT & SYNC
+• Full JSON export/import of sessions, stashes, groups, and settings
+• Individual session and stash exports
+• Google Drive sync (optional)
+
+🤖 AI PROVIDERS (all optional, bring your own key)
+• OpenAI (GPT-4.1, GPT-5, o4-mini)
+• Anthropic Claude (Haiku, Sonnet, Opus)
+• Google Gemini (2.5 Flash/Pro, 3.0 preview)
+• Chrome Built-in AI (Gemini Nano, on-device, no API key needed)
+• Any OpenAI-compatible endpoint (Ollama, LM Studio, Groq, Together AI)
+
+🔒 PRIVACY
+• Zero data collection — no telemetry, no analytics, no tracking
+• Everything stored locally unless you explicitly opt in to AI or Drive
+• API keys encrypted with AES-GCM 256-bit
+• Full privacy policy: https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/PRIVACY.md
+
+CATEGORY:
+Productivity
+
+LANGUAGE:
+English
+
+WEBSITE:
+https://github.com/michelabboud/tabkebab-chrome-ext

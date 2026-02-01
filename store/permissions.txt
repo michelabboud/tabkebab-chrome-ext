@@ -1,0 +1,44 @@
+============================================================
+  TabKebab — Permission Justifications
+============================================================
+
+When submitting to the Chrome Web Store, you'll need to justify
+each permission. Copy-paste these into the relevant fields.
+
+------------------------------------------------------------
+
+PERMISSION: tabs
+JUSTIFICATION:
+Required to read tab information (URL, title, favicon, pinned state, active status) for core functionality: grouping tabs by domain, detecting duplicates, saving/restoring sessions, stashing tabs, and displaying tab lists in the side panel. No tab content is read — only metadata.
+
+PERMISSION: tabGroups
+JUSTIFICATION:
+Required to create, update, and query Chrome native tab groups. This is core functionality — the extension organizes tabs into color-coded groups by domain, AI suggestion, or user-defined rules.
+
+PERMISSION: storage
+JUSTIFICATION:
+Required to persist user data locally: saved sessions, custom tab groups, keep-awake domain lists, AI provider settings, encrypted API keys, and cached AI responses. All data stays on the user's device.
+
+PERMISSION: sidePanel
+JUSTIFICATION:
+The extension's entire UI is a Chrome side panel. This permission is required to register and open the side panel where users interact with all features.
+
+PERMISSION: identity
+JUSTIFICATION:
+Required for optional Google Drive sync. Users who choose to connect Google Drive authenticate via chrome.identity to get an OAuth2 token with drive.file scope. The extension creates a visible "TabKebab" folder in the user's Drive and can only access files it created — never any other file. This feature is entirely opt-in and the permission is not used unless the user explicitly enables Drive sync.
+
+PERMISSION: alarms
+JUSTIFICATION:
+Required for the auto-save feature that creates a session backup every 24 hours. A single recurring alarm triggers the auto-save function. No other alarms are used.
+
+HOST PERMISSION: https://api.openai.com/*
+JUSTIFICATION:
+Required for optional AI-powered features (smart tab grouping, natural language commands, keep-awake classification) when the user chooses OpenAI as their AI provider. No requests are made unless the user configures an API key and initiates an AI action.
+
+HOST PERMISSION: https://api.anthropic.com/*
+JUSTIFICATION:
+Required for optional AI-powered features when the user chooses Anthropic Claude as their AI provider. No requests are made unless the user configures an API key and initiates an AI action.
+
+HOST PERMISSION: https://generativelanguage.googleapis.com/*
+JUSTIFICATION:
+Required for optional AI-powered features when the user chooses Google Gemini as their AI provider. No requests are made unless the user configures an API key and initiates an AI action.
