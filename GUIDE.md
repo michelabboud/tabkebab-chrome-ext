@@ -62,7 +62,19 @@ On first launch, TabKebab opens to the **Tabs** view showing all tabs in your cu
 
 ### Header
 
-The header shows the TabKebab logo and a **gear icon** to access Settings. Settings is a full-screen overlay covering all configuration options.
+The header shows the TabKebab logo, a **version badge** (v1.1.0), quick links to GitHub and the Privacy Policy, a **help button** (?), and a **gear icon** for Settings.
+
+### Global Stats Bar
+
+Below the navigation bar, a fixed stats bar displays three cards:
+
+| Stat | Meaning |
+|------|---------|
+| **Windows** | Total open browser windows |
+| **Tabs** | Total open tabs across all windows |
+| **Active / Kebab** | Percentage of tabs that are active (not discarded) |
+
+A hint line reads "Kebab = discarded tabs saving memory". The stats bar stays visible on every view and updates in real time.
 
 ### Navigation Bar
 
@@ -70,7 +82,7 @@ Four tabs switch between the main views. The active tab is highlighted with an a
 
 ### AI Command Bar
 
-When AI is configured, a command bar appears at the top of the main area. Type natural language commands and press Enter or click **Go**. See [Natural Language Commands](#natural-language-commands) for details.
+When AI is configured, a multi-line command bar appears below the stats bar. Type natural language commands and press **Enter** to send (or **Shift+Enter** for a new line). A small label shows the active AI provider name (e.g., "OpenAI", "Claude"). See [Natural Language Commands](#natural-language-commands) for details.
 
 ---
 
@@ -118,8 +130,12 @@ Shows tabs organized by their Chrome native tab group. Includes:
 
 A unified editor for managing tab groups. Three collapsible sections:
 
-1. **Chrome Tab Groups** — lists all native Chrome tab groups with their color and title. Click to expand and see member tabs.
-2. **Custom Groups** — groups you create within TabKebab. Includes a toolbar to create new groups.
+1. **Custom Groups** — groups you create within TabKebab. Includes a toolbar to create new groups. Each group card has:
+   - Collapsible body with drag-and-drop tab slots
+   - **Smart search input** — type to filter open tabs by title or URL; matching tabs appear with a **+** button to add them to the group
+   - **URL paste** — if the input looks like a URL, an "Add URL" option appears to add it directly
+   - **Apply to Chrome** — creates a native Chrome tab group from the custom group
+2. **Chrome Tab Groups** — lists all native Chrome tab groups with their color and title. Click to expand and see member tabs. Groups with no title display as "Untitled Group".
 3. **Ungrouped Tabs** — tabs not belonging to any group.
 
 Each section header has a **collapse/expand chevron**.
@@ -141,11 +157,13 @@ When grouping runs, a **4-phase progress indicator** appears:
 
 ### Finding Duplicates
 
-Click **Find Duplicates** to scan all windows. Results show:
-- Number of duplicates found
-- List of duplicate sets with tab titles
-- **Close Duplicates** button with confirmation dialog
-- Keeps the most recent copy of each duplicate
+The **Duplicates** sub-tab shows a **red badge** on the tab button with the current count of extra duplicate copies. This count is updated automatically every 60 seconds and after any close operation.
+
+Click **Scan for Duplicates** to refresh the list. Results show:
+- Number of duplicates found per URL
+- Each duplicate group with checkboxes (first tab marked "KEEP", rest pre-checked for closing)
+- **Close** button per tab or **Close All Duplicates** for bulk removal with undo support
+- Badge resets to zero when all duplicates are resolved
 
 ---
 
@@ -222,7 +240,14 @@ Click the **Restore** button on a stash card.
 
 ## Sessions View
 
-Sessions capture a complete snapshot of your browser state.
+Sessions capture a complete snapshot of your browser state. The view is split into two sub-tabs:
+
+| Tab | Contents |
+|-----|----------|
+| **Saved** | Sessions you created manually via the Save button |
+| **Auto** | Sessions created automatically by the auto-save scheduler |
+
+The **Auto** tab displays a count badge and strips the `[Auto]` prefix from session names since the tab itself indicates the type.
 
 ### What's Saved in a Session
 
@@ -233,33 +258,28 @@ Sessions capture a complete snapshot of your browser state.
 
 ### Saving a Session
 
-Click **Save Session** in the Sessions view. A dialog lets you name the session (default: timestamp). The snapshot is saved to `chrome.storage.local`.
+Type a name in the input at the top of the Sessions view and click **Save** (or press Enter). The snapshot is saved to `chrome.storage.local` and appears in the **Saved** tab.
 
 ### Auto-Save
 
 TabKebab automatically saves a session:
-- **On browser start** (labeled "Auto-save (startup)")
+- **On browser start**
 - **At regular intervals** (default: every 24 hours)
 - Auto-saves are subject to a retention policy (default: keep 7 days of auto-saves)
-- A maximum of 2 auto-saves are kept at any time
+- At least 2 auto-saves are always kept regardless of retention
+
+Auto-saved sessions appear in the **Auto** tab with just the date/time as their name.
 
 ### Restoring a Session
 
-Click **Restore** on a session card. A dropdown offers three modes:
-
-| Mode | Behavior |
-|------|----------|
-| **Original Windows** | Creates new windows matching the saved layout. Tabs already open (by URL) are skipped. |
-| **Current Window** | Opens all tabs in the current window. Duplicates skipped. |
-| **Single Window** | Opens all tabs in one new window regardless of original window layout. |
+Click **Restore** on a session card to open in new windows matching the original layout. Click **Restore here** to open all tabs in the current window. In both modes, tabs already open (by URL) are skipped.
 
 **Pipeline restore** (same as stash) activates for sessions with 20+ tabs, with two-phase progress tracking.
 
 ### Session Actions
 
-- **Rename** — edit the session name
-- **Export** — download as JSON
-- **Delete** — remove permanently
+- **Export** — download as JSON (arrow icon)
+- **Delete** — remove permanently with 8-second undo via toast
 
 ---
 
@@ -557,6 +577,31 @@ Use **Import** to load a previously exported JSON file. This merges with existin
 
 ## Keyboard & Tips
 
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| **1** | Switch to Windows view |
+| **2** | Switch to Tabs view |
+| **3** | Switch to Stash view |
+| **4** | Switch to Sessions view |
+| **/** | Focus the AI command bar |
+| **?** | Toggle the help overlay |
+| **Esc** | Close help/settings overlay, or blur the current input |
+
+Shortcuts are disabled when typing in an input, textarea, or select. Press **Esc** in any input to blur it first.
+
+### Help Overlay
+
+Press **?** or click the help button (circle with question mark) in the header to open a comprehensive help overlay. It covers:
+- View descriptions
+- Key features
+- All keyboard shortcuts
+- Usage tips
+- Links to the full guide and issue tracker
+
+Click the backdrop or press **Esc** to dismiss.
+
 ### Tips for Power Users
 
 - **Pin the side panel** for persistent access while browsing
@@ -565,11 +610,12 @@ Use **Import** to load a previously exported JSON file. This merges with existin
 - **Enable auto-bookmark on stash** so you never lose track of stashed tabs
 - **Use compressed export + HTML bookmarks** for efficient Drive storage with browsable access
 - **Connect Google Drive** across multiple computers with the same Google account for cross-device sync
+- **Search tabs in custom groups** — use the smart input in each group card to quickly add tabs by name or URL
 
 ### Performance Tips
 
 - For 100+ tabs, prefer **domain grouping** over AI grouping (faster, no API call)
-- **Kebab tabs** regularly to keep memory usage low
+- **Kebab tabs** regularly to keep memory usage low — the stats bar shows your Active/Kebab percentage
 - **Stash old tabs** instead of keeping them open — they're safely stored in IndexedDB
 - **Pipeline restore** handles large sessions gracefully — let it complete without interrupting
 

@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="GUIDE.md">User Guide</a> &middot;
+  <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="PRIVACY.md">Privacy Policy</a> &middot;
   <a href="TERMS.md">Terms of Service</a> &middot;
   <a href="https://github.com/michelabboud/tabkebab-chrome-ext/issues">Report Issue</a>
@@ -26,19 +27,21 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Drag-and-drop** tab reordering within and across groups
 - **Close, pin, discard, or move** individual tabs from the side panel
 - **Tab count badges** per window with color-coded thresholds (green / yellow / red)
-- **Duplicate detection** and bulk close across all windows with confirmation
+- **Duplicate detection** with badge counter, periodic background scanning (every 60s), and bulk close with undo
+- **Global stats bar** — always-visible bar showing Windows, Tabs, and Active/Kebab percentage
 
 ### Tab Grouping
 
 - **Domain grouping** — one-click to group all tabs by domain into Chrome native tab groups
 - **AI smart grouping** — understands context (research, shopping, work, entertainment) and creates meaningful groups
 - **4-phase pipeline**: Snapshot → Solver → Planner → Executor with live progress per phase
-- **Custom groups** — create, rename, recolor, and manage your own groups
+- **Custom groups** — create, rename, recolor, and manage your own groups with three ways to add tabs: drag-and-drop, text search filter, or URL paste
 - **Collapsible section headers** in the Groups sub-view
 
 ### Sessions
 
 - **Save** full snapshots of every window, tab, and tab group layout
+- **Saved / Auto tabs** — sessions view split into **Saved** (user-created) and **Auto** (automatic) sub-tabs for clean separation
 - **Restore** with automatic deduplication — already-open tabs are skipped
 - **Restore modes**: original windows, current window, or single new window
 - **Pipeline restore** for large sessions (20+ tabs): batched creation → load → discard with two-phase progress tracking
@@ -79,9 +82,17 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 
 ### Natural Language Commands
 
+- **Multi-line textarea** command bar with provider label showing the active AI model
 - Type commands like *"close YouTube tabs"*, *"find my GitHub tabs"*, *"group by project"*
 - AI interprets intent and executes tab operations
 - Works with any configured AI provider
+
+### Keyboard Shortcuts
+
+- **1–4** — switch between Windows, Tabs, Stash, and Sessions views
+- **/** — focus the AI command bar
+- **?** — toggle the help overlay
+- **Esc** — close overlays, unfocus inputs, or dismiss settings
 
 ### Google Drive Sync
 

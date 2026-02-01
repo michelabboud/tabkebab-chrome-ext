@@ -10,7 +10,8 @@ export class CommandBar {
     this.pending = false;
 
     this.inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !this.pending) {
+      if (e.key === 'Enter' && !e.shiftKey && !this.pending) {
+        e.preventDefault();
         this.execute();
       }
     });
@@ -115,12 +116,12 @@ export class CommandBar {
 
       const favicon = document.createElement('img');
       favicon.className = 'find-result-favicon';
-      favicon.src = tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>';
+      favicon.src = tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="2" fill="%23ccc"/></svg>';
       favicon.width = 16;
       favicon.height = 16;
       favicon.addEventListener('error', () => {
-        favicon.style.visibility = 'hidden';
-      });
+        favicon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="2" fill="%23ccc"/></svg>';
+      }, { once: true });
 
       const title = document.createElement('span');
       title.className = 'find-result-title';

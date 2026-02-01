@@ -247,11 +247,6 @@ export async function getWindowStats() {
     const windowObj = windowObjMap.get(windowId);
     const tabCount = tabs.length;
 
-    let status;
-    if (tabCount > 100) status = 'red';
-    else if (tabCount < CONSOLIDATION_THRESHOLD) status = 'yellow';
-    else status = 'green';
-
     // Bucket tabs by native group
     const groupsMap = new Map();
     const ungroupedTabs = [];
@@ -281,7 +276,6 @@ export async function getWindowStats() {
       windowNumber: 0,
       focused: windowObj?.focused ?? false,
       tabCount,
-      status,
       groups: [...groupsMap.values()],
       ungroupedCount: ungroupedTabs.length,
       ungroupedTabs,
@@ -297,9 +291,20 @@ export async function getWindowStats() {
 
   const totalTabs = windowList.reduce((sum, w) => sum + w.tabCount, 0);
 
+  // Count discarded (kebab'd) tabs across all windows
+  let discardedTabs = 0;
+  for (const tabs of snapshot.tabsByWindow.values()) {
+    for (const tab of tabs) {
+      if (tab.discarded || tab.status === 'discarded') discardedTabs++;
+    }
+  }
+  const activeTabs = totalTabs - discardedTabs;
+
   return {
     totalWindows: windowList.length,
     totalTabs,
+    activeTabs,
+    discardedTabs,
     avgTabsPerWindow: windowList.length > 0
       ? Math.round((totalTabs / windowList.length) * 10) / 10
       : 0,
@@ -413,8 +418,11 @@ export async function removeTabFromManualGroup(groupId, tabUrl) {
 export async function removeTabFromAllGroups(tabUrl) {
   const groups = await getManualGroups();
   for (const group of Object.values(groups)) {
+    const before = group.tabUrls.length;
     group.tabUrls = group.tabUrls.filter(u => u !== tabUrl);
-    group.modifiedAt = Date.now();
+    if (group.tabUrls.length !== before) {
+      group.modifiedAt = Date.now();
+    }
   }
   return Storage.set('manualGroups', groups);
 }

@@ -47,6 +47,7 @@ export class GroupEditor {
       this.getManualGroups(),
       this.send({ action: 'getTabs' }),
     ]);
+    this.allTabs = tabs || [];
     this.renderChromeGroups(chromeGroups || []);
     this.renderGroups(manualGroups, tabs);
     this.renderUngrouped(manualGroups, tabs);
@@ -132,7 +133,7 @@ export class GroupEditor {
 
       const name = document.createElement('span');
       name.className = 'group-name';
-      name.textContent = group.title;
+      name.textContent = group.title || 'Untitled Group';
 
       const count = document.createElement('span');
       count.className = 'group-count';
@@ -320,7 +321,7 @@ export class GroupEditor {
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'group-name';
-      nameSpan.textContent = this.escapeHtml(group.name);
+      nameSpan.textContent = group.name;
 
       const countSpan = document.createElement('span');
       countSpan.className = 'group-count';
@@ -336,20 +337,26 @@ export class GroupEditor {
       body.className = 'manual-group-body';
       body.dataset.dropzone = groupId;
 
-      // Toggle collapse/expand on header click
-      header.addEventListener('click', () => {
-        body.hidden = !body.hidden;
-        chevron.textContent = body.hidden ? '\u25b6' : '\u25bc';
-      });
-
-      const matchingTabs = tabs.filter(t => group.tabUrls.includes(t.url));
+      const urlSet = new Set(group.tabUrls);
+      const matchingTabs = tabs.filter(t => urlSet.has(t.url));
       if (matchingTabs.length === 0) {
-        body.innerHTML = '<p class="empty-state" style="padding:8px">Drag tabs here</p>';
+        body.innerHTML = '<p class="empty-state" style="padding:8px">Drag tabs here or search below</p>';
       } else {
         for (const tab of matchingTabs) {
           body.appendChild(this.createDraggableTab(tab));
         }
       }
+
+      // Add-tab area (search / paste URL)
+      const addTabArea = this.createAddTabArea(groupId, group);
+
+      // Toggle collapse/expand on header click
+      header.addEventListener('click', () => {
+        const isHidden = !body.hidden;
+        body.hidden = isHidden;
+        addTabArea.hidden = isHidden;
+        chevron.textContent = isHidden ? '\u25b6' : '\u25bc';
+      });
 
       // Actions
       const actions = document.createElement('div');
@@ -380,6 +387,7 @@ export class GroupEditor {
 
       groupEl.appendChild(header);
       groupEl.appendChild(body);
+      groupEl.appendChild(addTabArea);
       groupEl.appendChild(actions);
       this.groupsContainer.appendChild(groupEl);
     }
@@ -432,6 +440,157 @@ export class GroupEditor {
 
     return item;
   }
+
+  // ── Add Tab Area (search open tabs / paste URL) ──
+
+  createAddTabArea(groupId, group) {
+    const area = document.createElement('div');
+    area.className = 'group-add-tab';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'input group-add-tab-input';
+    input.placeholder = 'Search open tabs or paste a URL\u2026';
+
+    const results = document.createElement('div');
+    results.className = 'group-add-tab-results';
+
+    let debounceTimer;
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        this.renderAddTabResults(input.value.trim(), groupId, group, results, input);
+      }, 150);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        input.value = '';
+        results.innerHTML = '';
+        input.blur();
+        e.preventDefault();
+      }
+    });
+
+    area.appendChild(input);
+    area.appendChild(results);
+    return area;
+  }
+
+  renderAddTabResults(query, groupId, group, resultsEl, inputEl) {
+    resultsEl.innerHTML = '';
+    if (!query) return;
+
+    const isUrl = this.isLikelyUrl(query);
+    const existingUrls = new Set(group.tabUrls);
+
+    // If it looks like a URL, offer to add it directly
+    if (isUrl) {
+      let url = query;
+      if (!/^https?:\/\//i.test(url) && !/^chrome(-extension)?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+      if (!existingUrls.has(url)) {
+        resultsEl.appendChild(this.createUrlResultItem(url, groupId, inputEl, resultsEl));
+      }
+    }
+
+    // Filter open tabs by title or URL
+    const q = query.toLowerCase();
+    const matched = (this.allTabs || [])
+      .filter(t => !existingUrls.has(t.url))
+      .filter(t =>
+        (t.title && t.title.toLowerCase().includes(q)) ||
+        (t.url && t.url.toLowerCase().includes(q))
+      )
+      .slice(0, 8);
+
+    for (const tab of matched) {
+      resultsEl.appendChild(this.createTabResultItem(tab, groupId));
+    }
+
+    if (resultsEl.children.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'group-add-tab-empty';
+      empty.textContent = isUrl ? 'URL already in group' : 'No matching tabs found';
+      resultsEl.appendChild(empty);
+    }
+  }
+
+  createUrlResultItem(url, groupId, inputEl, resultsEl) {
+    const item = document.createElement('div');
+    item.className = 'group-add-tab-result url-result';
+
+    const badge = document.createElement('span');
+    badge.className = 'group-add-tab-url-badge';
+    badge.textContent = 'URL';
+
+    const label = document.createElement('span');
+    label.className = 'group-add-tab-result-label';
+    label.textContent = url;
+    label.title = url;
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'group-add-tab-btn';
+    addBtn.textContent = '+';
+    addBtn.title = 'Add this URL to group';
+    addBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await this.moveTabToGroup(url, groupId);
+      showToast('URL added to group', 'success');
+      this.refresh();
+    });
+
+    item.appendChild(badge);
+    item.appendChild(label);
+    item.appendChild(addBtn);
+    return item;
+  }
+
+  createTabResultItem(tab, groupId) {
+    const item = document.createElement('div');
+    item.className = 'group-add-tab-result';
+
+    const favicon = document.createElement('img');
+    favicon.className = 'favicon';
+    favicon.src = tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="2" fill="%23ccc"/></svg>';
+    favicon.width = 16;
+    favicon.height = 16;
+    favicon.alt = '';
+    favicon.addEventListener('error', () => {
+      favicon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="2" fill="%23ccc"/></svg>';
+    }, { once: true });
+
+    const label = document.createElement('span');
+    label.className = 'group-add-tab-result-label';
+    label.textContent = tab.title || tab.url || 'Untitled';
+    label.title = tab.url || '';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'group-add-tab-btn';
+    addBtn.textContent = '+';
+    addBtn.title = 'Add to group';
+    addBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await this.moveTabToGroup(tab.url, groupId);
+      showToast('Tab added to group', 'success');
+      this.refresh();
+    });
+
+    item.appendChild(favicon);
+    item.appendChild(label);
+    item.appendChild(addBtn);
+    return item;
+  }
+
+  isLikelyUrl(text) {
+    if (/^https?:\/\//i.test(text)) return true;
+    if (/^chrome(-extension)?:\/\//i.test(text)) return true;
+    if (/^[^\s]+\.[a-z]{2,}(\/\S*)?$/i.test(text)) return true;
+    return false;
+  }
+
+  // ── Drag and Drop ──
 
   setupDragAndDrop() {
     this.root.addEventListener('dragstart', (e) => {
@@ -488,8 +647,11 @@ export class GroupEditor {
 
     // Remove from all groups first
     for (const group of Object.values(groups)) {
+      const before = group.tabUrls.length;
       group.tabUrls = group.tabUrls.filter(u => u !== tabUrl);
-      group.modifiedAt = Date.now();
+      if (group.tabUrls.length !== before) {
+        group.modifiedAt = Date.now();
+      }
     }
 
     // Add to target group (unless it's "ungrouped")
@@ -546,7 +708,8 @@ export class GroupEditor {
     }
 
     const allTabs = await this.send({ action: 'getTabs' });
-    const tabIds = allTabs.filter(t => group.tabUrls.includes(t.url)).map(t => t.id);
+    const urls = new Set(group.tabUrls);
+    const tabIds = allTabs.filter(t => urls.has(t.url)).map(t => t.id);
 
     if (tabIds.length === 0) {
       showToast('No matching open tabs found', 'error');

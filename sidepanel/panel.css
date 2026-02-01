@@ -87,9 +87,9 @@
   --danger-soft: rgba(248, 113, 113, 0.1);
   --success: #34d399;
   --success-soft: rgba(52, 211, 153, 0.1);
-  --kebab: #fbbf24;
-  --kebab-hover: #f59e0b;
-  --kebab-soft: rgba(251, 191, 36, 0.15);
+  --kebab: #f97316;
+  --kebab-hover: #fb923c;
+  --kebab-soft: rgba(249, 115, 22, 0.15);
   --border: #2a2a2e;
   --border-strong: #3f3f46;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -934,6 +934,107 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* ── Custom Group: Add Tab Area ── */
+
+.group-add-tab {
+  padding: 8px 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.group-add-tab-input {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.group-add-tab-results {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.group-add-tab-results:empty {
+  display: none;
+}
+
+.group-add-tab-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition);
+}
+
+.group-add-tab-result:hover {
+  background: var(--bg-hover);
+}
+
+.group-add-tab-result .favicon {
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+.group-add-tab-result-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.group-add-tab-result.url-result .group-add-tab-result-label {
+  color: var(--accent);
+  font-size: 11.5px;
+}
+
+.group-add-tab-url-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-pill);
+  padding: 2px 6px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.group-add-tab-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition);
+  line-height: 1;
+  padding: 0;
+  font-family: var(--font);
+}
+
+.group-add-tab-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.group-add-tab-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 8px;
+  text-align: center;
+}
+
 /* ── Drag and Drop ── */
 .tab-item[draggable="true"] {
   cursor: grab;
@@ -1068,6 +1169,15 @@ body {
 .command-bar-row {
   display: flex;
   gap: 6px;
+  align-items: flex-start;
+}
+
+.command-bar-row textarea.input {
+  flex: 1;
+  resize: none;
+  height: 52px;
+  line-height: 1.4;
+  font-family: var(--font);
 }
 
 .command-bar-row .input {
@@ -1113,7 +1223,7 @@ body {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: var(--bg-card);
 }
 
 .find-result-item {
@@ -1361,40 +1471,151 @@ body.ai-available .ai-feature {
   background: var(--border-strong);
 }
 
-/* ── Windows View ── */
+/* ── Global Stats Bar (fixed, between nav and views) ── */
 
-.window-stats-bar {
+.global-stats-bar {
   display: flex;
   gap: 8px;
-  margin-bottom: 14px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+  flex-shrink: 0;
 }
 
-.window-stats-bar .stat-card {
+.global-stats-bar .stat-card {
   flex: 1;
   text-align: center;
-  padding: 10px 8px;
+  padding: 8px 6px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.window-stats-bar .stat-value {
+.global-stats-bar .stat-value {
   display: block;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
-.window-stats-bar .stat-label {
+.global-stats-bar .stat-label {
   display: block;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-top: 2px;
 }
+
+/* ── Stats Hint ── */
+
+.stats-hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 3px 14px 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Header Version + Links ── */
+
+.header-version {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  font-size: 10px;
+  margin-right: auto;
+}
+
+.header-links a {
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.header-links a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.header-links .about-sep {
+  color: var(--text-tertiary);
+  margin: 0 4px;
+  font-size: 10px;
+}
+
+/* ── Dupe Badge ── */
+
+.dupe-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--danger);
+  border-radius: var(--radius-pill);
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.dupe-badge[hidden] {
+  display: none;
+}
+
+/* ── Session Auto Count Badge ── */
+
+.session-auto-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-pill);
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+/* ── AI Provider Label ── */
+
+.ai-provider-label {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  text-align: right;
+  padding: 2px 0 0;
+}
+
+.ai-provider-label:empty {
+  display: none;
+}
+
+/* ── Windows View ── */
 
 /* Window cards */
 .window-card {

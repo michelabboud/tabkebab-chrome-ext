@@ -66,7 +66,7 @@ navButtons.forEach(btn => {
     // Refresh the activated controller
     if (target === 'tabs') {
       // Refresh the active sub-tab's controller
-      const activeSub = document.querySelector('.sub-nav [role="tab"].active');
+      const activeSub = document.querySelector('#view-tabs .sub-nav [role="tab"].active');
       const subKey = subControllers[activeSub?.dataset.subtab || 'domains'];
       controllers[subKey]?.refresh?.();
     } else {
@@ -90,8 +90,8 @@ settingsBtn.addEventListener('click', () => {
 });
 
 // --- Sub-navigation (Domains / Groups / Duplicates inside Tabs view) ---
-const subNavButtons = document.querySelectorAll('.sub-nav [role="tab"]');
-const subViews = document.querySelectorAll('.sub-view');
+const subNavButtons = document.querySelectorAll('#view-tabs .sub-nav [role="tab"]');
+const subViews = document.querySelectorAll('#view-tabs .sub-view');
 
 subNavButtons.forEach(btn => {
   btn.addEventListener('click', () => {
@@ -114,10 +114,59 @@ subNavButtons.forEach(btn => {
   });
 });
 
+// --- Global stats bar ---
+async function refreshGlobalStats() {
+  try {
+    const data = await chrome.runtime.sendMessage({ action: 'getWindowStats' });
+    if (!data) return;
+    document.getElementById('stat-windows').textContent = data.totalWindows ?? 0;
+    document.getElementById('stat-tabs').textContent = data.totalTabs ?? 0;
+    const pct = data.totalTabs > 0
+      ? Math.round((data.activeTabs / data.totalTabs) * 100)
+      : 100;
+    document.getElementById('stat-kebab').textContent = pct + '%';
+  } catch {
+    // Stats not available yet
+  }
+}
+
+// --- Duplicate badge ---
+function updateDupeBadge(count) {
+  const badge = document.getElementById('dupe-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+document.addEventListener('dupesUpdated', (e) => {
+  updateDupeBadge(e.detail.count);
+});
+
+// --- Periodic duplicate check (every 60s) ---
+async function checkDuplicates() {
+  try {
+    const dupes = await chrome.runtime.sendMessage({ action: 'findDuplicates' });
+    const count = dupes
+      ? dupes.reduce((sum, g) => sum + g.tabs.length - 1, 0)
+      : 0;
+    updateDupeBadge(count);
+  } catch {
+    // Ignore — service worker may not be ready
+  }
+}
+
+checkDuplicates();
+setInterval(checkDuplicates, 60000);
+
 // --- Listen for tab changes from service worker ---
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'tabsChanged') {
     controllers.tabs.refresh();
+    refreshGlobalStats();
   }
 });
 
@@ -170,6 +219,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // --- Initial load ---
 controllers.tabs.refresh();
+refreshGlobalStats();
 
 // --- Toggle AI-dependent UI elements ---
 async function updateAIVisibility() {
@@ -191,6 +241,26 @@ async function updateAIVisibility() {
     // Show/hide AI Suggest keep-awake button
     const suggestKeepAwakeBtn = document.getElementById('btn-suggest-keep-awake');
     if (suggestKeepAwakeBtn) suggestKeepAwakeBtn.hidden = !available;
+
+    // Update AI provider label
+    const providerLabel = document.getElementById('ai-provider-label');
+    if (providerLabel && available) {
+      try {
+        const aiSettings = await chrome.runtime.sendMessage({ action: 'getAISettings' });
+        const providerNames = {
+          openai: 'OpenAI',
+          claude: 'Claude',
+          gemini: 'Gemini',
+          'chrome-ai': 'Chrome AI',
+          custom: 'Custom',
+        };
+        providerLabel.textContent = providerNames[aiSettings?.providerId] || '';
+      } catch {
+        providerLabel.textContent = '';
+      }
+    } else if (providerLabel) {
+      providerLabel.textContent = '';
+    }
   } catch {
     // AI not available — keep hidden
     document.body.classList.remove('ai-available');

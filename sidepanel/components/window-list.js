@@ -33,11 +33,6 @@ export class WindowList {
     this.maxTabs = 50;
     this.recommendedTabs = 20;
 
-    // Stats elements
-    this.statWindows = rootEl.querySelector('#stat-windows');
-    this.statTabs = rootEl.querySelector('#stat-tabs');
-    this.statAvg = rootEl.querySelector('#stat-avg');
-
     // Consolidate button + progress
     this.consolidateBtn = rootEl.querySelector('#btn-consolidate-windows');
     this.collapseBtn = rootEl.querySelector('#btn-collapse-all');
@@ -115,19 +110,10 @@ export class WindowList {
       } catch (e) { console.warn('[TabKebab] settings fetch for tab limits failed:', e); }
 
       const data = await this.send({ action: 'getWindowStats' });
-      this.renderStats(data);
       this.renderWindows(data.windows);
     } catch (err) {
       showToast('Failed to load windows', 'error');
     }
-  }
-
-  // ── Stats bar ──
-
-  renderStats(data) {
-    this.statWindows.textContent = data.totalWindows;
-    this.statTabs.textContent = data.totalTabs;
-    this.statAvg.textContent = data.avgTabsPerWindow;
   }
 
   // ── Collapse / Expand ──
@@ -161,6 +147,7 @@ export class WindowList {
   }
 
   collapseAll() {
+    if (!this.lastWindows || this.lastWindows.length === 0) return;
     for (const key of this.getAllKeys(this.lastWindows)) {
       this.collapsed.add(key);
     }
@@ -168,6 +155,7 @@ export class WindowList {
   }
 
   expandAll() {
+    if (!this.lastWindows || this.lastWindows.length === 0) return;
     this.collapsed.clear();
     this.renderWindows(this.lastWindows);
   }
@@ -325,7 +313,7 @@ export class WindowList {
 
         const chipLabel = document.createElement('span');
         chipLabel.className = 'group-chip-label';
-        chipLabel.textContent = group.title;
+        chipLabel.textContent = group.title || 'Untitled Group';
 
         const chipCount = document.createElement('span');
         chipCount.className = 'group-chip-count';
@@ -407,7 +395,7 @@ export class WindowList {
 
     const label = document.createElement('span');
     label.className = 'window-group-label';
-    label.textContent = group.title;
+    label.textContent = group.title || 'Untitled Group';
 
     const count = document.createElement('span');
     count.className = 'count';

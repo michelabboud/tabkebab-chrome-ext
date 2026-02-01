@@ -21,6 +21,12 @@ export class DuplicateFinder {
     try {
       this.duplicates = await this.send({ action: 'findDuplicates' });
       this.render();
+
+      // Dispatch badge update event
+      const count = this.duplicates
+        ? this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0)
+        : 0;
+      document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count } }));
     } catch {
       showToast('Failed to scan for duplicates', 'error');
     }
@@ -82,7 +88,7 @@ export class DuplicateFinder {
         closeBtn.addEventListener('click', async () => {
           await this.send({ action: 'closeTabs', tabIds: [tab.id] });
           showToast('Tab closed', 'success');
-          this.scan();
+          await this.scan();
         });
         tabEl.appendChild(closeBtn);
 
@@ -115,7 +121,7 @@ export class DuplicateFinder {
 
     try {
       await this.send({ action: 'closeTabs', tabIds });
-      this.scan();
+      await this.scan();
       showToast(`Closed ${tabIds.length} duplicate tab(s)`, 'success', 8000, {
         label: 'Undo',
         callback: async () => {
