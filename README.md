@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://tabkebab.com">Website</a> &middot;
   <a href="GUIDE.md">User Guide</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
   <a href="PRIVACY.md">Privacy Policy</a> &middot;
