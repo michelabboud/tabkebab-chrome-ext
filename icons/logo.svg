@@ -1,10 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120">
-  <!-- TabKebab Logo: Transparent icon with colorful kebab + bold text -->
+  <style>
+    .skewer { fill: #404040; }
+    .tab-text { fill: #18181b; }
+    .tagline { fill: #a1a1aa; }
+    @media (prefers-color-scheme: dark) {
+      .skewer { fill: #a1a1aa; }
+      .tab-text { fill: #f3f4f6; }
+      .tagline { fill: #6b7280; }
+    }
+  </style>
 
-  <!-- Icon — no background -->
-  <rect x="40" y="10" width="8" height="82" rx="4" fill="#404040" />
-  <polygon points="40,88 48,88 44,100" fill="#404040" />
-  <circle cx="44" cy="10" r="6" fill="#404040" />
+  <!-- Icon -->
+  <rect x="40" y="10" width="8" height="82" rx="4" class="skewer" />
+  <polygon points="40,88 48,88 44,100" class="skewer" />
+  <circle cx="44" cy="10" r="6" class="skewer" />
 
   <g transform="rotate(-3, 44, 24)">
     <rect x="18" y="16" width="52" height="16" rx="6" fill="#ef4444" />
@@ -20,11 +29,11 @@
   </g>
 
   <!-- Text -->
-  <text x="95" y="58" font-family="Segoe UI, -apple-system, sans-serif" font-size="44" font-weight="900" fill="#18181b" letter-spacing="-1.5">Tab</text>
+  <text x="95" y="58" font-family="Segoe UI, -apple-system, sans-serif" font-size="44" font-weight="900" class="tab-text" letter-spacing="-1.5">Tab</text>
   <text x="192" y="58" font-family="Segoe UI, -apple-system, sans-serif" font-size="44" font-weight="900" letter-spacing="-1.5">
     <tspan fill="#ef4444">K</tspan><tspan fill="#f59e0b">e</tspan><tspan fill="#14b8a6">b</tspan><tspan fill="#14b8a6">a</tspan><tspan fill="#8b5cf6">b</tspan>
   </text>
 
   <!-- Tagline -->
-  <text x="96" y="82" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="500" fill="#a1a1aa" letter-spacing="0.5">Stack and organize your tabs</text>
+  <text x="96" y="82" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="500" class="tagline" letter-spacing="0.5">Stack and organize your tabs</text>
 </svg>
