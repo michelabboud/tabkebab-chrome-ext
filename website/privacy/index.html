@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — TabKebab</title>
+  <meta name="description" content="TabKebab Privacy Policy — zero data collection, no telemetry, no analytics, no tracking.">
+  <link rel="icon" type="image/png" href="../img/favicon.png">
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .policy { max-width: 780px; margin: 0 auto; padding: 120px 24px 80px; }
+    .policy h1 { font-size: 32px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.02em; }
+    .policy .updated { font-size: 14px; color: var(--text-tertiary); margin-bottom: 32px; }
+    .policy h2 { font-size: 22px; font-weight: 700; margin: 32px 0 12px; letter-spacing: -0.01em; }
+    .policy h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; }
+    .policy p { font-size: 15px; line-height: 1.7; color: var(--text-secondary); margin-bottom: 14px; }
+    .policy ul, .policy ol { margin: 0 0 14px 24px; font-size: 15px; color: var(--text-secondary); line-height: 1.7; }
+    .policy li { margin-bottom: 6px; }
+    .policy strong { color: var(--text-primary); font-weight: 600; }
+    .policy code { background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+    .policy table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    .policy th, .policy td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .policy th { font-weight: 600; color: var(--text-primary); background: var(--bg-secondary); }
+    .policy td { color: var(--text-secondary); }
+    .policy hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+    .policy .disclaimer { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="site-nav scrolled">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="../img/icon.svg" alt="TabKebab icon" width="28" height="28">
+      <span class="nav-brand-text">
+        <span class="t">Tab</span><span class="k">K</span><span class="e">e</span><span class="b1">b</span><span class="a">a</span><span class="b2">b</span>
+      </span>
+    </a>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/#features">Features</a>
+      <a href="/#guide">Guide</a>
+      <a href="/#contact">Contact</a>
+    </div>
+    <div class="nav-actions">
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+        <span class="theme-icon">&#9790;</span>
+      </button>
+    </div>
+    <button class="hamburger" id="hamburger" aria-label="Open menu">&#9776;</button>
+  </div>
+</nav>
+
+<!-- Mobile Drawer -->
+<div class="drawer-overlay" id="drawer-overlay"></div>
+<div class="mobile-drawer" id="mobile-drawer">
+  <button class="drawer-close" id="drawer-close" aria-label="Close menu">&times;</button>
+  <a href="/" class="drawer-link">Home</a>
+  <a href="/#features" class="drawer-link">Features</a>
+  <a href="/#guide" class="drawer-link">Guide</a>
+  <a href="/#contact" class="drawer-link">Contact</a>
+  <div class="drawer-actions">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+      <span class="theme-icon">&#9790;</span>
+    </button>
+  </div>
+</div>
+
+<article class="policy">
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: January 31, 2026</p>
+
+  <h2>The short version</h2>
+  <p>TabKebab collects <strong>zero</strong> data. No telemetry, no analytics, no tracking, no cookies, no fingerprinting, no crash reports — nothing. We have no servers. We have no database. Everything stays on your machine unless you explicitly choose otherwise.</p>
+
+  <hr>
+
+  <h2>Data we collect</h2>
+  <p>None.</p>
+
+  <hr>
+
+  <h2>Data stored locally on your device</h2>
+  <p>All extension data lives inside your browser profile and never leaves it unless you take an explicit action (enable AI features, connect Google Drive, or export a file).</p>
+
+  <h3>Chrome local storage (<code>chrome.storage.local</code>)</h3>
+  <table>
+    <thead><tr><th>Data</th><th>What it contains</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sessions</strong></td><td>Snapshots of your open windows, tabs (URL, title, favicon URL, pinned state), and tab group metadata (name, color)</td></tr>
+      <tr><td><strong>Manual groups</strong></td><td>Custom tab groups you create (group name, color, tab URLs)</td></tr>
+      <tr><td><strong>Keep-awake domains</strong></td><td>The list of domains you protect from tab sleep (e.g. <code>gmail.com</code>)</td></tr>
+      <tr><td><strong>AI settings</strong></td><td>Your chosen provider, model, and encrypted API key (if AI features are enabled)</td></tr>
+      <tr><td><strong>AI response cache</strong></td><td>A local LRU cache (max 200 entries, 24-hour expiry) of AI responses to avoid redundant API calls</td></tr>
+      <tr><td><strong>Drive sync state</strong></td><td>Whether Google Drive sync is connected and last sync timestamp</td></tr>
+      <tr><td><strong>Install ID</strong></td><td>A random UUID generated once per browser profile, used as a fallback encryption key if you don't set a passphrase</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Chrome session storage (<code>chrome.storage.session</code>)</h3>
+  <p>Decrypted AI API keys are held in session storage while the extension is active. This storage is automatically wiped every time Chrome's service worker restarts (browser restart, idle timeout, etc.). Keys are never written to disk in plaintext.</p>
+
+  <h3>IndexedDB (<code>TabKebabStash</code>)</h3>
+  <p>Stashed tabs are stored in an IndexedDB database on your device. Each stash contains the same kind of data as a session snapshot: tab URLs, titles, favicon URLs, pinned state, and group metadata.</p>
+
+  <h3>API key encryption</h3>
+  <p>If you use AI features, your API key is encrypted with AES-GCM (256-bit) using PBKDF2 key derivation (100,000 iterations, SHA-256). You can optionally set a passphrase for encryption; otherwise the per-profile install ID is used. The plaintext key is never persisted to disk.</p>
+
+  <hr>
+
+  <h2>Data that leaves your device</h2>
+
+  <h3>AI providers (opt-in only)</h3>
+  <p>If — and only if — you enable AI features and configure an API key, the extension sends requests to your chosen provider:</p>
+  <ul>
+    <li><strong>OpenAI</strong> (<code>api.openai.com</code>)</li>
+    <li><strong>Anthropic Claude</strong> (<code>api.anthropic.com</code>)</li>
+    <li><strong>Google Gemini</strong> (<code>generativelanguage.googleapis.com</code>)</li>
+    <li><strong>Custom endpoint</strong> (whatever URL you configure, e.g. a local Ollama instance)</li>
+    <li><strong>Chrome Built-in AI</strong> — runs entirely on-device, nothing sent over the network</li>
+  </ul>
+  <p><strong>What is sent:</strong> A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. Your API key is sent in the request header for authentication.</p>
+  <p><strong>What is NOT sent:</strong> Browsing history, page content, cookies, passwords, form data, or any data beyond tab titles and URLs relevant to the specific AI request.</p>
+  <p>Each provider has its own privacy policy that governs how they handle the data you send them. We have no control over that.</p>
+
+  <h3>Google Drive sync (opt-in only)</h3>
+  <p>If you connect Google Drive, the extension creates a <strong>TabKebab</strong> folder in your Drive and stores JSON files there (sync data, exported sessions, exported stashes). The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. The sync uses a <code>drive.file</code> OAuth scope — the extension can only access files it created, never any other file in your Drive.</p>
+  <p>Google's own privacy practices apply to data stored on Google Drive.</p>
+
+  <h3>Chrome itself</h3>
+  <p>Chrome may collect its own telemetry, sync data, or diagnostics depending on your browser settings. That is between you and Google and is entirely outside the scope of this extension.</p>
+
+  <h3>Export files</h3>
+  <p>When you export sessions or stashes, a JSON file is downloaded to your computer. Where that file goes after that is up to you.</p>
+
+  <hr>
+
+  <h2>Data we send to ourselves</h2>
+  <p>Nothing. There is no "home" to phone. No analytics endpoint, no error reporting service, no update pinger, no usage counter. The extension has no backend infrastructure of any kind.</p>
+
+  <hr>
+
+  <h2>Third-party services</h2>
+  <p>TabKebab does not embed any third-party SDKs, tracking pixels, ad networks, or analytics libraries. The only external network calls are the ones described above (AI providers and Google Drive), both of which require your explicit opt-in.</p>
+
+  <hr>
+
+  <h2>Children's privacy</h2>
+  <p>We don't collect data from anyone, including children.</p>
+
+  <hr>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the update will be committed to the <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">GitHub repository</a> with a clear diff.</p>
+
+  <hr>
+
+  <h2>Disclaimer</h2>
+  <p class="disclaimer">THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.</p>
+  <p class="disclaimer">IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR INABILITY TO USE THE SOFTWARE.</p>
+  <p class="disclaimer"><strong>Use TabKebab entirely at your own risk.</strong> The authors take no responsibility for any data loss, tab loss, browser issues, API charges from third-party providers, or any other consequences arising from the use of this extension.</p>
+</article>
+
+<!-- Footer -->
+<footer class="site-footer">
+  <div class="container">
+    <img src="../img/icon.svg" alt="TabKebab" class="footer-logo">
+    <p class="footer-credit">Created by Michel Abboud</p>
+    <div class="footer-links">
+      <a href="/">Home</a>
+      <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">GitHub</a>
+      <a href="/terms">Terms</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../script.js"></script>
+</body>
+</html>

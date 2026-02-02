@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service — TabKebab</title>
+  <meta name="description" content="TabKebab Terms of Service.">
+  <link rel="icon" type="image/png" href="../img/favicon.png">
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    .policy { max-width: 780px; margin: 0 auto; padding: 120px 24px 80px; }
+    .policy h1 { font-size: 32px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.02em; }
+    .policy .updated { font-size: 14px; color: var(--text-tertiary); margin-bottom: 32px; }
+    .policy h2 { font-size: 22px; font-weight: 700; margin: 32px 0 12px; letter-spacing: -0.01em; }
+    .policy p { font-size: 15px; line-height: 1.7; color: var(--text-secondary); margin-bottom: 14px; }
+    .policy ul { margin: 0 0 14px 24px; font-size: 15px; color: var(--text-secondary); line-height: 1.7; }
+    .policy li { margin-bottom: 6px; }
+    .policy strong { color: var(--text-primary); font-weight: 600; }
+    .policy hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+    .policy .disclaimer { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="site-nav scrolled">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="../img/icon.svg" alt="TabKebab icon" width="28" height="28">
+      <span class="nav-brand-text">
+        <span class="t">Tab</span><span class="k">K</span><span class="e">e</span><span class="b1">b</span><span class="a">a</span><span class="b2">b</span>
+      </span>
+    </a>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/#features">Features</a>
+      <a href="/#guide">Guide</a>
+      <a href="/#contact">Contact</a>
+    </div>
+    <div class="nav-actions">
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+        <span class="theme-icon">&#9790;</span>
+      </button>
+    </div>
+    <button class="hamburger" id="hamburger" aria-label="Open menu">&#9776;</button>
+  </div>
+</nav>
+
+<!-- Mobile Drawer -->
+<div class="drawer-overlay" id="drawer-overlay"></div>
+<div class="mobile-drawer" id="mobile-drawer">
+  <button class="drawer-close" id="drawer-close" aria-label="Close menu">&times;</button>
+  <a href="/" class="drawer-link">Home</a>
+  <a href="/#features" class="drawer-link">Features</a>
+  <a href="/#guide" class="drawer-link">Guide</a>
+  <a href="/#contact" class="drawer-link">Contact</a>
+  <div class="drawer-actions">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+      <span class="theme-icon">&#9790;</span>
+    </button>
+  </div>
+</div>
+
+<article class="policy">
+  <h1>Terms of Service</h1>
+  <p class="updated">Last updated: January 31, 2026</p>
+
+  <h2>Acceptance of Terms</h2>
+  <p>By installing or using TabKebab ("the Extension"), you agree to these Terms of Service. If you do not agree, do not install or use the Extension.</p>
+
+  <h2>Description of Service</h2>
+  <p>TabKebab is a free Chrome browser extension for organizing and managing browser tabs. Features include tab grouping, stashing, session management, duplicate detection, and optional AI-powered organization.</p>
+
+  <h2>License</h2>
+  <p>TabKebab is open source software. See the <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a> file for details.</p>
+
+  <h2>Privacy</h2>
+  <p>TabKebab collects no data. No telemetry, analytics, or tracking of any kind. See our full <a href="/privacy">Privacy Policy</a> for details on local storage and optional features that transmit data.</p>
+
+  <h2>Third-Party Services</h2>
+  <p>The Extension optionally integrates with third-party services. Use of these services is subject to their own terms:</p>
+  <ul>
+    <li><strong>OpenAI</strong> — <a href="https://openai.com/terms" target="_blank" rel="noopener">openai.com/terms</a></li>
+    <li><strong>Anthropic</strong> — <a href="https://www.anthropic.com/terms" target="_blank" rel="noopener">anthropic.com/terms</a></li>
+    <li><strong>Google Gemini</strong> — <a href="https://ai.google.dev/terms" target="_blank" rel="noopener">ai.google.dev/terms</a></li>
+    <li><strong>Google Drive</strong> — <a href="https://policies.google.com/terms" target="_blank" rel="noopener">policies.google.com/terms</a></li>
+  </ul>
+  <p>You are responsible for your own API keys, usage, and any costs incurred with these providers.</p>
+
+  <h2>User Responsibilities</h2>
+  <ul>
+    <li>You are responsible for any API keys you enter into the Extension.</li>
+    <li>You are responsible for any data you choose to export or sync to Google Drive.</li>
+    <li>Do not use the Extension for any unlawful purpose.</li>
+  </ul>
+
+  <h2>Disclaimer of Warranties</h2>
+  <p class="disclaimer">THE EXTENSION IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.</p>
+
+  <h2>Limitation of Liability</h2>
+  <p class="disclaimer">IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE EXTENSION OR THE USE OR INABILITY TO USE THE EXTENSION.</p>
+  <p class="disclaimer">This includes but is not limited to: data loss, tab loss, browser issues, API charges from third-party providers, or any other consequences arising from the use of this Extension.</p>
+
+  <h2>Changes to Terms</h2>
+  <p>These terms may be updated at any time. Changes will be committed to the <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">project repository</a> with a clear diff. Continued use of the Extension after changes constitutes acceptance of the updated terms.</p>
+
+  <h2>Contact</h2>
+  <p>For questions or concerns, open an issue at: <a href="https://github.com/michelabboud/tabkebab-chrome-ext/issues" target="_blank" rel="noopener">github.com/michelabboud/tabkebab-chrome-ext/issues</a></p>
+</article>
+
+<!-- Footer -->
+<footer class="site-footer">
+  <div class="container">
+    <img src="../img/icon.svg" alt="TabKebab" class="footer-logo">
+    <p class="footer-credit">Created by Michel Abboud</p>
+    <div class="footer-links">
+      <a href="/">Home</a>
+      <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">GitHub</a>
+      <a href="/privacy">Privacy</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../script.js"></script>
+</body>
+</html>
