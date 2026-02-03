@@ -7,6 +7,12 @@
 </p>
 
 <p align="center">
+  <a href="https://chromewebstore.google.com/detail/tabkebab/cgfnjdcioainbclbbihglaopbhikhdob">
+    <img src="https://img.shields.io/badge/Chrome_Web_Store-Add_to_Chrome-blue?logo=googlechrome&logoColor=white" alt="Add to Chrome">
+  </a>
+</p>
+
+<p align="center">
   <a href="https://tabkebab.com">Website</a> &middot;
   <a href="GUIDE.md">User Guide</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
