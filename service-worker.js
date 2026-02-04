@@ -11,6 +11,7 @@ import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
+import { getCachedFocusState, getFocusState, isBlockedDomain, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles } from './core/focus.js';
 
 // ── Keep Awake Defaults ──
 
@@ -83,6 +84,7 @@ const ALARM_AUTO_STASH = 'autoStash';
 const ALARM_AUTO_SYNC_DRIVE = 'autoSyncDrive';
 const ALARM_RETENTION_CLEANUP = 'retentionCleanup';
 const ALARM_AUTO_BOOKMARK = 'autoBookmark';
+const ALARM_FOCUS_TICK = 'focusTick';
 
 // ── Alarm system ──
 
@@ -736,6 +738,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     case ALARM_AUTO_SYNC_DRIVE: autoSyncDrive(); break;
     case ALARM_RETENTION_CLEANUP: runRetentionCleanup(); break;
     case ALARM_AUTO_BOOKMARK:  createBookmarks(); break;
+    case ALARM_FOCUS_TICK:     handleFocusTick(); break;
   }
 });
 
@@ -743,6 +746,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 (async () => {
   const alarm = await chrome.alarms.get(ALARM_AUTO_SAVE);
   if (!alarm) await reconfigureAlarms();
+
+  // Restore focus alarm + badge if a session was active before SW restart
+  const focusState = await getFocusState();
+  if (focusState?.status === 'active') {
+    const existing = await chrome.alarms.get(ALARM_FOCUS_TICK);
+    if (!existing) await chrome.alarms.create(ALARM_FOCUS_TICK, { periodInMinutes: 1 });
+    await updateBadge(focusState);
+  }
 })();
 
 // Open side panel when extension icon is clicked
@@ -755,11 +766,28 @@ function notifyPanel() {
   });
 }
 
-chrome.tabs.onCreated.addListener(notifyPanel);
+chrome.tabs.onCreated.addListener((tab) => {
+  notifyPanel();
+  // Focus mode: intercept new tabs opened to blocked URLs
+  if (tab.pendingUrl || tab.url) {
+    const url = tab.pendingUrl || tab.url;
+    const state = getCachedFocusState();
+    if (state?.status === 'active' && isBlockedDomain(url, state)) {
+      handleDistraction(tab.id, url, state);
+    }
+  }
+});
 chrome.tabs.onRemoved.addListener(notifyPanel);
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'complete' || changeInfo.url) {
     notifyPanel();
+  }
+  // Focus mode: intercept navigation to blocked domains
+  if (changeInfo.url) {
+    const state = getCachedFocusState();
+    if (state?.status === 'active' && isBlockedDomain(changeInfo.url, state)) {
+      handleDistraction(tabId, changeInfo.url, state);
+    }
   }
 });
 
@@ -1426,6 +1454,32 @@ async function handleMessage(msg) {
       const bookmarks = (await Storage.get('tabkebabBookmarks')) || [];
       return bookmarks;
     }
+
+    // ── Focus Mode ──
+
+    case 'getFocusState':
+      return getFocusState();
+
+    case 'startFocus':
+      return startFocus(msg);
+
+    case 'endFocus':
+      return endFocus();
+
+    case 'pauseFocus':
+      return pauseFocus();
+
+    case 'resumeFocus':
+      return resumeFocus();
+
+    case 'extendFocus':
+      return extendFocus(msg.minutes || 5);
+
+    case 'getFocusHistory':
+      return getFocusHistory();
+
+    case 'getFocusProfiles':
+      return getAllProfiles();
 
     default:
       return { error: `Unknown action: ${msg.action}` };

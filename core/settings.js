@@ -29,6 +29,12 @@ export const SETTINGS_DEFAULTS = {
   compressedExport: false,
   exportHtmlBookmarkToDrive: false,
 
+  // Focus Mode
+  focusDefaultProfile: 'coding',
+  focusDefaultDuration: 25,
+  focusTabAction: 'kebab',          // kebab | stash | group | none
+  focusStrictBlocking: false,       // Phase 2: true = close tab vs goBack
+
   // Google Drive
   autoExportSessionsToDrive: false,
   autoExportStashesToDrive: false,

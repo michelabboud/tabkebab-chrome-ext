@@ -10,6 +10,8 @@ import { AISettings } from './components/ai-settings.js';
 import { CommandBar } from './components/command-bar.js';
 import { StashList } from './components/stash-list.js';
 import { SettingsManager } from './components/settings-manager.js';
+import { GlobalSearch } from './components/global-search.js';
+import { FocusPanel } from './components/focus-panel.js';
 
 // --- Initialize view controllers ---
 
@@ -36,6 +38,10 @@ const controllers = {
 
 // --- AI command bar ---
 const commandBar = new CommandBar(document.getElementById('command-bar'));
+
+// --- Global search ---
+const globalSearch = new GlobalSearch();
+document.getElementById('btn-search').addEventListener('click', () => globalSearch.toggle());
 
 // --- Sub-tab mapping (subtab name → controller key) ---
 const subControllers = { domains: 'tabs', groups: 'groups', duplicates: 'duplicates' };
@@ -88,6 +94,38 @@ settingsBtn.addEventListener('click', () => {
   views.forEach(v => v.classList.toggle('hidden', v.id !== 'view-settings'));
   controllers.settings?.refresh?.();
 });
+
+// --- Focus panel ---
+const focusPanel = new FocusPanel(document.getElementById('view-focus'));
+const focusBtn = document.getElementById('btn-focus');
+
+function showFocusView() {
+  navButtons.forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
+  settingsBtn.classList.remove('active');
+  focusBtn.classList.add('active');
+  views.forEach(v => v.classList.toggle('hidden', v.id !== 'view-focus'));
+  focusPanel.refresh();
+}
+
+focusBtn.addEventListener('click', showFocusView);
+
+// Also deselect focus btn when primary nav or settings is clicked
+navButtons.forEach(btn => {
+  btn.addEventListener('click', () => focusBtn.classList.remove('active'));
+});
+settingsBtn.addEventListener('click', () => focusBtn.classList.remove('active'));
+
+// Update focus button pulse state on load and focus events
+async function updateFocusBtnState() {
+  try {
+    const state = await chrome.runtime.sendMessage({ action: 'getFocusState' });
+    focusBtn.classList.toggle('focus-active', !!(state?.status === 'active' || state?.status === 'paused'));
+  } catch {}
+}
+updateFocusBtnState();
 
 // --- Sub-navigation (Domains / Groups / Duplicates inside Tabs view) ---
 const subNavButtons = document.querySelectorAll('#view-tabs .sub-nav [role="tab"]');
@@ -167,6 +205,9 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'tabsChanged') {
     controllers.tabs.refresh();
     refreshGlobalStats();
+  }
+  if (message.type === 'focusEnded' || message.type === 'focusDistraction') {
+    updateFocusBtnState();
   }
 });
 
@@ -274,6 +315,13 @@ document.getElementById('btn-help').addEventListener('click', () => toggleHelp()
 
 // --- Keyboard shortcuts ---
 document.addEventListener('keydown', (e) => {
+  // Ctrl+K / Cmd+K: toggle search (works even when focused in inputs)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    globalSearch.toggle();
+    return;
+  }
+
   // Skip when typing in inputs
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
@@ -290,6 +338,13 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     const btn = document.querySelector(`.tab-nav [data-view="${tabKeys[e.key]}"]`);
     if (btn) btn.click();
+    return;
+  }
+
+  // F: toggle focus view
+  if (e.key === 'f' || e.key === 'F') {
+    e.preventDefault();
+    showFocusView();
     return;
   }
 
@@ -353,6 +408,7 @@ function toggleHelp() {
           <div class="help-feature"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain (requires AI setup in Settings).</div>
           <div class="help-feature"><strong>Drive Sync</strong> &mdash; Back up sessions, stashes, and bookmarks to Google Drive.</div>
           <div class="help-feature"><strong>Bookmarks</strong> &mdash; Export tabs as Chrome bookmarks, local JSON, or Drive HTML.</div>
+          <div class="help-feature"><strong>Focus Mode</strong> &mdash; Start a timed focus session. Distracting tabs are blocked, non-focus tabs can be kebab'd or stashed.</div>
         </div>
         <div class="help-group">
           <h3>Keyboard Shortcuts</h3>
@@ -360,6 +416,8 @@ function toggleHelp() {
           <div class="help-row"><kbd>2</kbd><span>Tabs view</span></div>
           <div class="help-row"><kbd>3</kbd><span>Stash view</span></div>
           <div class="help-row"><kbd>4</kbd><span>Sessions view</span></div>
+          <div class="help-row"><kbd>F</kbd><span>Focus Mode</span></div>
+          <div class="help-row"><kbd>Ctrl+K</kbd><span>Search everything</span></div>
           <div class="help-row"><kbd>/</kbd><span>Focus AI command bar</span></div>
           <div class="help-row"><kbd>Esc</kbd><span>Close / unfocus</span></div>
           <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
