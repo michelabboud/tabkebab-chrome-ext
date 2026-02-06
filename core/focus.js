@@ -77,30 +77,90 @@ export function formatBadgeTime(ms) {
   return `${totalMin}m`;
 }
 
-// ── Domain matching ──
+// ── Allowlist matching ──
+
+/**
+ * Allowlist entry types:
+ * - { type: 'domain', value: 'github.com' }
+ * - { type: 'url', value: 'https://docs.google.com/...' }
+ * - { type: 'group', value: 'Work', groupId: 123 } // Chrome tab group
+ * - { type: 'custom', value: 'Project Alpha' } // TabKebab custom group
+ *
+ * Legacy support: plain strings are treated as domains
+ */
 
 function domainMatches(tabUrl, domainList) {
   if (!domainList || domainList.length === 0) return false;
   const hostname = extractDomain(tabUrl);
   if (!hostname || hostname === 'other') return false;
-  return domainList.some(d => hostname === d || hostname.endsWith('.' + d));
+  return domainList.some(d => {
+    const domain = typeof d === 'string' ? d : (d.type === 'domain' ? d.value : null);
+    if (!domain) return false;
+    return hostname === domain || hostname.endsWith('.' + domain);
+  });
+}
+
+function urlMatches(tabUrl, allowList) {
+  if (!allowList || allowList.length === 0) return false;
+  return allowList.some(entry => {
+    if (typeof entry !== 'object' || entry.type !== 'url') return false;
+    // Exact URL match or prefix match
+    return tabUrl === entry.value || tabUrl.startsWith(entry.value);
+  });
 }
 
 /**
- * Check if a URL should be blocked based on current focus state.
+ * Check if a tab is in an allowed Chrome group.
+ * @param {Object} tab - Tab object with groupId
+ * @param {Array} allowList - Allowlist entries
+ * @returns {boolean}
+ */
+function groupMatches(tab, allowList) {
+  if (!tab?.groupId || tab.groupId === -1) return false;
+  if (!allowList || allowList.length === 0) return false;
+  return allowList.some(entry => {
+    if (typeof entry !== 'object' || entry.type !== 'group') return false;
+    return entry.groupId === tab.groupId;
+  });
+}
+
+/**
+ * Check if tab is allowed by any entry in the allowlist.
+ * Supports domains (legacy strings), URLs, Chrome groups.
+ */
+function isAllowed(tab, allowList) {
+  if (!allowList || allowList.length === 0) return false;
+  const url = tab?.url || tab;
+
+  // Check domains (including legacy string format)
+  if (domainMatches(url, allowList)) return true;
+
+  // Check exact URLs
+  if (urlMatches(url, allowList)) return true;
+
+  // Check Chrome groups
+  if (typeof tab === 'object' && groupMatches(tab, allowList)) return true;
+
+  return false;
+}
+
+/**
+ * Check if a tab/URL should be blocked based on current focus state.
  * Blocking modes (in order of priority):
- * 1. Allowed domains always pass (whitelist)
+ * 1. Allowed entries always pass (domains, URLs, groups)
  * 2. Explicit blocked domains always block
  * 3. Strict mode: block everything not in allowed list
  * 4. Curated categories: block if in enabled category
  * 5. AI mode: ask AI to categorize (async, handled separately)
  *
- * @param {string} url - The URL to check
+ * @param {string|Object} tabOrUrl - URL string or tab object
  * @param {Object} state - Focus state object
  * @returns {{ blocked: boolean, reason: string|null, category: string|null }}
  */
-export function isBlockedDomain(url, state) {
+export function isBlockedDomain(tabOrUrl, state) {
+  const url = typeof tabOrUrl === 'string' ? tabOrUrl : tabOrUrl?.url;
   const hostname = extractDomain(url);
+
   if (!hostname || hostname === 'other') {
     return { blocked: false, reason: null, category: null };
   }
@@ -110,8 +170,8 @@ export function isBlockedDomain(url, state) {
     return { blocked: false, reason: null, category: null };
   }
 
-  // 1. Allowed domains always pass
-  if (domainMatches(url, state?.allowedDomains)) {
+  // 1. Check against allowlist (domains, URLs, groups)
+  if (isAllowed(tabOrUrl, state?.allowedDomains)) {
     return { blocked: false, reason: null, category: null };
   }
 
@@ -121,8 +181,11 @@ export function isBlockedDomain(url, state) {
   }
 
   // 3. Strict mode: block everything not in allowed list
-  if (state?.strictMode && state?.allowedDomains?.length > 0) {
-    return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
+  if (state?.strictMode) {
+    const hasAllowlist = state?.allowedDomains?.length > 0;
+    if (hasAllowlist) {
+      return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
+    }
   }
 
   // 4. Curated categories

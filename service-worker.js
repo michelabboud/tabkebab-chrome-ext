@@ -831,7 +831,9 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const url = tab.pendingUrl || tab.url;
     const state = getCachedFocusState();
     if (state?.status === 'active') {
-      const result = isBlockedDomain(url, state);
+      // Pass full tab object to check group membership
+      const tabWithUrl = { ...tab, url };
+      const result = isBlockedDomain(tabWithUrl, state);
       if (result.blocked) {
         handleDistraction(tab.id, url, state, result.category);
       } else if (state.aiBlocking && !result.blocked) {
@@ -842,7 +844,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   }
 });
 chrome.tabs.onRemoved.addListener(notifyPanel);
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' || changeInfo.url) {
     notifyPanel();
   }
@@ -850,7 +852,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.url) {
     const state = getCachedFocusState();
     if (state?.status === 'active') {
-      const result = isBlockedDomain(changeInfo.url, state);
+      // Pass full tab object to check group membership
+      const result = isBlockedDomain(tab, state);
       if (result.blocked) {
         handleDistraction(tabId, changeInfo.url, state, result.category);
       } else if (state.aiBlocking && !result.blocked) {

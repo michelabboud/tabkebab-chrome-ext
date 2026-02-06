@@ -100,15 +100,22 @@ export class FocusPanel {
           </div>
         </div>
 
-        <div class="focus-domains-section">
-          <div class="focus-domain-group">
-            <label class="focus-label">Allowed domains</label>
-            <div class="focus-domain-tags" id="focus-allowed-tags"></div>
-            <div class="focus-domain-add">
-              <input type="text" id="focus-add-allowed" class="input" placeholder="Add domain...">
-              <button class="action-btn secondary focus-add-btn" id="btn-add-allowed">+</button>
-            </div>
+        <div class="focus-allowlist-section">
+          <label class="focus-label">Allowed (whitelist)</label>
+          <p class="focus-hint">Tabs matching these will never be blocked</p>
+          <div class="focus-allowlist-tags" id="focus-allowlist-tags"></div>
+          <div class="focus-allowlist-add">
+            <select id="focus-add-type" class="input focus-add-type-select">
+              <option value="domain">Domain</option>
+              <option value="group">Chrome Group</option>
+            </select>
+            <input type="text" id="focus-add-value" class="input" placeholder="e.g. github.com">
+            <select id="focus-add-group" class="input" hidden></select>
+            <button class="action-btn secondary focus-add-btn" id="btn-add-allowlist">+</button>
           </div>
+        </div>
+
+        <div class="focus-domains-section">
           <div class="focus-domain-group">
             <label class="focus-label">Blocked domains (additional)</label>
             <div class="focus-domain-tags" id="focus-blocked-tags"></div>
@@ -130,17 +137,77 @@ export class FocusPanel {
 
     // Store current selections
     this._selectedProfile = profile;
-    this._allowedDomains = [...(profile.allowedDomains || [])];
+    // Convert legacy string domains to new format
+    this._allowlist = (profile.allowedDomains || []).map(d =>
+      typeof d === 'string' ? { type: 'domain', value: d } : d
+    );
     this._blockedDomains = [...(profile.blockedDomains || [])];
     this._blockedCategories = [...(profile.blockedCategories || [])];
     this._strictMode = false;
     this._aiBlocking = false;
+    this._chromeGroups = [];
 
+    this._loadChromeGroups();
+    this._renderAllowlistTags();
     this._renderDomainTags();
     this._renderCategoryChips();
     this._checkAIAvailability();
     this._wireSetupEvents();
     this._loadHistory();
+  }
+
+  async _loadChromeGroups() {
+    try {
+      const groups = await chrome.tabGroups.query({});
+      this._chromeGroups = groups.map(g => ({
+        id: g.id,
+        title: g.title || `Group ${g.id}`,
+        color: g.color,
+      }));
+      this._updateGroupDropdown();
+    } catch {
+      this._chromeGroups = [];
+    }
+  }
+
+  _updateGroupDropdown() {
+    const select = this.container.querySelector('#focus-add-group');
+    if (!select) return;
+    select.innerHTML = this._chromeGroups.length === 0
+      ? '<option value="">No groups available</option>'
+      : this._chromeGroups.map(g =>
+          `<option value="${g.id}">${this._esc(g.title)}</option>`
+        ).join('');
+  }
+
+  _renderAllowlistTags() {
+    const container = this.container.querySelector('#focus-allowlist-tags');
+    if (!container) return;
+
+    if (this._allowlist.length === 0) {
+      container.innerHTML = '<span class="focus-domain-empty">No items - all domains allowed (use blocklist/categories)</span>';
+      return;
+    }
+
+    container.innerHTML = this._allowlist.map((entry, idx) => {
+      const icon = entry.type === 'group' ? '📁' : entry.type === 'url' ? '🔗' : '🌐';
+      const label = entry.type === 'group' ? entry.value : entry.value;
+      return `
+        <span class="focus-allowlist-tag" data-type="${entry.type}">
+          <span class="focus-tag-icon">${icon}</span>
+          <span>${this._esc(label)}</span>
+          <button class="focus-tag-remove" data-idx="${idx}">&times;</button>
+        </span>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.focus-tag-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx);
+        this._allowlist.splice(idx, 1);
+        this._renderAllowlistTags();
+      });
+    });
   }
 
   async _checkAIAvailability() {
@@ -225,7 +292,9 @@ export class FocusPanel {
         const profile = this.profiles.find(p => p.id === profileId);
         if (!profile) return;
         this._selectedProfile = profile;
-        this._allowedDomains = [...(profile.allowedDomains || [])];
+        this._allowlist = (profile.allowedDomains || []).map(d =>
+          typeof d === 'string' ? { type: 'domain', value: d } : d
+        );
         this._blockedDomains = [...(profile.blockedDomains || [])];
         this._blockedCategories = [...(profile.blockedCategories || [])];
 
@@ -235,6 +304,7 @@ export class FocusPanel {
         const durInput = this.container.querySelector('#focus-duration');
         if (durInput) durInput.value = profile.suggestedDuration || 25;
 
+        this._renderAllowlistTags();
         this._renderDomainTags();
         this._renderCategoryChips();
       });
@@ -250,28 +320,53 @@ export class FocusPanel {
       });
     }
 
-    // Add domain buttons
-    const addAllowed = this.container.querySelector('#btn-add-allowed');
-    const addBlocked = this.container.querySelector('#btn-add-blocked');
-    const allowedInput = this.container.querySelector('#focus-add-allowed');
-    const blockedInput = this.container.querySelector('#focus-add-blocked');
+    // Allowlist type toggle
+    const addTypeSelect = this.container.querySelector('#focus-add-type');
+    const addValueInput = this.container.querySelector('#focus-add-value');
+    const addGroupSelect = this.container.querySelector('#focus-add-group');
+    if (addTypeSelect && addValueInput && addGroupSelect) {
+      addTypeSelect.addEventListener('change', () => {
+        const isGroup = addTypeSelect.value === 'group';
+        addValueInput.hidden = isGroup;
+        addGroupSelect.hidden = !isGroup;
+        addValueInput.placeholder = isGroup ? '' : 'e.g. github.com';
+      });
+    }
 
-    const addDomain = (input, list, type) => {
-      const val = input.value.trim().toLowerCase();
-      if (!val) return;
-      if (type === 'allowed' && !this._allowedDomains.includes(val)) {
-        this._allowedDomains.push(val);
-      } else if (type === 'blocked' && !this._blockedDomains.includes(val)) {
-        this._blockedDomains.push(val);
+    // Add to allowlist
+    const addAllowlistBtn = this.container.querySelector('#btn-add-allowlist');
+    addAllowlistBtn?.addEventListener('click', () => {
+      const type = addTypeSelect?.value || 'domain';
+      if (type === 'group') {
+        const groupId = parseInt(addGroupSelect?.value);
+        const group = this._chromeGroups.find(g => g.id === groupId);
+        if (group && !this._allowlist.some(e => e.type === 'group' && e.groupId === groupId)) {
+          this._allowlist.push({ type: 'group', value: group.title, groupId });
+          this._renderAllowlistTags();
+        }
+      } else {
+        const val = addValueInput?.value.trim().toLowerCase();
+        if (val && !this._allowlist.some(e => e.type === 'domain' && e.value === val)) {
+          this._allowlist.push({ type: 'domain', value: val });
+          addValueInput.value = '';
+          this._renderAllowlistTags();
+        }
       }
-      input.value = '';
-      this._renderDomainTags();
-    };
+    });
 
-    addAllowed?.addEventListener('click', () => addDomain(allowedInput, this._allowedDomains, 'allowed'));
-    addBlocked?.addEventListener('click', () => addDomain(blockedInput, this._blockedDomains, 'blocked'));
-    allowedInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addDomain(allowedInput, this._allowedDomains, 'allowed'); });
-    blockedInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addDomain(blockedInput, this._blockedDomains, 'blocked'); });
+    // Add blocked domain
+    const addBlocked = this.container.querySelector('#btn-add-blocked');
+    const blockedInput = this.container.querySelector('#focus-add-blocked');
+    const addBlockedDomain = () => {
+      const val = blockedInput?.value.trim().toLowerCase();
+      if (val && !this._blockedDomains.includes(val)) {
+        this._blockedDomains.push(val);
+        blockedInput.value = '';
+        this._renderDomainTags();
+      }
+    };
+    addBlocked?.addEventListener('click', addBlockedDomain);
+    blockedInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBlockedDomain(); });
 
     // Start button
     this.container.querySelector('#btn-start-focus')?.addEventListener('click', () => this._startSession());
@@ -297,7 +392,7 @@ export class FocusPanel {
         profileId: this._selectedProfile.id,
         duration,
         tabAction,
-        allowedDomains: this._allowedDomains,
+        allowedDomains: this._allowlist, // New flexible allowlist format
         blockedDomains: this._blockedDomains,
         strictMode,
         blockedCategories: this._blockedCategories,
