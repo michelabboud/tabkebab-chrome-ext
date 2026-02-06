@@ -63,7 +63,7 @@ On first launch, TabKebab opens to the **Tabs** view showing all tabs in your cu
 
 ### Header
 
-The header shows the TabKebab logo, a **version badge** (v1.1.0), quick links to GitHub and the Privacy Policy, a **help button** (?), and a **gear icon** for Settings.
+The header shows the TabKebab logo, a **version badge**, quick links to GitHub and the Privacy Policy, status icons for **Drive** and **AI** connections, a **Focus Mode** button (F), a **search** button (Ctrl+K), a **help button** (?), and a **gear icon** for Settings.
 
 ### Global Stats Bar
 
