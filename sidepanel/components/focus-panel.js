@@ -2,6 +2,8 @@
 
 import { showToast } from './toast.js';
 
+const PROFILE_PREFS_KEY = 'focusProfilePrefs';
+
 export class FocusPanel {
   constructor(rootEl) {
     this.root = rootEl;
@@ -9,6 +11,7 @@ export class FocusPanel {
     this.state = null;
     this.profiles = [];
     this.timerInterval = null;
+    this._profilePrefs = {};
 
     // Listen for focus events from service worker
     chrome.runtime.onMessage.addListener((msg) => {
@@ -32,13 +35,13 @@ export class FocusPanel {
     if (this.state?.status === 'active' || this.state?.status === 'paused') {
       this._renderHUD();
     } else {
-      this._renderSetup();
+      await this._renderSetup();
     }
   }
 
   // ── Setup View ──
 
-  _renderSetup() {
+  async _renderSetup() {
     const settings = this.settings || {};
     const defaultProfile = settings.focusDefaultProfile || 'coding';
     const defaultDuration = settings.focusDefaultDuration || 25;
@@ -147,6 +150,15 @@ export class FocusPanel {
     this._aiBlocking = false;
     this._chromeGroups = [];
 
+    // Load saved preferences for default profile (overrides defaults)
+    await this._loadProfilePrefs(profile.id);
+
+    // Update UI with loaded preferences
+    const strictCb = this.container.querySelector('#focus-strict-mode');
+    const aiCb = this.container.querySelector('#focus-ai-blocking');
+    if (strictCb) strictCb.checked = this._strictMode;
+    if (aiCb) aiCb.checked = this._aiBlocking;
+
     this._loadChromeGroups();
     this._renderAllowlistTags();
     this._renderDomainTags();
@@ -178,6 +190,50 @@ export class FocusPanel {
       : this._chromeGroups.map(g =>
           `<option value="${g.id}">${this._esc(g.title)}</option>`
         ).join('');
+  }
+
+  async _loadAllProfilePrefs() {
+    try {
+      const result = await chrome.storage.local.get(PROFILE_PREFS_KEY);
+      this._profilePrefs = result[PROFILE_PREFS_KEY] || {};
+    } catch {
+      this._profilePrefs = {};
+    }
+  }
+
+  async _loadProfilePrefs(profileId) {
+    await this._loadAllProfilePrefs();
+    const prefs = this._profilePrefs[profileId];
+    if (!prefs) return;
+
+    // Apply saved preferences
+    if (prefs.blockedCategories) this._blockedCategories = [...prefs.blockedCategories];
+    if (prefs.allowlist) this._allowlist = [...prefs.allowlist];
+    if (prefs.blockedDomains) this._blockedDomains = [...prefs.blockedDomains];
+    if (prefs.strictMode !== undefined) this._strictMode = prefs.strictMode;
+    if (prefs.aiBlocking !== undefined) this._aiBlocking = prefs.aiBlocking;
+    if (prefs.duration !== undefined) {
+      const durInput = this.container.querySelector('#focus-duration');
+      if (durInput) durInput.value = prefs.duration;
+    }
+    if (prefs.tabAction) {
+      const radio = this.container.querySelector(`input[name="focus-action"][value="${prefs.tabAction}"]`);
+      if (radio) radio.checked = true;
+    }
+  }
+
+  async _saveProfilePrefs(profileId) {
+    const prefs = {
+      blockedCategories: this._blockedCategories,
+      allowlist: this._allowlist,
+      blockedDomains: this._blockedDomains,
+      strictMode: this._strictMode,
+      aiBlocking: this._aiBlocking,
+      duration: parseInt(this.container.querySelector('#focus-duration')?.value) || 25,
+      tabAction: this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none',
+    };
+    this._profilePrefs[profileId] = prefs;
+    await chrome.storage.local.set({ [PROFILE_PREFS_KEY]: this._profilePrefs });
   }
 
   _renderAllowlistTags() {
@@ -287,22 +343,35 @@ export class FocusPanel {
   _wireSetupEvents() {
     // Profile picker
     this.container.querySelectorAll('.focus-profile-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
+      chip.addEventListener('click', async () => {
         const profileId = chip.dataset.profile;
         const profile = this.profiles.find(p => p.id === profileId);
         if (!profile) return;
         this._selectedProfile = profile;
+
+        // Set defaults from profile
         this._allowlist = (profile.allowedDomains || []).map(d =>
           typeof d === 'string' ? { type: 'domain', value: d } : d
         );
         this._blockedDomains = [...(profile.blockedDomains || [])];
         this._blockedCategories = [...(profile.blockedCategories || [])];
+        this._strictMode = false;
+        this._aiBlocking = false;
+
+        const durInput = this.container.querySelector('#focus-duration');
+        if (durInput) durInput.value = profile.suggestedDuration || 25;
+
+        // Load saved preferences (overrides defaults)
+        await this._loadProfilePrefs(profileId);
 
         this.container.querySelectorAll('.focus-profile-chip').forEach(c => c.classList.remove('active'));
         chip.classList.add('active');
 
-        const durInput = this.container.querySelector('#focus-duration');
-        if (durInput) durInput.value = profile.suggestedDuration || 25;
+        // Update UI to reflect loaded preferences
+        const strictCb = this.container.querySelector('#focus-strict-mode');
+        const aiCb = this.container.querySelector('#focus-ai-blocking');
+        if (strictCb) strictCb.checked = this._strictMode;
+        if (aiCb) aiCb.checked = this._aiBlocking;
 
         this._renderAllowlistTags();
         this._renderDomainTags();
@@ -383,8 +452,11 @@ export class FocusPanel {
     const durInput = this.container.querySelector('#focus-duration');
     const duration = openEnded ? 0 : (parseInt(durInput?.value) || 25);
     const tabAction = this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none';
-    const strictMode = this.container.querySelector('#focus-strict-mode')?.checked || false;
-    const aiBlocking = this.container.querySelector('#focus-ai-blocking')?.checked || false;
+    this._strictMode = this.container.querySelector('#focus-strict-mode')?.checked || false;
+    this._aiBlocking = this.container.querySelector('#focus-ai-blocking')?.checked || false;
+
+    // Save preferences for this profile
+    await this._saveProfilePrefs(this._selectedProfile.id);
 
     try {
       this.state = await this.send({
@@ -394,9 +466,9 @@ export class FocusPanel {
         tabAction,
         allowedDomains: this._allowlist, // New flexible allowlist format
         blockedDomains: this._blockedDomains,
-        strictMode,
+        strictMode: this._strictMode,
         blockedCategories: this._blockedCategories,
-        aiBlocking,
+        aiBlocking: this._aiBlocking,
       });
       this._renderHUD();
       showToast(`Focus started: ${this._selectedProfile.name}`, 'success');
@@ -407,14 +479,25 @@ export class FocusPanel {
 
   // ── Active Timer HUD ──
 
+  _getProfileColor(colorName) {
+    const colors = {
+      cyan: '#22d3ee',
+      purple: '#a78bfa',
+      green: '#34d399',
+      blue: '#60a5fa',
+    };
+    return colors[colorName] || colors.blue;
+  }
+
   _renderHUD() {
     const state = this.state;
     if (!state) return;
 
     const isPaused = state.status === 'paused';
+    const profileColor = this._getProfileColor(state.profileColor);
 
     this.container.innerHTML = `
-      <div class="focus-hud">
+      <div class="focus-hud" style="--focus-profile-color: ${profileColor}">
         <div class="focus-hud-header">
           <span class="focus-hud-label">FOCUS MODE - ${this._esc(state.profileName)}</span>
           <button class="action-btn secondary focus-end-early-btn" id="btn-end-early">End Early</button>

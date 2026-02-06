@@ -4,6 +4,38 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.0] — 2026-02-07
+
+### Added
+
+- **Focus Mode** — time-bounded productivity sessions with distraction blocking
+  - 4 built-in profiles: Coding, Writing, Research, Meeting
+  - Live countdown timer with profile-colored HUD (cyan/purple/green/blue) and glowing animation
+  - Distraction interception: blocks navigation to distracting sites during focus
+  - Three blocking modes: Strict Mode (whitelist only), Curated Categories (6 blocklists), AI Detection
+  - Flexible allowlist supporting domains, URLs, and Chrome tab groups
+  - Tab actions on focus start: Kebab, Stash, Group, or None
+  - Session reports with stats (duration, distractions blocked, focus tabs)
+  - Focus history (last 50 sessions)
+  - Preferences saved per profile (categories, allowlist, duration, etc.)
+  - Focus button in header with `F` keyboard shortcut
+  - Badge countdown on extension icon during active sessions
+- **Empty pages cleanup** — separate row in Duplicates tab to find and close blank/empty pages (about:blank, new tabs)
+- **Header status icons** — Drive and AI connection status indicators with click-to-navigate to settings
+- **Downward tooltips** — header icon tooltips now appear below buttons to prevent clipping at window edge
+
+### Changed
+
+- **Auto-kebab default** — now enabled by default at 3 hours (was 0/off)
+- **Duplicate badge** — now includes empty pages count in the badge total
+
+### Fixed
+
+- **Tooltip visibility** — header tooltips no longer clip behind the window border
+- **Empty pages counter** — badge updates correctly after closing empty pages
+
+---
+
 ## [1.1.0] — 2026-02-01
 
 ### Added

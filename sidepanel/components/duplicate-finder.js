@@ -1,4 +1,4 @@
-// duplicate-finder.js — Scan and close duplicate tabs
+// duplicate-finder.js — Scan and close duplicate tabs + empty pages
 
 import { showToast } from './toast.js';
 
@@ -7,10 +7,14 @@ export class DuplicateFinder {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#duplicate-list');
     this.closeAllBtn = rootEl.querySelector('#btn-close-all-dupes');
+    this.emptyPagesRow = rootEl.querySelector('#empty-pages-row');
+    this.emptyPagesCount = rootEl.querySelector('#empty-pages-count');
     this.duplicates = [];
+    this.emptyPages = [];
 
     rootEl.querySelector('#btn-scan-dupes').addEventListener('click', () => this.scan());
     this.closeAllBtn.addEventListener('click', () => this.closeAllDuplicates());
+    rootEl.querySelector('#btn-close-empty')?.addEventListener('click', () => this.closeEmptyPages());
   }
 
   async refresh() {
@@ -19,16 +23,58 @@ export class DuplicateFinder {
 
   async scan() {
     try {
-      this.duplicates = await this.send({ action: 'findDuplicates' });
+      // Scan for duplicates and empty pages in parallel
+      const [duplicates, emptyPages] = await Promise.all([
+        this.send({ action: 'findDuplicates' }),
+        this.send({ action: 'findEmptyPages' }),
+      ]);
+      this.duplicates = duplicates;
+      this.emptyPages = emptyPages || [];
       this.render();
+      this.renderEmptyPages();
 
-      // Dispatch badge update event
-      const count = this.duplicates
+      // Dispatch badge update event (include empty pages in count)
+      const dupeCount = this.duplicates
         ? this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0)
         : 0;
-      document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count } }));
+      const totalCount = dupeCount + this.emptyPages.length;
+      document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count: totalCount } }));
     } catch {
       showToast('Failed to scan for duplicates', 'error');
+    }
+  }
+
+  renderEmptyPages() {
+    if (!this.emptyPagesRow) return;
+
+    if (this.emptyPages.length === 0) {
+      this.emptyPagesRow.hidden = true;
+      if (this.emptyPagesCount) this.emptyPagesCount.textContent = '0';
+      return;
+    }
+
+    this.emptyPagesRow.hidden = false;
+    if (this.emptyPagesCount) {
+      this.emptyPagesCount.textContent = this.emptyPages.length;
+    }
+  }
+
+  async closeEmptyPages() {
+    if (this.emptyPages.length === 0) {
+      showToast('No empty pages found', 'error');
+      return;
+    }
+
+    const tabIds = this.emptyPages.map(t => t.id);
+    const count = tabIds.length;
+    try {
+      await this.send({ action: 'closeTabs', tabIds });
+      // Small delay to ensure Chrome's tab list is updated
+      await new Promise(r => setTimeout(r, 100));
+      showToast(`Closed ${count} empty page(s)`, 'success');
+      await this.scan();
+    } catch {
+      showToast('Failed to close empty pages', 'error');
     }
   }
 

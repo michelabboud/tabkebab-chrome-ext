@@ -259,6 +259,7 @@ export async function startFocus({
 }) {
   const profile = getProfileById(profileId);
   const profileName = profile?.name || profileId;
+  const profileColor = profile?.color || 'blue';
 
   const state = {
     status: 'active',
@@ -268,6 +269,7 @@ export async function startFocus({
     pausedElapsed: 0,
     profileId,
     profileName,
+    profileColor,
     tabAction: tabAction || 'none',
     allowedDomains: allowedDomains || [],
     blockedDomains: blockedDomains || [],
@@ -369,6 +371,7 @@ export async function endFocus() {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     profileId: state.profileId,
     profileName: state.profileName,
+    profileColor: state.profileColor,
     startedAt: state.startedAt,
     endedAt: Date.now(),
     plannedDuration: state.duration,

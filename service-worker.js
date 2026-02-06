@@ -1,7 +1,7 @@
 // service-worker.js — Background service worker (Manifest V3)
 
 import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows } from './core/grouping.js';
-import { findDuplicates } from './core/duplicates.js';
+import { findDuplicates, findEmptyPages } from './core/duplicates.js';
 import { saveSession, restoreSession, listSessions, deleteSession } from './core/sessions.js';
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
@@ -894,6 +894,9 @@ async function handleMessage(msg) {
 
     case 'findDuplicates':
       return findDuplicates();
+
+    case 'findEmptyPages':
+      return findEmptyPages();
 
     case 'closeTabs':
       await closeTabs(msg.tabIds);

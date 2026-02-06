@@ -231,6 +231,15 @@
 
       <!-- Duplicates sub-view -->
       <div id="sub-duplicates" class="sub-view hidden">
+        <!-- Empty pages row -->
+        <div id="empty-pages-row" class="empty-pages-row" hidden>
+          <div class="empty-pages-info">
+            <span class="empty-pages-icon">&#9634;</span>
+            <span class="empty-pages-label">Empty Pages</span>
+            <span id="empty-pages-count" class="empty-pages-count">0</span>
+          </div>
+          <button id="btn-close-empty" class="action-btn danger">Close Empty Pages</button>
+        </div>
         <div class="toolbar">
           <button id="btn-scan-dupes" class="action-btn">Scan for Duplicates</button>
           <button id="btn-close-all-dupes" class="action-btn danger" disabled>Close All Duplicates</button>

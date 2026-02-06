@@ -17,7 +17,7 @@ export const SETTINGS_DEFAULTS = {
   // Automation
   autoSaveIntervalHours: 24,
   autoSaveRetentionDays: 7,
-  autoKebabAfterHours: 0,    // 0 = off
+  autoKebabAfterHours: 3,    // 0 = off, default 3 hours
   autoStashAfterDays: 0,     // 0 = off
 
   // Bookmarks

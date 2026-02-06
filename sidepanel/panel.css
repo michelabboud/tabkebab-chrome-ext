@@ -869,6 +869,44 @@ body {
   min-width: unset;
 }
 
+/* ── Empty Pages Row ── */
+.empty-pages-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.empty-pages-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.empty-pages-icon {
+  font-size: 16px;
+  color: var(--text-tertiary);
+}
+
+.empty-pages-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-pages-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+  background: var(--danger-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
 /* ── Duplicate Groups ── */
 .duplicate-group {
   margin-bottom: 10px;
@@ -3281,7 +3319,33 @@ body.ai-available .ai-feature {
 /* HUD */
 .focus-hud {
   text-align: center;
-  padding: 8px 0;
+  padding: 16px;
+  margin: -14px;
+  margin-bottom: 0;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--focus-profile-color, var(--accent)) 8%, var(--bg-primary)),
+    color-mix(in srgb, var(--focus-profile-color, var(--accent)) 3%, var(--bg-primary))
+  );
+  border: 1.5px solid color-mix(in srgb, var(--focus-profile-color, var(--accent)) 40%, transparent);
+  box-shadow:
+    0 0 20px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 15%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--focus-profile-color, var(--accent)) 10%, transparent);
+  animation: focus-hud-glow 3s ease-in-out infinite;
+}
+
+@keyframes focus-hud-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 15%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--focus-profile-color, var(--accent)) 10%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 30px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 25%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--focus-profile-color, var(--accent)) 15%, transparent);
+  }
 }
 
 .focus-hud-header {
@@ -3294,8 +3358,10 @@ body.ai-available .ai-feature {
 .focus-hud-label {
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  color: var(--accent);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--focus-profile-color, var(--accent));
+  text-shadow: 0 0 10px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 30%, transparent);
 }
 
 .focus-end-early-btn {
@@ -3312,8 +3378,9 @@ body.ai-available .ai-feature {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
-  color: var(--text-primary);
+  color: var(--focus-profile-color, var(--text-primary));
   letter-spacing: -0.02em;
+  text-shadow: 0 0 20px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 25%, transparent);
 }
 
 .focus-timer-sub {
@@ -3335,8 +3402,9 @@ body.ai-available .ai-feature {
 }
 
 .focus-progress-fill {
-  background: var(--accent);
+  background: var(--focus-profile-color, var(--accent));
   transition: width 1s linear;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 50%, transparent);
 }
 
 .focus-progress-pct {

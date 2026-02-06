@@ -42,3 +42,36 @@ export async function findDuplicates() {
 
   return duplicates;
 }
+
+/**
+ * Find empty/blank pages that can be closed.
+ * Matches: about:blank, chrome://newtab, empty URLs, new tab pages
+ */
+export async function findEmptyPages() {
+  const tabs = await getAllTabs({ allWindows: true });
+  const emptyPages = [];
+
+  for (const tab of tabs) {
+    const url = tab.url || '';
+    const isEmpty =
+      !url ||
+      url === '' ||
+      url === 'about:blank' ||
+      url === 'chrome://newtab/' ||
+      url === 'chrome://new-tab-page/' ||
+      url === 'edge://newtab/' ||
+      url.startsWith('chrome://newtab') ||
+      url.startsWith('chrome://new-tab-page');
+
+    if (isEmpty && !tab.active) {
+      emptyPages.push({
+        id: tab.id,
+        title: tab.title || 'Empty Page',
+        url,
+        windowId: tab.windowId,
+      });
+    }
+  }
+
+  return emptyPages;
+}

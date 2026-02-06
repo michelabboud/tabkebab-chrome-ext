@@ -35,6 +35,7 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Close, pin, discard, or move** individual tabs from the side panel
 - **Tab count badges** per window with color-coded thresholds (green / yellow / red)
 - **Duplicate detection** with badge counter, periodic background scanning (every 60s), and bulk close with undo
+- **Empty pages cleanup** — find and close blank tabs (about:blank, new tab pages) from the Duplicates view
 - **Global stats bar** — always-visible bar showing Windows, Tabs, and Active/Kebab percentage
 
 ### Tab Grouping
@@ -85,7 +86,23 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Per-domain keep-awake exceptions** — protect email, calendars, AI tools
 - **AI-assisted classification** suggests which domains to protect
 - **Sleep by** domain, group, window, or everything at once
-- **Auto-kebab** idle tabs after configurable hours
+- **Auto-kebab** idle tabs after configurable hours (default: 3 hours)
+
+### Focus Mode
+
+- **Time-bounded productivity sessions** with live countdown timer
+- **4 built-in profiles**: Coding, Writing, Research, Meeting — each with preset allowed/blocked domains
+- **Profile-colored HUD** — timer display glows in profile color (cyan, purple, green, blue)
+- **Distraction blocking** with three modes:
+  - **Strict Mode** — only allowlisted sites accessible
+  - **Curated Categories** — block Social, Video, Gaming, News, Shopping, Entertainment
+  - **AI Detection** — AI categorizes unknown domains in real-time
+- **Flexible allowlist** — whitelist domains, specific URLs, or entire Chrome tab groups
+- **Tab actions on start** — Kebab, Stash, Group, or monitor-only
+- **Session reports** — stats on duration, distractions blocked, focus tabs
+- **Focus history** — review your last 50 sessions
+- **Preferences saved per profile** — your category selections and settings remembered
+- **Keyboard shortcut** — press `F` to start Focus Mode
 
 ### Natural Language Commands
 
@@ -97,6 +114,7 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 ### Keyboard Shortcuts
 
 - **1–4** — switch between Windows, Tabs, Stash, and Sessions views
+- **F** — start Focus Mode
 - **/** — focus the AI command bar
 - **?** — toggle the help overlay
 - **Esc** — close overlays, unfocus inputs, or dismiss settings
@@ -185,7 +203,10 @@ TabKebab/
     sessions.js              # Session save/restore with v1→v2 migration
     stash-db.js              # IndexedDB stash storage
     grouping.js              # 4-phase grouping orchestrator
-    duplicates.js            # Duplicate tab detection
+    duplicates.js            # Duplicate tab detection + empty pages
+    focus.js                 # Focus Mode engine: state, timer, blocking
+    focus-profiles.js        # Built-in focus profiles
+    focus-blocklists.js      # Curated distraction blocklists
     nl-executor.js           # Natural language command execution
     settings.js              # Settings schema and CRUD
     storage.js               # Storage abstraction layer
@@ -220,7 +241,8 @@ TabKebab/
       session-manager.js     # Sessions view
       stash-list.js          # Stash view
       group-editor.js        # Groups sub-view & editor
-      duplicate-finder.js    # Duplicate detection UI
+      duplicate-finder.js    # Duplicate detection UI + empty pages
+      focus-panel.js         # Focus Mode UI: setup, timer, report, history
       command-bar.js         # AI command bar
       drive-sync.js          # Drive sync controls
       settings-manager.js    # Settings UI bindings

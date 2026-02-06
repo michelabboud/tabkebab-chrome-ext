@@ -13,14 +13,15 @@ A complete guide to every feature in TabKebab.
 5. [Stash View](#stash-view)
 6. [Sessions View](#sessions-view)
 7. [Tab Sleep (Kebab)](#tab-sleep-kebab)
-8. [Bookmarks](#bookmarks)
-9. [Natural Language Commands](#natural-language-commands)
-10. [Google Drive Sync](#google-drive-sync)
-11. [AI Configuration](#ai-configuration)
-12. [Settings Reference](#settings-reference)
-13. [Export & Import](#export--import)
-14. [Keyboard & Tips](#keyboard--tips)
-15. [Troubleshooting](#troubleshooting)
+8. [Focus Mode](#focus-mode)
+9. [Bookmarks](#bookmarks)
+10. [Natural Language Commands](#natural-language-commands)
+11. [Google Drive Sync](#google-drive-sync)
+12. [AI Configuration](#ai-configuration)
+13. [Settings Reference](#settings-reference)
+14. [Export & Import](#export--import)
+15. [Keyboard & Tips](#keyboard--tips)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -157,13 +158,22 @@ When grouping runs, a **4-phase progress indicator** appears:
 
 ### Finding Duplicates
 
-The **Duplicates** sub-tab shows a **red badge** on the tab button with the current count of extra duplicate copies. This count is updated automatically every 60 seconds and after any close operation.
+The **Duplicates** sub-tab shows a **red badge** on the tab button with the current count of extra duplicate copies plus empty pages. This count is updated automatically every 60 seconds and after any close operation.
 
 Click **Scan for Duplicates** to refresh the list. Results show:
 - Number of duplicates found per URL
 - Each duplicate group with checkboxes (first tab marked "KEEP", rest pre-checked for closing)
 - **Close** button per tab or **Close All Duplicates** for bulk removal with undo support
 - Badge resets to zero when all duplicates are resolved
+
+### Empty Pages
+
+Above the duplicate list, an **Empty Pages** row appears if any blank tabs are detected. Empty pages include:
+- `about:blank` tabs
+- `chrome://newtab` pages
+- Tabs with no URL
+
+Click **Close Empty Pages** to remove them all at once. The badge count includes both duplicates and empty pages.
 
 ---
 
@@ -315,6 +325,94 @@ In Settings > Automation, set **Auto-kebab idle tabs** to a number of hours. Tab
 ### Auto-Stash
 
 Set **Auto-stash inactive tabs** to a number of days. Tabs inactive for longer are automatically stashed and closed. Set to 0 to disable.
+
+---
+
+## Focus Mode
+
+Focus Mode transforms TabKebab into a productivity assistant. Start a timed session, and TabKebab clears distractions — discarding or stashing non-focus tabs, blocking distracting navigations, and showing a live countdown with stats.
+
+### Starting a Focus Session
+
+Access Focus Mode via:
+- **Header button** — click the target/crosshair icon in the header
+- **Keyboard** — press `F` (when not in an input field)
+
+### Built-in Profiles
+
+Choose from 4 preset profiles, each with suggested domains and duration:
+
+| Profile | Color | Suggested Duration | Allowed Domains |
+|---------|-------|-------------------|-----------------|
+| **Coding** | Cyan | 50 min | github.com, gitlab.com, stackoverflow.com, developer.mozilla.org, localhost |
+| **Writing** | Purple | 25 min | docs.google.com, notion.so, grammarly.com |
+| **Research** | Green | 45 min | (open browsing allowed) |
+| **Meeting** | Blue | 60 min | meet.google.com, zoom.us, teams.microsoft.com, docs.google.com |
+
+### Setup Options
+
+Before starting, configure:
+
+1. **Duration** — set minutes or check "Open-ended" for unlimited timer
+2. **Tab Action** — what happens to non-focus tabs when you start:
+   - **Kebab** — discard tabs (they stay in tab strip but unload)
+   - **Stash** — save and close tabs (auto-restored when session ends)
+   - **Group** — create a Chrome tab group for focus tabs
+   - **None** — monitor only, don't touch tabs
+3. **Blocking Mode**:
+   - **Strict Mode** — only whitelisted domains allowed
+   - **Curated Categories** — select categories to block (Social, Video, Gaming, News, Shopping, Entertainment)
+   - **AI Detection** — AI categorizes unknown domains in real-time
+4. **Allowlist** — add domains, URLs, or Chrome tab groups that are always permitted
+
+### The Focus HUD
+
+Once started, the panel shows a colorful timer dashboard:
+
+- **Profile-colored display** — the entire HUD glows in your profile's color with a subtle pulsing animation
+- **Countdown timer** — large minutes:seconds display (or elapsed time if open-ended)
+- **Progress bar** — visual progress toward your goal
+- **Stats** — distractions blocked and focus tab count
+- **Controls** — Pause, +5 min extend, End Session
+
+The extension badge also shows the remaining minutes during focus.
+
+### Distraction Blocking
+
+When you navigate to a blocked site during focus:
+
+1. TabKebab intercepts the navigation and goes back
+2. The distractions counter flashes and increments
+3. A toast notification shows what was blocked
+
+Blocking is a **soft block** — you can always navigate manually after the redirect. The friction is the point.
+
+### Session End
+
+When the timer expires (or you click End Session):
+
+1. If tabs were stashed, they're automatically restored
+2. Focus tab group is removed (tabs ungrouped)
+3. Badge clears, timer stops
+4. A **report overlay** shows your session stats:
+   - Profile and duration
+   - Distractions blocked
+   - Focus tabs count
+5. The session is saved to your focus history
+
+### Focus History
+
+Click "Recent Sessions" to see your last 50 focus sessions with date, profile, duration, and distraction count. Useful for tracking productivity over time.
+
+### Preferences Per Profile
+
+TabKebab remembers your choices for each profile:
+- Blocked categories
+- Allowlist entries
+- Strict mode / AI blocking toggles
+- Duration and tab action
+
+Switch profiles and your last configuration is restored.
 
 ---
 
@@ -522,7 +620,7 @@ Access settings via the **gear icon** in the header.
 |---------|---------|-------------|
 | Auto-save interval | 24 hrs | Hours between automatic session saves |
 | Auto-save retention | 7 days | Days to keep auto-saved sessions |
-| Auto-kebab idle tabs | 0 (off) | Discard tabs idle for N hours |
+| Auto-kebab idle tabs | 3 hours | Discard tabs idle for N hours (0 = off) |
 | Auto-stash inactive tabs | 0 (off) | Stash tabs inactive for N days |
 
 ### Bookmarks
@@ -585,6 +683,7 @@ Use **Import** to load a previously exported JSON file. This merges with existin
 | **2** | Switch to Tabs view |
 | **3** | Switch to Stash view |
 | **4** | Switch to Sessions view |
+| **F** | Start Focus Mode |
 | **/** | Focus the AI command bar |
 | **?** | Toggle the help overlay |
 | **Esc** | Close help/settings overlay, or blur the current input |

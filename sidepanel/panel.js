@@ -187,11 +187,15 @@ document.addEventListener('dupesUpdated', (e) => {
 // --- Periodic duplicate check (every 60s) ---
 async function checkDuplicates() {
   try {
-    const dupes = await chrome.runtime.sendMessage({ action: 'findDuplicates' });
-    const count = dupes
+    const [dupes, emptyPages] = await Promise.all([
+      chrome.runtime.sendMessage({ action: 'findDuplicates' }),
+      chrome.runtime.sendMessage({ action: 'findEmptyPages' }),
+    ]);
+    const dupeCount = dupes
       ? dupes.reduce((sum, g) => sum + g.tabs.length - 1, 0)
       : 0;
-    updateDupeBadge(count);
+    const emptyCount = emptyPages?.length || 0;
+    updateDupeBadge(dupeCount + emptyCount);
   } catch {
     // Ignore — service worker may not be ready
   }
