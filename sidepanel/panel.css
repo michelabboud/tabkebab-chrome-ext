@@ -3232,6 +3232,37 @@ body.focus-blink {
   50% { background-color: var(--danger-soft); }
 }
 
+/* API provider guide box */
+.api-guide {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.api-guide p {
+  margin: 0 0 4px;
+}
+
+.api-guide a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.api-guide a:hover {
+  text-decoration: underline;
+}
+
+.api-guide-note {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-top: 6px !important;
+}
+
 /* Chrome AI warning banner */
 .warning-banner {
   background: var(--warning-soft, rgba(245, 158, 11, 0.15));
