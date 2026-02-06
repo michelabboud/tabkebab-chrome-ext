@@ -721,8 +721,20 @@ chrome.runtime.onStartup.addListener(() => {
   }, 5000);
 });
 
-// Auto-save on extension install/update
-chrome.runtime.onInstalled.addListener(() => {
+// Auto-save on extension install/update + open panel on first install
+chrome.runtime.onInstalled.addListener(async (details) => {
+  // On first install, open the side panel to welcome the user
+  if (details.reason === 'install') {
+    try {
+      const [currentWindow] = await chrome.windows.getAll({ windowTypes: ['normal'] });
+      if (currentWindow) {
+        await chrome.sidePanel.open({ windowId: currentWindow.id });
+      }
+    } catch {
+      // Side panel may not be available in all contexts
+    }
+  }
+
   setTimeout(async () => {
     await autoSaveSession();
     await reconfigureAlarms();

@@ -297,8 +297,10 @@ export async function extendFocus(minutes) {
 // ── Distraction handling ──
 
 export async function handleDistraction(tabId, url, _cachedRef) {
+  let windowId;
   try {
     const tab = await chrome.tabs.get(tabId);
+    windowId = tab.windowId;
     // If this is a new tab with no history, close it
     // Otherwise, go back
     if (!tab.url || tab.url === url) {
@@ -317,6 +319,11 @@ export async function handleDistraction(tabId, url, _cachedRef) {
     try { await chrome.tabs.remove(tabId); } catch {}
   }
 
+  // Open side panel to show the distraction notification
+  if (windowId) {
+    try { await chrome.sidePanel.open({ windowId }); } catch {}
+  }
+
   // Re-read state from storage to avoid stale data
   const state = await getFocusState();
   if (!state) return;
@@ -328,12 +335,14 @@ export async function handleDistraction(tabId, url, _cachedRef) {
   // Flash badge
   await flashBadgeDistraction();
 
-  // Notify panel
+  // Notify panel to switch to focus view and blink
   const domain = extractDomain(url);
   chrome.runtime.sendMessage({
     type: 'focusDistraction',
     domain,
     count: state.distractionsBlocked,
+    openFocusView: true,
+    blink: true,
   }).catch(() => {});
 }
 

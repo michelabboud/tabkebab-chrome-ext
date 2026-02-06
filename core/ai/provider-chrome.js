@@ -49,8 +49,10 @@ export const ChromeAIProvider = {
       if (request.systemPrompt) {
         options.systemPrompt = request.systemPrompt;
       }
+      // Chrome AI requires both topK and temperature, or neither
       if (request.temperature != null) {
         options.temperature = request.temperature;
+        options.topK = 40; // reasonable default
       }
 
       session = await api.create(options);

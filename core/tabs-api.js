@@ -27,7 +27,12 @@ export async function focusTab(tabId) {
 }
 
 export async function closeTabs(tabIds) {
-  return chrome.tabs.remove(tabIds);
+  try {
+    return await chrome.tabs.remove(tabIds);
+  } catch (e) {
+    // Tab may already be closed — ignore "No tab with id" errors
+    if (!e.message?.includes('No tab with id')) throw e;
+  }
 }
 
 export async function createNativeGroup(tabIds, title, color = 'blue') {

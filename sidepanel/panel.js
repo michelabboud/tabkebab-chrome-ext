@@ -209,6 +209,17 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'focusEnded' || message.type === 'focusDistraction') {
     updateFocusBtnState();
   }
+  if (message.type === 'focusDistraction') {
+    // Switch to focus view
+    if (message.openFocusView) {
+      showFocusView();
+    }
+    // Blink the panel 3 times
+    if (message.blink) {
+      document.body.classList.add('focus-blink');
+      setTimeout(() => document.body.classList.remove('focus-blink'), 1500);
+    }
+  }
 });
 
 // --- Theme support ---
@@ -261,6 +272,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // --- Initial load ---
 controllers.tabs.refresh();
 refreshGlobalStats();
+
+// --- Set version from manifest ---
+const manifest = chrome.runtime.getManifest();
+document.querySelectorAll('.app-version').forEach(el => {
+  el.textContent = `v${manifest.version}`;
+});
 
 // --- Toggle AI-dependent UI elements ---
 async function updateAIVisibility() {

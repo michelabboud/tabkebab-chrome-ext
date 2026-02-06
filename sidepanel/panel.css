@@ -3221,3 +3221,13 @@ body.ai-available .ai-feature {
   color: var(--text-tertiary);
   font-size: 11px;
 }
+
+/* Focus distraction blink */
+body.focus-blink {
+  animation: focus-blink-anim 0.5s ease-in-out 3;
+}
+
+@keyframes focus-blink-anim {
+  0%, 100% { background-color: var(--bg-primary); }
+  50% { background-color: var(--danger-soft); }
+}
