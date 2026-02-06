@@ -80,6 +80,26 @@ export class FocusPanel {
           </div>
         </div>
 
+        <div class="focus-blocking-section">
+          <label class="focus-label">Blocking Mode</label>
+          <div class="focus-blocking-options">
+            <label class="focus-toggle-row">
+              <input type="checkbox" id="focus-strict-mode">
+              <span class="focus-toggle-label">Strict Mode</span>
+              <span class="focus-toggle-hint">Block everything except allowed domains</span>
+            </label>
+            <label class="focus-toggle-row" id="focus-ai-row" hidden>
+              <input type="checkbox" id="focus-ai-blocking">
+              <span class="focus-toggle-label">AI Detection</span>
+              <span class="focus-toggle-hint">Use AI to identify distracting sites</span>
+            </label>
+          </div>
+          <div class="focus-categories">
+            <label class="focus-label">Block Categories</label>
+            <div class="focus-category-chips" id="focus-category-chips"></div>
+          </div>
+        </div>
+
         <div class="focus-domains-section">
           <div class="focus-domain-group">
             <label class="focus-label">Allowed domains</label>
@@ -90,7 +110,7 @@ export class FocusPanel {
             </div>
           </div>
           <div class="focus-domain-group">
-            <label class="focus-label">Blocked domains</label>
+            <label class="focus-label">Blocked domains (additional)</label>
             <div class="focus-domain-tags" id="focus-blocked-tags"></div>
             <div class="focus-domain-add">
               <input type="text" id="focus-add-blocked" class="input" placeholder="Add domain...">
@@ -112,10 +132,60 @@ export class FocusPanel {
     this._selectedProfile = profile;
     this._allowedDomains = [...(profile.allowedDomains || [])];
     this._blockedDomains = [...(profile.blockedDomains || [])];
+    this._blockedCategories = [...(profile.blockedCategories || [])];
+    this._strictMode = false;
+    this._aiBlocking = false;
 
     this._renderDomainTags();
+    this._renderCategoryChips();
+    this._checkAIAvailability();
     this._wireSetupEvents();
     this._loadHistory();
+  }
+
+  async _checkAIAvailability() {
+    try {
+      const result = await this.send({ action: 'isAIAvailable' });
+      const aiRow = this.container.querySelector('#focus-ai-row');
+      if (aiRow && result?.available) {
+        aiRow.hidden = false;
+      }
+    } catch {}
+  }
+
+  _renderCategoryChips() {
+    const container = this.container.querySelector('#focus-category-chips');
+    if (!container) return;
+
+    const categories = [
+      { id: 'social', name: 'Social Media', icon: '💬' },
+      { id: 'video', name: 'Video', icon: '📺' },
+      { id: 'gaming', name: 'Gaming', icon: '🎮' },
+      { id: 'news', name: 'News', icon: '📰' },
+      { id: 'shopping', name: 'Shopping', icon: '🛒' },
+      { id: 'entertainment', name: 'Entertainment', icon: '🎭' },
+    ];
+
+    container.innerHTML = categories.map(cat => `
+      <button class="focus-category-chip ${this._blockedCategories.includes(cat.id) ? 'active' : ''}"
+              data-category="${cat.id}">
+        <span>${cat.icon}</span>
+        <span>${cat.name}</span>
+      </button>
+    `).join('');
+
+    container.querySelectorAll('.focus-category-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const catId = chip.dataset.category;
+        if (this._blockedCategories.includes(catId)) {
+          this._blockedCategories = this._blockedCategories.filter(c => c !== catId);
+          chip.classList.remove('active');
+        } else {
+          this._blockedCategories.push(catId);
+          chip.classList.add('active');
+        }
+      });
+    });
   }
 
   _renderDomainTags() {
@@ -157,6 +227,7 @@ export class FocusPanel {
         this._selectedProfile = profile;
         this._allowedDomains = [...(profile.allowedDomains || [])];
         this._blockedDomains = [...(profile.blockedDomains || [])];
+        this._blockedCategories = [...(profile.blockedCategories || [])];
 
         this.container.querySelectorAll('.focus-profile-chip').forEach(c => c.classList.remove('active'));
         chip.classList.add('active');
@@ -165,6 +236,7 @@ export class FocusPanel {
         if (durInput) durInput.value = profile.suggestedDuration || 25;
 
         this._renderDomainTags();
+        this._renderCategoryChips();
       });
     });
 
@@ -216,6 +288,8 @@ export class FocusPanel {
     const durInput = this.container.querySelector('#focus-duration');
     const duration = openEnded ? 0 : (parseInt(durInput?.value) || 25);
     const tabAction = this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none';
+    const strictMode = this.container.querySelector('#focus-strict-mode')?.checked || false;
+    const aiBlocking = this.container.querySelector('#focus-ai-blocking')?.checked || false;
 
     try {
       this.state = await this.send({
@@ -225,6 +299,9 @@ export class FocusPanel {
         tabAction,
         allowedDomains: this._allowedDomains,
         blockedDomains: this._blockedDomains,
+        strictMode,
+        blockedCategories: this._blockedCategories,
+        aiBlocking,
       });
       this._renderHUD();
       showToast(`Focus started: ${this._selectedProfile.name}`, 'success');

@@ -3025,6 +3025,79 @@ body.ai-available .ai-feature {
 }
 
 /* Domain tags */
+/* Focus blocking mode */
+.focus-blocking-section {
+  margin-bottom: 16px;
+}
+
+.focus-blocking-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.focus-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.focus-toggle-row input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.focus-toggle-label {
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.focus-toggle-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.focus-categories {
+  margin-top: 12px;
+}
+
+.focus-category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.focus-category-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.focus-category-chip:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.focus-category-chip.active {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
 .focus-domains-section {
   display: flex;
   flex-direction: column;

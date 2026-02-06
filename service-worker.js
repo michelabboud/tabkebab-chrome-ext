@@ -778,27 +778,85 @@ function notifyPanel() {
   });
 }
 
-chrome.tabs.onCreated.addListener((tab) => {
+// AI-based domain categorization for focus mode
+const aiCheckCache = new Map(); // Cache AI results to avoid repeated calls
+async function checkWithAI(tabId, url, state) {
+  try {
+    const available = await AIClient.isAvailable();
+    if (!available) return;
+
+    const hostname = extractDomain(url);
+    if (!hostname || hostname === 'other') return;
+
+    // Check cache first
+    if (aiCheckCache.has(hostname)) {
+      const cached = aiCheckCache.get(hostname);
+      if (cached.distraction) {
+        handleDistraction(tabId, url, state, cached.category);
+      }
+      return;
+    }
+
+    // Ask AI to categorize the domain
+    const response = await AIClient.complete({
+      systemPrompt: `You are a productivity assistant. Categorize websites as either productive or distracting.
+Distracting categories: social media, gaming, video streaming, entertainment, news, shopping.
+Productive categories: work tools, documentation, education, development, communication (work).
+Respond with JSON only: {"distraction": true/false, "category": "category name", "confidence": 0.0-1.0}`,
+      userPrompt: `Is "${hostname}" a distracting website? The user is in focus mode for: ${state.profileName}`,
+      responseFormat: 'json',
+      temperature: 0.1,
+    });
+
+    if (response.parsed) {
+      // Cache the result
+      aiCheckCache.set(hostname, response.parsed);
+
+      // Clear cache after 1 hour
+      setTimeout(() => aiCheckCache.delete(hostname), 60 * 60 * 1000);
+
+      if (response.parsed.distraction && response.parsed.confidence > 0.7) {
+        handleDistraction(tabId, url, state, response.parsed.category || 'AI detected');
+      }
+    }
+  } catch (err) {
+    console.warn('[TabKebab] AI check failed:', err.message);
+  }
+}
+
+chrome.tabs.onCreated.addListener(async (tab) => {
   notifyPanel();
   // Focus mode: intercept new tabs opened to blocked URLs
   if (tab.pendingUrl || tab.url) {
     const url = tab.pendingUrl || tab.url;
     const state = getCachedFocusState();
-    if (state?.status === 'active' && isBlockedDomain(url, state)) {
-      handleDistraction(tab.id, url, state);
+    if (state?.status === 'active') {
+      const result = isBlockedDomain(url, state);
+      if (result.blocked) {
+        handleDistraction(tab.id, url, state, result.category);
+      } else if (state.aiBlocking && !result.blocked) {
+        // Try AI categorization for unknown domains
+        checkWithAI(tab.id, url, state);
+      }
     }
   }
 });
 chrome.tabs.onRemoved.addListener(notifyPanel);
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.status === 'complete' || changeInfo.url) {
     notifyPanel();
   }
   // Focus mode: intercept navigation to blocked domains
   if (changeInfo.url) {
     const state = getCachedFocusState();
-    if (state?.status === 'active' && isBlockedDomain(changeInfo.url, state)) {
-      handleDistraction(tabId, changeInfo.url, state);
+    if (state?.status === 'active') {
+      const result = isBlockedDomain(changeInfo.url, state);
+      if (result.blocked) {
+        handleDistraction(tabId, changeInfo.url, state, result.category);
+      } else if (state.aiBlocking && !result.blocked) {
+        // Try AI categorization for unknown domains
+        checkWithAI(tabId, changeInfo.url, state);
+      }
     }
   }
 });

@@ -4,6 +4,7 @@ import { Storage } from './storage.js';
 import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs } from './tabs-api.js';
 import { saveStash, restoreStashTabs, getStash } from './stash-db.js';
 import { getProfileById, getAllProfiles } from './focus-profiles.js';
+import { checkAgainstBlocklists, BLOCKLIST_CATEGORIES } from './focus-blocklists.js';
 
 const FOCUS_STATE_KEY = 'focusState';
 const FOCUS_HISTORY_KEY = 'focusHistory';
@@ -85,11 +86,64 @@ function domainMatches(tabUrl, domainList) {
   return domainList.some(d => hostname === d || hostname.endsWith('.' + d));
 }
 
+/**
+ * Check if a URL should be blocked based on current focus state.
+ * Blocking modes (in order of priority):
+ * 1. Allowed domains always pass (whitelist)
+ * 2. Explicit blocked domains always block
+ * 3. Strict mode: block everything not in allowed list
+ * 4. Curated categories: block if in enabled category
+ * 5. AI mode: ask AI to categorize (async, handled separately)
+ *
+ * @param {string} url - The URL to check
+ * @param {Object} state - Focus state object
+ * @returns {{ blocked: boolean, reason: string|null, category: string|null }}
+ */
 export function isBlockedDomain(url, state) {
-  if (!state?.blockedDomains?.length) return false;
-  // If on the allowed list, never block
-  if (domainMatches(url, state.allowedDomains)) return false;
-  return domainMatches(url, state.blockedDomains);
+  const hostname = extractDomain(url);
+  if (!hostname || hostname === 'other') {
+    return { blocked: false, reason: null, category: null };
+  }
+
+  // Chrome internal pages are never blocked
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+    return { blocked: false, reason: null, category: null };
+  }
+
+  // 1. Allowed domains always pass
+  if (domainMatches(url, state?.allowedDomains)) {
+    return { blocked: false, reason: null, category: null };
+  }
+
+  // 2. Explicit blocked domains always block
+  if (domainMatches(url, state?.blockedDomains)) {
+    return { blocked: true, reason: 'blocklist', category: 'Blocked Domain' };
+  }
+
+  // 3. Strict mode: block everything not in allowed list
+  if (state?.strictMode && state?.allowedDomains?.length > 0) {
+    return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
+  }
+
+  // 4. Curated categories
+  if (state?.blockedCategories?.length > 0) {
+    const result = checkAgainstBlocklists(hostname, state.blockedCategories);
+    if (result.blocked) {
+      return { blocked: true, reason: 'category', category: result.category };
+    }
+  }
+
+  // 5. AI mode handled separately (async) - return not blocked here
+  // The service worker will call checkWithAI if aiBlocking is enabled
+
+  return { blocked: false, reason: null, category: null };
+}
+
+/**
+ * Legacy compatibility wrapper - returns boolean
+ */
+export function isBlockedDomainSimple(url, state) {
+  return isBlockedDomain(url, state).blocked;
 }
 
 function isFocusTab(tab, state) {
@@ -130,7 +184,16 @@ export async function flashBadgeDistraction() {
 
 // ── Start focus ──
 
-export async function startFocus({ profileId, duration, tabAction, allowedDomains, blockedDomains }) {
+export async function startFocus({
+  profileId,
+  duration,
+  tabAction,
+  allowedDomains,
+  blockedDomains,
+  strictMode,
+  blockedCategories,
+  aiBlocking,
+}) {
   const profile = getProfileById(profileId);
   const profileName = profile?.name || profileId;
 
@@ -145,6 +208,10 @@ export async function startFocus({ profileId, duration, tabAction, allowedDomain
     tabAction: tabAction || 'none',
     allowedDomains: allowedDomains || [],
     blockedDomains: blockedDomains || [],
+    // New blocking modes
+    strictMode: strictMode || false,
+    blockedCategories: blockedCategories || [],
+    aiBlocking: aiBlocking || false,
     stashId: null,
     focusGroupId: null,
     distractionsBlocked: 0,
@@ -296,7 +363,7 @@ export async function extendFocus(minutes) {
 
 // ── Distraction handling ──
 
-export async function handleDistraction(tabId, url, _cachedRef) {
+export async function handleDistraction(tabId, url, _cachedRef, category = null) {
   let windowId;
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -340,6 +407,7 @@ export async function handleDistraction(tabId, url, _cachedRef) {
   chrome.runtime.sendMessage({
     type: 'focusDistraction',
     domain,
+    category,
     count: state.distractionsBlocked,
     openFocusView: true,
     blink: true,
