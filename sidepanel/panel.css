@@ -175,8 +175,10 @@ body {
 .header-icons {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .header-meta {
@@ -239,6 +241,8 @@ body {
 .settings-btn {
   width: 32px;
   height: 32px;
+  min-width: 24px;
+  min-height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -249,6 +253,11 @@ body {
   cursor: pointer;
   transition: all var(--transition);
   flex-shrink: 0;
+}
+
+/* Allow shrinking in header */
+.header-icons .settings-btn {
+  flex-shrink: 1;
 }
 
 .settings-btn:hover {
@@ -264,6 +273,18 @@ body {
 .settings-btn svg {
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 340px) {
+  .header-icons .settings-btn {
+    width: 26px;
+    height: 26px;
+  }
+  .header-icons .settings-btn svg {
+    width: 15px;
+    height: 15px;
+  }
 }
 
 /* Upward tooltips */
