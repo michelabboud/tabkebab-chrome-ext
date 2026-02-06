@@ -2975,15 +2975,34 @@ body.ai-available .ai-feature {
   --focus-blue: #60a5fa;
 }
 
-/* Focus button pulse when active */
-#btn-focus.focus-active {
-  color: var(--accent);
-  animation: focus-pulse 2s ease-in-out infinite;
+/* Focus button - blue when inactive */
+#btn-focus {
+  color: var(--focus-blue);
 }
 
-@keyframes focus-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+/* Focus button - red heartbeat when active */
+#btn-focus.focus-active {
+  color: #ef4444;
+  animation: focus-heartbeat 1s ease-in-out infinite;
+}
+
+@keyframes focus-heartbeat {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  15% {
+    transform: scale(1.15);
+  }
+  30% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.1);
+  }
+  60%, 100% {
+    transform: scale(1);
+  }
 }
 
 /* Setup */
