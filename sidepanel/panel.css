@@ -169,7 +169,30 @@ body {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  flex: 1;
+  flex-shrink: 0;
+}
+
+.header-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 380px) {
+  .header-meta {
+    display: none;
+  }
 }
 
 /* ── Navigation — Segmented Control ── */
@@ -1588,7 +1611,6 @@ body.ai-available .ai-feature {
   gap: 0;
   flex-shrink: 0;
   font-size: 10px;
-  margin-right: auto;
 }
 
 .header-links a {
