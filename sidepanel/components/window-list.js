@@ -389,10 +389,10 @@ export class WindowList {
       body.appendChild(this.createUngroupedSection(win.windowId, win.ungroupedTabs));
     }
 
-    // Focus window button
+    // Bring window to front button
     const focusBtn = document.createElement('button');
     focusBtn.className = 'window-focus-btn';
-    focusBtn.textContent = 'Focus Window';
+    focusBtn.textContent = 'Bring to Front';
     focusBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       chrome.windows.update(win.windowId, { focused: true });
