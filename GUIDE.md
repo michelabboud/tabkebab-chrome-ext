@@ -193,7 +193,7 @@ Each card displays:
 
 ### Actions
 
-- Click a window card to **focus** that window
+- **Bring to Front** button — brings that browser window to the foreground
 - **Consolidate** button intelligently reorganizes your windows (see below)
 - Tab counts update in real time
 
