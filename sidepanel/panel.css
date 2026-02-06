@@ -243,6 +243,55 @@ body {
   height: 18px;
 }
 
+/* Upward tooltips */
+.has-tooltip {
+  position: relative;
+}
+
+.has-tooltip::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.has-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 2px;
+  border: 4px solid transparent;
+  border-top-color: var(--border);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none;
+  z-index: 1001;
+}
+
+.has-tooltip:hover::before,
+.has-tooltip:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
 /* ── Sub-nav (secondary tabs inside Tabs view) ── */
 .sub-nav {
   display: flex;

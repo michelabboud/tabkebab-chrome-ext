@@ -333,15 +333,15 @@ const aiStatusBtn = document.getElementById('btn-ai-status');
 
 async function updateDriveStatusIcon() {
   try {
-    const result = await chrome.runtime.sendMessage({ action: 'getDriveStatus' });
-    const connected = result?.connected || false;
+    const result = await chrome.storage.local.get('driveSync');
+    const connected = result?.driveSync?.connected || false;
     driveStatusBtn.classList.toggle('connected', connected);
     driveStatusBtn.classList.toggle('disconnected', !connected);
-    driveStatusBtn.title = connected ? 'Google Drive: Connected' : 'Google Drive: Not connected (click to setup)';
+    driveStatusBtn.dataset.tooltip = connected ? 'Google Drive: Connected' : 'Google Drive: Not connected';
   } catch {
     driveStatusBtn.classList.add('disconnected');
     driveStatusBtn.classList.remove('connected');
-    driveStatusBtn.title = 'Google Drive: Not connected (click to setup)';
+    driveStatusBtn.dataset.tooltip = 'Google Drive: Not connected';
   }
 }
 
@@ -351,11 +351,11 @@ async function updateAIStatusIcon() {
     const available = result?.available || false;
     aiStatusBtn.classList.toggle('connected', available);
     aiStatusBtn.classList.toggle('disconnected', !available);
-    aiStatusBtn.title = available ? 'AI: Connected' : 'AI: Not configured (click to setup)';
+    aiStatusBtn.dataset.tooltip = available ? 'AI: Connected' : 'AI: Not configured';
   } catch {
     aiStatusBtn.classList.add('disconnected');
     aiStatusBtn.classList.remove('connected');
-    aiStatusBtn.title = 'AI: Not configured (click to setup)';
+    aiStatusBtn.dataset.tooltip = 'AI: Not configured';
   }
 }
 
@@ -387,7 +387,7 @@ updateAIStatusIcon();
 // Update status icons when storage changes
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
-    if (changes.driveToken) updateDriveStatusIcon();
+    if (changes.driveSync) updateDriveStatusIcon();
     if (changes.aiSettings) updateAIStatusIcon();
   }
 });
