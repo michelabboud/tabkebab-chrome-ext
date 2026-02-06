@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabKebab",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
 
   "permissions": [
@@ -21,7 +21,7 @@
   ],
 
   "oauth2": {
-    "client_id": "873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com",
+    "client_id": "873809052111-98bqhnbc3enk2l20iumfvsmvdhbpgq4l.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/drive.file"
     ]
