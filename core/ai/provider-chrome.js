@@ -43,6 +43,26 @@ export const ChromeAIProvider = {
       throw new AINetworkError('Chrome Built-in AI is not available. Requires Chrome 138+ with the Prompt API origin trial enabled.');
     }
 
+    // Check availability first
+    try {
+      let status;
+      if (typeof api.availability === 'function') {
+        status = await api.availability();
+      } else if (typeof api.capabilities === 'function') {
+        const caps = await api.capabilities();
+        status = caps.available === 'readily' ? 'available' : caps.available;
+      }
+      if (status === 'unavailable' || status === 'no') {
+        throw new AINetworkError('Chrome AI model is not available on this device.');
+      }
+      if (status === 'downloadable' || status === 'after-download') {
+        throw new AINetworkError('Chrome AI model needs to be downloaded first. Go to chrome://components and update "Optimization Guide On Device Model".');
+      }
+    } catch (err) {
+      if (err instanceof AINetworkError) throw err;
+      // Availability check failed, try to proceed anyway
+    }
+
     let session;
     try {
       const options = {};

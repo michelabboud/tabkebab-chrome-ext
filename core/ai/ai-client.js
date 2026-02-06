@@ -27,7 +27,7 @@ const NO_KEY_PROVIDERS = new Set([ProviderId.CHROME_AI]);
 
 const AI_SETTINGS_KEY = 'aiSettings';
 const SESSION_KEY_PREFIX = 'aiDecryptedKey_';
-const REQUEST_TIMEOUT_MS = 60_000; // 60s for on-device Chrome AI
+const REQUEST_TIMEOUT_MS = 120_000; // 120s for on-device Chrome AI (model loading can be slow)
 
 const queue = new AIQueue();
 
