@@ -194,8 +194,27 @@ Each card displays:
 ### Actions
 
 - Click a window card to **focus** that window
-- **Consolidate** button merges all tabs from all windows into the current window
+- **Consolidate** button intelligently reorganizes your windows (see below)
 - Tab counts update in real time
+
+### Consolidate Windows
+
+The **Consolidate** button runs a 3-phase optimization:
+
+1. **Redistribute from huge windows** — Windows with >100 tabs have excess tabs moved to smaller windows that have room. Targets ~50 tabs per window.
+
+2. **Merge tiny windows** — Windows with <30 tabs are merged into larger windows to reduce clutter.
+
+3. **Balance groups** — Windows with >8 Chrome tab groups have their smallest groups moved to windows with fewer groups. This keeps each window manageable.
+
+After consolidation, the grouping pipeline runs automatically to organize tabs by domain.
+
+| Threshold | Value | Purpose |
+|-----------|-------|---------|
+| Window cap | 100 tabs | Windows above this are considered oversized |
+| Ideal size | 50 tabs | Target tabs per window after redistribution |
+| Min size | 30 tabs | Windows below this get merged |
+| Max groups | 8 | Groups per window before rebalancing |
 
 ---
 

@@ -28,6 +28,11 @@ All notable changes to TabKebab are documented in this file.
 
 - **Auto-kebab default** — now enabled by default at 3 hours (was 0/off)
 - **Duplicate badge** — now includes empty pages count in the badge total
+- **Consolidate windows improved** — now a 3-phase smart consolidation:
+  - Phase 1: Redistributes excess tabs from huge windows (>100 tabs) to smaller ones
+  - Phase 2: Merges tiny windows (<30 tabs) into larger ones
+  - Phase 3: Balances groups across windows (max 8 groups per window)
+  - Targets 50 tabs per window for optimal organization
 
 ### Fixed
 
