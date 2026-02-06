@@ -437,7 +437,94 @@ export async function consolidateWindows(onProgress) {
     }
   } else if (hugeWindows.length === 0) {
     report(Phase.EXECUTOR, 'No windows need consolidation.');
-    return { tabsMoved: 0, windowsClosed: 0, windowsConsolidated: 0, tabsRedistributed: 0, pipelineResult: null };
+  }
+
+  // ── Phase 3: Balance groups across windows ──
+  snapshot = await takeSnapshot();
+  let groupsMoved = 0;
+
+  // Build window stats with group info
+  const windowGroupStats = [];
+  for (const [windowId, tabs] of snapshot.tabsByWindow) {
+    // Group tabs by their Chrome group ID
+    const groupMap = new Map();
+    for (const tab of tabs) {
+      const gid = tab.groupId ?? -1;
+      if (!groupMap.has(gid)) groupMap.set(gid, []);
+      groupMap.get(gid).push(tab);
+    }
+    // Get actual groups (exclude ungrouped tabs which have groupId -1)
+    const groups = [...groupMap.entries()]
+      .filter(([gid]) => gid !== -1)
+      .map(([gid, gTabs]) => ({ groupId: gid, tabs: gTabs, count: gTabs.length }));
+
+    windowGroupStats.push({
+      windowId,
+      tabs,
+      tabCount: tabs.length,
+      groups,
+      groupCount: groups.length,
+    });
+  }
+
+  // Find windows with too many groups
+  const crowdedWindows = windowGroupStats
+    .filter(w => w.groupCount > MAX_GROUPS_PER_WINDOW)
+    .sort((a, b) => b.groupCount - a.groupCount);
+
+  // Find windows with room for more groups
+  const roomyWindows = windowGroupStats
+    .filter(w => w.groupCount < MAX_GROUPS_PER_WINDOW && w.tabCount < WINDOW_CAP)
+    .sort((a, b) => a.groupCount - b.groupCount);
+
+  if (crowdedWindows.length > 0) {
+    report(Phase.EXECUTOR, `Balancing groups from ${crowdedWindows.length} window(s) with too many groups...`);
+
+    for (const crowded of crowdedWindows) {
+      const excessGroupCount = crowded.groupCount - MAX_GROUPS_PER_WINDOW;
+      // Sort groups by size (smallest first) to move smaller groups
+      const groupsToMove = crowded.groups
+        .sort((a, b) => a.count - b.count)
+        .slice(0, excessGroupCount);
+
+      for (const group of groupsToMove) {
+        // Find a window with room for this group
+        const target = roomyWindows.find(w =>
+          w.groupCount < MAX_GROUPS_PER_WINDOW &&
+          w.tabCount + group.count <= WINDOW_CAP &&
+          w.windowId !== crowded.windowId
+        );
+
+        if (target) {
+          report(Phase.EXECUTOR, `Moving group (${group.count} tabs) to window with ${target.groupCount} groups...`);
+          const moved = await moveTabsInBatches(group.tabs.map(t => t.id), target.windowId);
+          target.tabCount += moved;
+          target.groupCount++;
+          groupsMoved++;
+          totalTabsMoved += moved;
+        } else {
+          // No room anywhere, create new window for this group
+          report(Phase.EXECUTOR, `Creating new window for group with ${group.count} tabs...`);
+          try {
+            const firstTab = group.tabs[0];
+            const newWindow = await chrome.windows.create({ tabId: firstTab.id });
+            if (group.tabs.length > 1) {
+              await moveTabsInBatches(group.tabs.slice(1).map(t => t.id), newWindow.id);
+            }
+            groupsMoved++;
+            totalTabsMoved += group.count;
+            // Add to roomy windows for next iteration
+            roomyWindows.push({
+              windowId: newWindow.id,
+              tabCount: group.count,
+              groupCount: 1,
+            });
+          } catch (e) {
+            console.warn('[TabKebab] Failed to create window for group:', e);
+          }
+        }
+      }
+    }
   }
 
   // Re-run the full grouping pipeline to fix groups
@@ -449,7 +536,7 @@ export async function consolidateWindows(onProgress) {
   const survivingIds = new Set(postSnapshot.tabsByWindow.keys());
   const windowsClosed = sources.filter(s => !survivingIds.has(s.windowId)).length;
 
-  return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, tabsRedistributed, pipelineResult };
+  return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, tabsRedistributed, groupsMoved, pipelineResult };
 }
 
 // ── Manual groups ──
