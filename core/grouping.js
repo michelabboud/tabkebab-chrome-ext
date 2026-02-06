@@ -312,9 +312,15 @@ export async function getWindowStats() {
   };
 }
 
+const IDEAL_WINDOW_SIZE = 50;   // Target tabs per window
+const MAX_GROUPS_PER_WINDOW = 8; // Max Chrome tab groups per window
+
 /**
- * Consolidate under-populated windows (< 30 tabs) by moving their tabs
- * into windows with room, then re-run the grouping pipeline.
+ * Consolidate windows for optimal organization:
+ * 1. Move excess tabs from huge windows (> WINDOW_CAP) to smaller windows
+ * 2. Merge under-utilized windows (< 30 tabs) into others
+ * 3. Balance groups across windows (max MAX_GROUPS_PER_WINDOW per window)
+ * Then re-run the grouping pipeline.
  */
 export async function consolidateWindows(onProgress) {
   const report = (phase, detail) => {
@@ -322,9 +328,83 @@ export async function consolidateWindows(onProgress) {
   };
 
   report(Phase.SNAPSHOT, 'Scanning windows...');
-  const snapshot = await takeSnapshot();
+  let snapshot = await takeSnapshot();
 
-  // Classify windows into sources (small) and targets (have room)
+  let totalTabsMoved = 0;
+  let windowsConsolidated = 0;
+  let tabsRedistributed = 0;
+
+  // ── Phase 1: Redistribute from huge windows to smaller ones ──
+  const windowStats = [];
+  for (const [windowId, tabs] of snapshot.tabsByWindow) {
+    // Count groups in this window
+    const groupIds = new Set(tabs.map(t => t.groupId).filter(g => g !== -1));
+    windowStats.push({
+      windowId,
+      tabs,
+      count: tabs.length,
+      groupCount: groupIds.size,
+    });
+  }
+
+  // Find huge windows (over cap) and small windows (under ideal with room)
+  const hugeWindows = windowStats.filter(w => w.count > WINDOW_CAP);
+  const smallWindows = windowStats
+    .filter(w => w.count < IDEAL_WINDOW_SIZE && w.count >= CONSOLIDATION_THRESHOLD)
+    .sort((a, b) => a.count - b.count);
+
+  if (hugeWindows.length > 0 && smallWindows.length > 0) {
+    report(Phase.EXECUTOR, `Redistributing tabs from ${hugeWindows.length} oversized window(s)...`);
+
+    for (const huge of hugeWindows) {
+      const excess = huge.count - IDEAL_WINDOW_SIZE;
+      if (excess <= 0) continue;
+
+      // Get tabs to move (from the end, non-active, non-pinned)
+      const movableTabs = huge.tabs
+        .filter(t => !t.active && !t.pinned)
+        .slice(-excess);
+
+      let moved = 0;
+      for (const target of smallWindows) {
+        if (moved >= excess) break;
+        const room = IDEAL_WINDOW_SIZE - target.count;
+        if (room <= 0) continue;
+
+        const batch = movableTabs.slice(moved, moved + room);
+        if (batch.length === 0) continue;
+
+        report(Phase.EXECUTOR, `Moving ${batch.length} tab(s) from window with ${huge.count} to window with ${target.count}...`);
+        const batchMoved = await moveTabsInBatches(batch.map(t => t.id), target.windowId);
+        moved += batchMoved;
+        target.count += batchMoved;
+        tabsRedistributed += batchMoved;
+      }
+
+      // If still have excess and no small windows with room, create new window
+      if (moved < excess) {
+        const remaining = movableTabs.slice(moved);
+        if (remaining.length > 0) {
+          report(Phase.EXECUTOR, `Creating new window for ${remaining.length} excess tab(s)...`);
+          try {
+            const firstTab = remaining[0];
+            const newWindow = await chrome.windows.create({ tabId: firstTab.id });
+            if (remaining.length > 1) {
+              await moveTabsInBatches(remaining.slice(1).map(t => t.id), newWindow.id);
+            }
+            tabsRedistributed += remaining.length;
+          } catch (e) {
+            console.warn('[TabKebab] Failed to create overflow window:', e);
+          }
+        }
+      }
+    }
+
+    // Re-snapshot after redistribution
+    snapshot = await takeSnapshot();
+  }
+
+  // ── Phase 2: Consolidate small windows ──
   const sources = [];
   const targets = [];
 
@@ -340,27 +420,24 @@ export async function consolidateWindows(onProgress) {
   sources.sort((a, b) => a.count - b.count);
   targets.sort((a, b) => b.room - a.room);
 
-  if (sources.length === 0) {
-    report(Phase.EXECUTOR, 'No under-utilized windows to consolidate.');
-    return { tabsMoved: 0, windowsClosed: 0, windowsConsolidated: 0, pipelineResult: null };
-  }
+  if (sources.length > 0) {
+    report(Phase.EXECUTOR, `Consolidating ${sources.length} under-utilized window(s)...`);
 
-  let totalTabsMoved = 0;
-  let windowsConsolidated = 0;
+    for (const source of sources) {
+      const target = targets.find(t => t.room >= source.count);
+      if (!target) continue;
 
-  report(Phase.EXECUTOR, `Consolidating ${sources.length} under-utilized window(s)...`);
+      report(Phase.EXECUTOR, `Moving ${source.count} tab(s) into window with ${target.count} tabs...`);
+      const moved = await moveTabsInBatches(source.tabs.map(t => t.id), target.windowId);
+      totalTabsMoved += moved;
 
-  for (const source of sources) {
-    const target = targets.find(t => t.room >= source.count);
-    if (!target) continue;
-
-    report(Phase.EXECUTOR, `Moving ${source.count} tab(s) into window with ${target.count} tabs...`);
-    const moved = await moveTabsInBatches(source.tabs.map(t => t.id), target.windowId);
-    totalTabsMoved += moved;
-
-    target.count += moved;
-    target.room -= moved;
-    windowsConsolidated++;
+      target.count += moved;
+      target.room -= moved;
+      windowsConsolidated++;
+    }
+  } else if (hugeWindows.length === 0) {
+    report(Phase.EXECUTOR, 'No windows need consolidation.');
+    return { tabsMoved: 0, windowsClosed: 0, windowsConsolidated: 0, tabsRedistributed: 0, pipelineResult: null };
   }
 
   // Re-run the full grouping pipeline to fix groups
@@ -372,7 +449,7 @@ export async function consolidateWindows(onProgress) {
   const survivingIds = new Set(postSnapshot.tabsByWindow.keys());
   const windowsClosed = sources.filter(s => !survivingIds.has(s.windowId)).length;
 
-  return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, pipelineResult };
+  return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, tabsRedistributed, pipelineResult };
 }
 
 // ── Manual groups ──
