@@ -69,9 +69,17 @@ export class DuplicateFinder {
     const count = tabIds.length;
     try {
       await this.send({ action: 'closeTabs', tabIds });
-      // Small delay to ensure Chrome's tab list is updated
-      await new Promise(r => setTimeout(r, 100));
+      // Clear local state immediately
+      this.emptyPages = [];
+      this.renderEmptyPages();
+      // Update badge immediately
+      const dupeCount = this.duplicates
+        ? this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0)
+        : 0;
+      document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count: dupeCount } }));
       showToast(`Closed ${count} empty page(s)`, 'success');
+      // Delay then rescan to confirm
+      await new Promise(r => setTimeout(r, 200));
       await this.scan();
     } catch {
       showToast('Failed to close empty pages', 'error');
