@@ -3232,6 +3232,48 @@ body.focus-blink {
   50% { background-color: var(--danger-soft); }
 }
 
+/* Status icons in header */
+.status-icon {
+  position: relative;
+}
+
+.status-icon.connected {
+  color: var(--success, #22c55e);
+}
+
+.status-icon.disconnected {
+  color: var(--danger, #ef4444);
+}
+
+.status-icon::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.status-icon.connected::after {
+  background: var(--success, #22c55e);
+}
+
+.status-icon.disconnected::after {
+  background: var(--danger, #ef4444);
+}
+
+/* Highlight section animation */
+.highlight-section {
+  animation: highlight-pulse 0.5s ease-in-out 2;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px var(--accent); }
+}
+
 /* API provider guide box */
 .api-guide {
   background: var(--bg-secondary);

@@ -327,6 +327,71 @@ async function updateAIVisibility() {
 
 updateAIVisibility();
 
+// --- Status icons (Drive & AI) ---
+const driveStatusBtn = document.getElementById('btn-drive-status');
+const aiStatusBtn = document.getElementById('btn-ai-status');
+
+async function updateDriveStatusIcon() {
+  try {
+    const result = await chrome.runtime.sendMessage({ action: 'getDriveStatus' });
+    const connected = result?.connected || false;
+    driveStatusBtn.classList.toggle('connected', connected);
+    driveStatusBtn.classList.toggle('disconnected', !connected);
+    driveStatusBtn.title = connected ? 'Google Drive: Connected' : 'Google Drive: Not connected (click to setup)';
+  } catch {
+    driveStatusBtn.classList.add('disconnected');
+    driveStatusBtn.classList.remove('connected');
+    driveStatusBtn.title = 'Google Drive: Not connected (click to setup)';
+  }
+}
+
+async function updateAIStatusIcon() {
+  try {
+    const result = await chrome.runtime.sendMessage({ action: 'isAIAvailable' });
+    const available = result?.available || false;
+    aiStatusBtn.classList.toggle('connected', available);
+    aiStatusBtn.classList.toggle('disconnected', !available);
+    aiStatusBtn.title = available ? 'AI: Connected' : 'AI: Not configured (click to setup)';
+  } catch {
+    aiStatusBtn.classList.add('disconnected');
+    aiStatusBtn.classList.remove('connected');
+    aiStatusBtn.title = 'AI: Not configured (click to setup)';
+  }
+}
+
+function scrollToSettingsSection(sectionId) {
+  // Switch to settings view
+  settingsBtn.click();
+  // Scroll to the section after a short delay
+  setTimeout(() => {
+    const section = document.getElementById(sectionId);
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      section.classList.add('highlight-section');
+      setTimeout(() => section.classList.remove('highlight-section'), 2000);
+    }
+  }, 100);
+}
+
+driveStatusBtn.addEventListener('click', () => {
+  scrollToSettingsSection('settings-drive-section');
+});
+
+aiStatusBtn.addEventListener('click', () => {
+  scrollToSettingsSection('settings-ai-section');
+});
+
+updateDriveStatusIcon();
+updateAIStatusIcon();
+
+// Update status icons when storage changes
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    if (changes.driveToken) updateDriveStatusIcon();
+    if (changes.aiSettings) updateAIStatusIcon();
+  }
+});
+
 // --- Help button ---
 document.getElementById('btn-help').addEventListener('click', () => toggleHelp());
 
