@@ -9,6 +9,18 @@ TabKebab is a Chrome Manifest V3 side-panel extension for tab management. Zero d
 
 ## Extension ID
 - **Published**: `cgfnjdcioainbclbbihglaopbhikhdob`
+- **Dev (unpacked)**: `hkhlbjmokednepfjmnlglapgppfdpmck`
+
+## OAuth2 Client IDs (Google Drive)
+- **Production**: `873809052111-98bqhnbc3enk2l20iumfvsmvdhbpgq4l.apps.googleusercontent.com`
+- **Dev**: `873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com`
+
+## Release Checklist
+Before publishing to Chrome Web Store:
+1. Merge `dev` → `main`
+2. Update `manifest.json` client_id to **Production** OAuth ID
+3. Bump version in `manifest.json`
+4. Zip and upload to Chrome Web Store
 
 ## Live URLs
 - **Website**: https://tabkebab.com (deployed via Cloudflare Workers, static assets)
