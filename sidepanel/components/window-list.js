@@ -1,6 +1,7 @@
 // window-list.js — Renders Chrome windows with tab groups, stats, and consolidation
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -273,6 +274,34 @@ export class WindowList {
       }
     });
     header.appendChild(kebabBtn);
+
+    // Close button (only for non-focused windows)
+    if (!win.focused) {
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'close-btn';
+      closeBtn.textContent = 'Close';
+      closeBtn.title = 'Close this window';
+      closeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const ok = await showConfirm({
+          title: 'Close window?',
+          message: `Close Window ${win.windowNumber} with ${win.tabCount} tab${win.tabCount !== 1 ? 's' : ''}? This cannot be undone.`,
+          confirmLabel: 'Close',
+          danger: true,
+        });
+        if (!ok) return;
+        closeBtn.disabled = true;
+        try {
+          await chrome.windows.remove(win.windowId);
+          showToast(`Closed Window ${win.windowNumber}`, 'success');
+          this.refresh();
+        } catch {
+          showToast('Close failed', 'error');
+          closeBtn.disabled = false;
+        }
+      });
+      header.appendChild(closeBtn);
+    }
 
     if (win.focused) {
       const badge = document.createElement('span');

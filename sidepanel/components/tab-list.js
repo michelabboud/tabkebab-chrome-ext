@@ -1,6 +1,7 @@
 // tab-list.js — Renders tabs grouped by domain with collapsible headers + pipeline progress
 
 import { showToast } from './toast.js';
+import { showConfirm } from './confirm-dialog.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -301,6 +302,33 @@ export class TabList {
         this.kebabDomain(group.domain);
       });
       header.appendChild(kebabBtn);
+
+      // Close button
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'close-btn';
+      closeBtn.textContent = 'Close';
+      closeBtn.title = 'Close all tabs from this domain';
+      closeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const tabIds = group.tabs.map(t => t.id);
+        const ok = await showConfirm({
+          title: 'Close domain?',
+          message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from ${group.domain}? This cannot be undone.`,
+          confirmLabel: 'Close',
+          danger: true,
+        });
+        if (!ok) return;
+        closeBtn.disabled = true;
+        try {
+          await this.send({ action: 'closeTabs', tabIds });
+          showToast(`Closed ${tabIds.length} tabs from ${group.domain}`, 'success');
+          this.refresh();
+        } catch {
+          showToast('Close failed', 'error');
+          closeBtn.disabled = false;
+        }
+      });
+      header.appendChild(closeBtn);
 
       // Apply keep-awake class to header
       if (isKeepAwake) {

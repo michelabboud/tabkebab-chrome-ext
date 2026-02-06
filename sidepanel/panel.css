@@ -2136,6 +2136,31 @@ body.ai-available .ai-feature {
   cursor: not-allowed;
 }
 
+/* Close button for domains/windows */
+.domain-group-header .close-btn,
+.window-card-header .close-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  transition: background 0.15s, color 0.15s;
+}
+
+.domain-group-header .close-btn:hover,
+.window-card-header .close-btn:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.domain-group-header .close-btn:disabled,
+.window-card-header .close-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .stash-source-badge.source-auto {
   background: rgba(156, 163, 175, 0.12);
   color: var(--text-secondary);
