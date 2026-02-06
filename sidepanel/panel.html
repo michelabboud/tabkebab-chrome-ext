@@ -613,8 +613,30 @@
 
           <!-- Chrome AI config -->
           <div id="ai-config-chrome-ai" class="provider-config" hidden>
-            <p class="description">Chrome Built-in AI uses Gemini Nano on-device. Requires Chrome 138+ with the Prompt API origin trial. No API key needed.</p>
+            <p class="description">Chrome Built-in AI uses Gemini Nano on-device. Free, private, no API key needed — but requires setup.</p>
             <div id="chrome-ai-availability" class="drive-status">Checking availability...</div>
+            <details class="chrome-ai-guide">
+              <summary>Setup Guide</summary>
+              <div class="guide-content">
+                <p><strong>Requirements:</strong></p>
+                <ul>
+                  <li>Chrome 127+ (ideally 138+)</li>
+                  <li>22GB free disk space</li>
+                  <li>GPU with 4GB+ VRAM</li>
+                </ul>
+                <p><strong>Steps:</strong></p>
+                <ol>
+                  <li>Go to <code>chrome://flags</code></li>
+                  <li>Enable "<em>Prompt API for Gemini Nano</em>"</li>
+                  <li>Enable "<em>Enables optimization guide on device</em>"</li>
+                  <li>Restart Chrome</li>
+                  <li>Go to <code>chrome://components</code></li>
+                  <li>Find "<em>Optimization Guide On Device Model</em>"</li>
+                  <li>Click "Check for update" (downloads ~2GB)</li>
+                </ol>
+                <p class="guide-note">After setup, return here and test the connection.</p>
+              </div>
+            </details>
           </div>
 
           <!-- Custom (OpenAI-compatible) config -->

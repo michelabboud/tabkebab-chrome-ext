@@ -185,12 +185,15 @@ export class AISettings {
 
     try {
       const result = await this.send({ action: 'testAIConnection', providerId: 'chrome-ai', config: {} });
-      el.textContent = result.success
-        ? 'Available and ready to use'
-        : 'Not available in this browser';
-      el.className = result.success ? 'drive-status connected' : 'drive-status';
+      if (result.success) {
+        el.textContent = 'Available and ready to use';
+        el.className = 'drive-status connected';
+      } else {
+        el.textContent = 'Not available — see Setup Guide below';
+        el.className = 'drive-status';
+      }
     } catch {
-      el.textContent = 'Not available';
+      el.textContent = 'Not available — see Setup Guide below';
       el.className = 'drive-status';
     }
   }
