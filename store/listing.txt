@@ -65,7 +65,7 @@ TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, an
 • Zero data collection — no telemetry, no analytics, no tracking
 • Everything stored locally unless you explicitly opt in to AI or Drive
 • API keys encrypted with AES-GCM 256-bit
-• Full privacy policy: https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/PRIVACY.md
+• Full privacy policy: https://tabkebab.com/privacy
 
 CATEGORY:
 Productivity
@@ -74,4 +74,4 @@ LANGUAGE:
 English
 
 WEBSITE:
-https://github.com/michelabboud/tabkebab-chrome-ext
+https://tabkebab.com
