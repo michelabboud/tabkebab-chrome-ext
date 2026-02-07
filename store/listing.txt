@@ -6,10 +6,19 @@ EXTENSION NAME:
 TabKebab
 
 SHORT DESCRIPTION (132 chars max):
-Stack and organize your tabs — group by domain or AI, stash and restore, save sessions, close duplicates, sleep idle tabs.
+Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.
 
 DETAILED DESCRIPTION:
 TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, and restore tabs across windows — manually or with AI.
+
+🎯 FOCUS MODE
+• Time-bounded productivity sessions with distraction blocking
+• 4 built-in profiles: Coding, Writing, Research, Meeting
+• Live countdown timer with profile-colored HUD
+• Blocks navigation to distracting sites (YouTube, Reddit, social media)
+• Three blocking modes: Strict (whitelist only), Curated Categories, AI Detection
+• Flexible allowlist for domains, URLs, and Chrome tab groups
+• Session reports with stats and focus history
 
 🗂 ORGANIZE
 • Group tabs by domain into native Chrome tab groups with one click
@@ -37,6 +46,7 @@ TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, an
 
 🔍 FIND & CLEAN
 • Duplicate detection and bulk close across all windows
+• Empty pages cleanup (about:blank, new tabs)
 • Natural language commands: "close YouTube tabs", "find my GitHub tabs", "group by project"
 
 📤 EXPORT & SYNC
