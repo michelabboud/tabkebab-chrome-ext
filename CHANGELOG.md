@@ -4,6 +4,20 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.3] — 2026-07-14
+
+### Added
+
+- Dependency-free Bun regression harness with isolated Chrome storage, events, tab/window/group state, runtime ports, call recording, and one-shot failure injection.
+- Repository-wide JavaScript parse and Manifest V3/version consistency checks.
+- Checked side-panel `sendOrThrow()` message boundary covering successful, error-shaped, rejected, and null responses.
+- GitHub Actions test gate for pull requests, manual runs, and pushes to `main` using pinned Bun `1.3.11`.
+
+### Changed
+
+- Documented the automated commands and the boundary between mocked orchestration and mandatory real-Chrome verification.
+- Ignored generated Bun coverage output while retaining test evidence reports.
+
 ## [1.2.2] — 2026-07-14
 
 ### Added

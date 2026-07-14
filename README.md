@@ -191,12 +191,30 @@ See [Google Drive Setup Guide](store/google-drive-setup.md) for OAuth configurat
 3. Select a provider, enter your API key, and choose a model
 4. The AI command bar and smart grouping features will activate
 
+## Development and verification
+
+The extension remains dependency-free and Chrome loads this repository directly; there is no package install, bundler, or generated runtime output. Automated tests use Bun `1.3.11`, pinned in [`.bun-version`](.bun-version). Install that exact Bun version and verify it with `bun --version` before running the gate.
+
+Run the same commands required by CI from the repository root:
+
+```bash
+bun test
+bun test --coverage
+bun test tests/syntax.test.js
+```
+
+The repository-owned Chrome mock resets local/session storage, listeners, tab/window/group state, runtime ports, failures, and call records between tests. It is intentionally an orchestration boundary, not a browser emulator: DOM, IndexedDB, extension lifecycle, OAuth, and Chrome Prompt API behavior still require the unpacked-extension Chrome smoke matrix.
+
+GitHub Actions runs all three commands, in that order, for pull requests, manual dispatches, and pushes to `main`. Tag pushes do not trigger this workflow.
+
 ## Project Structure
 
 ```
 TabKebab/
   manifest.json              # Extension manifest (MV3)
+  bunfig.toml                # Bun test preload and coverage settings
   service-worker.js          # Background service worker & message hub
+  tests/                     # Bun regressions and Chrome API test doubles
   icons/                     # Logo and icon assets (SVG + PNG)
   core/
     tabs-api.js              # Chrome tabs/windows API wrapper

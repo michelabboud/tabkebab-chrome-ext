@@ -18,6 +18,9 @@ Thanks for your interest in contributing to TabKebab!
    - Open `chrome://extensions`
    - Enable **Developer Mode**
    - Click **Load unpacked** and select the project folder
+5. Install Bun `1.3.11`, the exact version pinned in `.bun-version`
+
+No package installation is required. TabKebab has no runtime or test dependencies and Chrome loads its source files directly.
 
 ## Branch Strategy
 
@@ -29,17 +32,26 @@ Thanks for your interest in contributing to TabKebab!
 ## Submitting Changes
 
 1. Make your changes on your feature branch
-2. Test thoroughly in Chrome
-3. Push to your fork
-4. Open a Pull Request targeting the **`dev`** branch
-5. Describe what you changed and why
+2. Run the complete automated gate from the repository root:
+   ```bash
+   bun test
+   bun test --coverage
+   bun test tests/syntax.test.js
+   ```
+3. Test browser-only behavior thoroughly in unpacked Chrome
+4. Push to your fork
+5. Open a Pull Request targeting the **`dev`** branch
+6. Describe what you changed and why
+
+GitHub Actions repeats the three Bun commands, in order, for pull requests, manual dispatches, and pushes to `main`; tag pushes are excluded.
 
 ## Guidelines
 
 - **No frameworks, no build tools** — this project is vanilla HTML, CSS, and JS
 - **No external dependencies** — keep it zero-dependency
 - **Match the existing code style** — follow the patterns you see in the codebase
-- **Test your changes** — load the extension and verify everything works
+- **Test success and failure paths** — start behavior changes with a failing regression, then run the full gate
+- **Respect the test boundary** — the Chrome mock verifies policy and API orchestration, not DOM, IndexedDB, extension lifecycle, OAuth, or Prompt API behavior; verify those in real Chrome
 - **Keep PRs focused** — one feature or fix per PR
 
 ## Reporting Bugs

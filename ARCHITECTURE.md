@@ -42,7 +42,19 @@ Credentials, decrypted keys, OAuth tokens, caches, and active Focus Mode state a
 
 ## Verification architecture
 
-Bun `1.3.11` is the pinned test runtime. `bun:test` covers pure policies, data merges, response contracts, retry behavior, and mocked Chrome API orchestration without adding packages. Bun does not supply IndexedDB or a browser DOM; those integrations are verified in an unpacked-extension Chrome smoke matrix.
+Bun `1.3.11` is the pinned test runtime. `bun:test` covers pure policies, data merges, response contracts, retry behavior, and mocked Chrome API orchestration without adding packages. `bunfig.toml` preloads a fresh repository-owned Chrome double before every test and resets it afterward.
+
+The mock keeps `storage.local` and `storage.session` separate, emits Chrome-shaped storage changes, models mutable tabs/windows/groups, supplies resettable Chrome events and peer-only runtime ports, records API calls, and supports one-shot failure injection. This is a deterministic orchestration seam, not evidence that browser integration works. No DOM or IndexedDB shim is installed; DOM rendering, IndexedDB CRUD, extension lifecycle, OAuth, and Prompt API behavior stay in the unpacked-extension Chrome smoke matrix.
+
+The required local and CI gate is:
+
+```bash
+bun test
+bun test --coverage
+bun test tests/syntax.test.js
+```
+
+The final command parses every tracked or unignored JavaScript file and verifies that `manifest.json` remains Manifest V3 and mirrors `VERSION`. GitHub Actions runs this sequence for pull requests, manual dispatches, and pushes to `main`, excluding tag pushes. Chrome still loads the source tree directly; testing adds no production dependency, package manifest, build, or generated runtime code.
 
 See:
 

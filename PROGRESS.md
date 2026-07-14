@@ -2,11 +2,19 @@
 
 ## Current state
 
-- Repository version: `1.2.2`
+- Repository version: `1.2.3`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
-- Plan status: detailed 15-task TDD implementation plan ready for approval
-- Implementation status: not started
+- Plan status: approved 15-task TDD implementation plan in progress
+- Implementation status: Task 1 complete; Bun regression and CI boundary established
+
+## Completed implementation slices
+
+### Task 1 — Bun regression and CI boundary (`1.2.3`)
+
+- Added the pinned Bun preload, isolated Chrome API mock, syntax/version checks, and checked side-panel message client.
+- Added the three-command GitHub Actions gate for pull requests, manual dispatches, and `main` pushes while excluding tag pushes.
+- Kept the runtime dependency-free and directly loadable by Chrome; browser-only DOM, IndexedDB, lifecycle, OAuth, and Prompt API behavior remain real-Chrome gates.
 
 ## Confirmed remediation scope
 
@@ -36,4 +44,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Michel reviews and explicitly approves `docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md`. After approval, execution starts with Task 1's Bun regression/CI boundary and proceeds through the plan's task and phase release checkpoints.
+Task 2 makes session and stash restoration complete-or-recoverable, with exact restore outcomes, source retention after partial failure, and mute/discard/unmute regression coverage.
