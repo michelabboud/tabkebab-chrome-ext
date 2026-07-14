@@ -3,6 +3,8 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
+import { sendOrThrow } from '../message-client.js';
+import { formatRestoreFeedback } from '../restore-feedback.js';
 
 export class StashList {
   constructor(rootEl) {
@@ -168,7 +170,7 @@ export class StashList {
       restoreBtn.disabled = true;
       restoreBtn.textContent = 'Restoring...';
       this.activeRestoreId = stash.id;
-      await this.restoreStash(stash.id, stash.name, { mode: 'windows' });
+      await this.restoreStash(stash.id, { mode: 'windows' });
       this.activeRestoreId = null;
       this.hideProgress(stash.id);
       restoreBtn.disabled = false;
@@ -187,7 +189,7 @@ export class StashList {
       restoreHereBtn.disabled = true;
       restoreHereBtn.textContent = 'Restoring...';
       this.activeRestoreId = stash.id;
-      await this.restoreStash(stash.id, stash.name, { mode: 'here' });
+      await this.restoreStash(stash.id, { mode: 'here' });
       this.activeRestoreId = null;
       this.hideProgress(stash.id);
       restoreHereBtn.disabled = false;
@@ -252,7 +254,7 @@ export class StashList {
     }
   }
 
-  async restoreStash(id, name, options) {
+  async restoreStash(id, options) {
     try {
       // Let service worker read removeStashAfterRestore from settings
       const result = await this.send({
@@ -261,21 +263,8 @@ export class StashList {
         options,
       });
 
-      if (result.restoredCount === 0) {
-        showToast('All tabs already open \u2014 nothing to restore', 'info');
-      } else {
-        const parts = [`Restored ${result.restoredCount} tabs`];
-        if (result.windowsCreated > 0) {
-          parts[0] += ` in ${result.windowsCreated} window${result.windowsCreated > 1 ? 's' : ''}`;
-        }
-        if (result.groupsRestored > 0) {
-          parts.push(`${result.groupsRestored} group${result.groupsRestored > 1 ? 's' : ''} restored`);
-        }
-        if (result.skippedDuplicate > 0) {
-          parts.push(`${result.skippedDuplicate} duplicate${result.skippedDuplicate > 1 ? 's' : ''} skipped`);
-        }
-        showToast(parts.join(' \u2014 '), 'success');
-      }
+      const feedback = formatRestoreFeedback(result, { source: 'stash' });
+      showToast(feedback.message, feedback.type);
       this.refresh();
     } catch (err) {
       showToast(`Restore failed: ${err.message}`, 'error');
@@ -388,6 +377,6 @@ export class StashList {
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 }

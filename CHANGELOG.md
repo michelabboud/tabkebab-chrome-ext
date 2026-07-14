@@ -4,6 +4,25 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.4] — 2026-07-14
+
+### Added
+
+- One dependency-free restore coordinator and fixed outcome contract for session and stash restoration, including requested, restored, duplicate, invalid, failed, and complete state.
+- Regression coverage for partial batch settlement, saved-record immutability, pinned/group association, discard audio ordering, cleanup retries, error scopes, retained stashes, and counted UI warnings.
+- Redacted real-Chrome smoke evidence for a non-discarding session restore and a retained partial stash.
+
+### Changed
+
+- Session and stash wrappers now share the same cloned, success-preserving restore pipeline.
+- Restore notifications use the checked message boundary and show warning counts whenever an outcome is incomplete.
+
+### Fixed
+
+- Kept the original stash unchanged when any URL is invalid or any Chrome restore operation fails, even if delete-after-restore was requested.
+- Preserved successful saved-tab metadata when a sibling creation rejects instead of shifting pinned/group data by array index.
+- Muted only background tabs entering the discard pipeline, unmuted after every discard attempt, retried pending cleanup in an outer `finally`, and kept the first visible tab active and unmuted.
+
 ## [1.2.3] — 2026-07-14
 
 ### Added

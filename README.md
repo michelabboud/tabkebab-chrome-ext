@@ -50,9 +50,9 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 
 - **Save** full snapshots of every window, tab, and tab group layout
 - **Saved / Auto tabs** — sessions view split into **Saved** (user-created) and **Auto** (automatic) sub-tabs for clean separation
-- **Restore** with automatic deduplication — already-open tabs are skipped
+- **Recoverable restore outcomes** — every saved tab is reported as restored, already open, invalid, or failed
 - **Restore modes**: original windows, current window, or single new window
-- **Pipeline restore** for large sessions (20+ tabs): batched creation → load → discard with two-phase progress tracking
+- **Audio-safe pipeline restore**: batched creation → temporary background mute → discard → guaranteed unmute cleanup; non-discarding restores never mute
 - **Auto-save** on browser start and at configurable intervals (default 24h), with retention policy
 - **Per-session export** as JSON for sharing or backup
 - **Rename and delete** sessions from the panel
@@ -61,7 +61,7 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 
 - **Stash and close** tabs by window, Chrome group, domain, or all at once
 - Save to **IndexedDB** — no storage limits
-- **Lazy restore** for large stashes: batched with per-batch discard to avoid overwhelming Chrome
+- **Fail-closed stash restore**: incomplete restores retain the unchanged IndexedDB source even when delete-after-restore is enabled
 - **Two-phase progress bar**: "Creating tabs..." then "Loading... X / Y ready" with animated stripe
 - **Restored badge** on stashes already restored, with confirmation before re-restoring
 - **Favicon previews**, source badges, tab count, and one-click restore or delete

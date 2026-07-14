@@ -9,6 +9,7 @@ import { Prompts } from './core/ai/prompts.js';
 import { filterTabs, executeNLAction } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
+import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
 import { getCachedFocusState, getFocusState, isBlockedDomain, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles } from './core/focus.js';
@@ -873,6 +874,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true; // keep channel open for async response
 });
 
+/**
+ * Apply the storage policy for one completed stash restore.
+ * Incomplete outcomes leave the original IndexedDB record untouched.
+ */
+export async function applyStashRestoreDisposition(
+  stash,
+  restoreResult,
+  removeAfterRestore,
+  {
+    deleteSource = deleteStashDB,
+    saveSource = saveStash,
+  } = {},
+) {
+  if (shouldDeleteRestoredSource(restoreResult, removeAfterRestore)) {
+    await deleteSource(stash.id);
+    return { deleted: true, markedRestored: false };
+  }
+
+  if (restoreResult.complete && restoreResult.restoredCount > 0) {
+    await saveSource({ ...stash, restoredAt: Date.now() });
+    return { deleted: false, markedRestored: true };
+  }
+
+  return { deleted: false, markedRestored: false };
+}
+
 async function handleMessage(msg) {
   switch (msg.action) {
     case 'getTabs':
@@ -1422,13 +1449,7 @@ async function handleMessage(msg) {
         shouldRemove = settings.removeStashAfterRestore;
       }
 
-      if (shouldRemove !== false) {
-        await deleteStashDB(msg.stashId);
-      } else if (restoreResult.restoredCount > 0) {
-        // Mark stash as restored (when not deleted)
-        stash.restoredAt = Date.now();
-        await saveStash(stash);
-      }
+      await applyStashRestoreDisposition(stash, restoreResult, shouldRemove);
 
       return restoreResult;
     }

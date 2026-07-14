@@ -22,6 +22,8 @@ Side-panel commands cross one checked runtime-message boundary. Background error
 
 `core/` contains tab, session, stash, Focus Mode, Drive, export, settings, and command logic. `core/engine/` implements the snapshot, solver, planner, and executor grouping pipeline. `core/ai/` contains provider adapters, key handling, caching, and request scheduling.
 
+`core/tab-restore.js` is the single session/stash restore coordinator. It clones saved inputs, preserves `{ savedTab, createdTab }` associations across settled batches, returns the fixed outcome from `core/restore-outcome.js`, and owns mute/discard/unmute cleanup. IndexedDB deletion remains in the service-worker boundary and is allowed only for a complete outcome.
+
 Pure policy and merge decisions belong in core modules that can run without Chrome. Chrome API calls remain at explicit adapters and orchestration boundaries.
 
 ## Persistence

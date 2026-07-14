@@ -2,6 +2,8 @@
 
 import { showToast } from './toast.js';
 import { exportData, exportSession, importData } from '../../core/export-import.js';
+import { sendOrThrow } from '../message-client.js';
+import { formatRestoreFeedback } from '../restore-feedback.js';
 
 export class SessionManager {
   constructor(rootEl) {
@@ -188,7 +190,7 @@ export class SessionManager {
           sessionId: session.id,
           options: { mode: 'windows' },
         });
-        this.showRestoreResult(session.name, result);
+        this.showRestoreResult(result);
       } catch (err) {
         showToast(`Restore failed: ${err.message}`, 'error');
       } finally {
@@ -209,7 +211,7 @@ export class SessionManager {
           sessionId: session.id,
           options: { mode: 'here' },
         });
-        this.showRestoreResult(session.name, result);
+        this.showRestoreResult(result);
       } catch (err) {
         showToast(`Restore failed: ${err.message}`, 'error');
       } finally {
@@ -275,27 +277,9 @@ export class SessionManager {
     return `${tabCount} tabs \u00b7 ${dateStr}`;
   }
 
-  showRestoreResult(name, result) {
-    if (result.restoredCount === 0) {
-      showToast('All tabs already open \u2014 nothing to restore', 'info');
-      return;
-    }
-
-    const parts = [`Restored ${result.restoredCount} tabs`];
-
-    if (result.windowsCreated > 0) {
-      parts[0] += ` in ${result.windowsCreated} window${result.windowsCreated > 1 ? 's' : ''}`;
-    }
-
-    if (result.groupsRestored > 0) {
-      parts.push(`${result.groupsRestored} group${result.groupsRestored > 1 ? 's' : ''} restored`);
-    }
-
-    if (result.skippedDuplicate > 0) {
-      parts.push(`${result.skippedDuplicate} duplicate${result.skippedDuplicate > 1 ? 's' : ''} skipped`);
-    }
-
-    showToast(parts.join(' \u2014 '), 'success');
+  showRestoreResult(result) {
+    const feedback = formatRestoreFeedback(result, { source: 'session' });
+    showToast(feedback.message, feedback.type);
   }
 
   async saveSession() {
@@ -351,7 +335,7 @@ export class SessionManager {
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 
   escapeHtml(str) {

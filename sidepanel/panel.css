@@ -1625,6 +1625,11 @@ body.ai-available .ai-feature {
   color: #fff;
 }
 
+.toast.warning {
+  background: var(--warning);
+  color: #111827;
+}
+
 @keyframes toastIn {
   from {
     transform: translateY(8px);

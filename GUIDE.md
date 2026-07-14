@@ -248,13 +248,11 @@ Stashes appear as cards with:
 Click the **Restore** button on a stash card.
 
 - If the stash has a "Restored" badge, a confirmation dialog asks if you want to restore again.
-- **Small stashes** (under 20 tabs): all tabs open at once.
-- **Large stashes** (20+ tabs): uses **pipeline restore**:
-  1. Tabs are created in batches of 5
-  2. Each batch loads in the background
-  3. After loading, tabs are discarded to save memory
-  4. Progress bar shows two phases: "Creating tabs..." then "Loading... X / Y ready"
-  5. An animated stripe on the progress bar indicates active loading
+- Tabs are restored in batches of up to six. Successful creations retain their own saved pinned/group metadata even if a sibling tab fails.
+- In the default discard pipeline, only background tabs being discarded are temporarily muted. Each is unmuted after the discard attempt, including failure cleanup; the first visible tab stays active and unmuted.
+- A non-discarding restore does not mute restored tabs.
+- The result accounts for every saved tab as restored, already-open, invalid, or failed. An incomplete result shows a counted warning and keeps the original stash unchanged for recovery.
+- Progress shows the creation and loading/discard phases without hiding partial failures.
 
 ### Other Stash Actions
 
@@ -263,7 +261,7 @@ Click the **Restore** button on a stash card.
 
 ### Settings Integration
 
-- **Remove stash after restore** (Settings > General): automatically deletes the stash after successful restore.
+- **Remove stash after restore** (Settings > General): deletes the stash only after a complete restore. Invalid URLs or Chrome API failures retain the unchanged stash even when removal was requested.
 
 ---
 
@@ -303,7 +301,9 @@ Auto-saved sessions appear in the **Auto** tab with just the date/time as their 
 
 Click **Restore** on a session card to open in new windows matching the original layout. Click **Restore here** to open all tabs in the current window. In both modes, tabs already open (by URL) are skipped.
 
-**Pipeline restore** (same as stash) activates for sessions with 20+ tabs, with two-phase progress tracking.
+Session restore uses the same settlement-preserving coordinator as stash restore. Each saved tab is counted; valid siblings continue restoring after a creation failure; pinned state and groups stay associated with the correct successful tab. Incomplete restores show restored, duplicate, invalid, and failed counts while the saved session remains available to retry.
+
+The default discard pipeline temporarily mutes only background tabs that are about to be discarded and always attempts to unmute them afterward. The first visible tab remains active and unmuted, and non-discarding restores never mute tabs.
 
 ### Session Actions
 
