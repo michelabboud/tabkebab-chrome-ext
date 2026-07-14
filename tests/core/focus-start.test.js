@@ -4,6 +4,14 @@ import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
 
 let importNonce = 0;
 
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 async function loadFocus(overrides = {}) {
   const harness = installChromeMock(overrides);
   const focus = await import(`../../core/focus.js?focus-start=${++importNonce}`);
@@ -227,6 +235,95 @@ describe('Focus startup policy and tab actions', () => {
     expect(harness.snapshot().tabs.find(({ id }) => id === 5)?.discarded).toBe(false);
   });
 
+  test('startup classifies a navigating tab by pendingUrl before its committed URL', async () => {
+    const allowedPendingUrl = 'https://exact.test/Allowed';
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [
+        {
+          id: 1,
+          windowId: 1,
+          url: 'https://blocked.test/committed',
+          pendingUrl: allowedPendingUrl,
+        },
+        {
+          id: 2,
+          windowId: 1,
+          url: allowedPendingUrl,
+          pendingUrl: 'https://blocked.test/pending',
+        },
+      ],
+    });
+
+    const state = await focus.startFocus(makeStartOptions({
+      tabAction: 'kebab',
+      strictMode: true,
+      allowedDomains: [{ type: 'url', value: allowedPendingUrl }],
+    }));
+
+    expect(state.focusTabCount).toBe(1);
+    expect(harness.calls.tabs.discard).toEqual([[2]]);
+    expect(harness.snapshot().tabs.find(({ id }) => id === 1)?.discarded).toBe(false);
+  });
+
+  test('startup stash preserves the authoritative pending URL instead of the committed URL', async () => {
+    const committedAllowedUrl = 'https://allowed.test/committed';
+    const pendingBlockedUrl = 'https://blocked.test/pending';
+    const saved = [];
+    const { focus } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{
+        id: 1,
+        windowId: 1,
+        url: committedAllowedUrl,
+        pendingUrl: pendingBlockedUrl,
+        title: 'Navigating tab',
+      }],
+    });
+
+    await focus.startFocus(
+      makeStartOptions({
+        tabAction: 'stash',
+        strictMode: true,
+        allowedDomains: [{ type: 'url', value: committedAllowedUrl }],
+      }),
+      { saveStash: async (stash) => saved.push(structuredClone(stash)) },
+    );
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].windows[0].tabs[0].url).toBe(pendingBlockedUrl);
+  });
+
+  test('startup excludes an internal pending target but blocks a hostless pending target', async () => {
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [
+        {
+          id: 1,
+          windowId: 1,
+          url: 'https://blocked.test/committed',
+          pendingUrl: 'chrome://settings/',
+        },
+        {
+          id: 2,
+          windowId: 1,
+          url: 'chrome://settings/',
+          pendingUrl: 'about:blank',
+        },
+      ],
+    });
+
+    const state = await focus.startFocus(makeStartOptions({
+      tabAction: 'kebab',
+      strictMode: true,
+      allowedDomains: [],
+    }));
+
+    expect(state.focusTabCount).toBe(0);
+    expect(harness.calls.tabs.discard).toEqual([[2]]);
+    expect(harness.snapshot().tabs.find(({ id }) => id === 1)?.discarded).toBe(false);
+  });
+
   test('a live-group query failure aborts before tab classification, mutation, or focus-state persistence', async () => {
     const { focus, harness } = await loadFocus({
       windows: [{ id: 1, focused: true }],
@@ -251,6 +348,67 @@ describe('Focus startup policy and tab actions', () => {
 });
 
 describe('Focus runtime group rebinding', () => {
+  test('getFocusState cannot restore persisted group IDs while live rebinding is pending', async () => {
+    const stale = {
+      status: 'active',
+      startedAt: Date.now(),
+      duration: 25,
+      pausedAt: null,
+      pausedElapsed: 0,
+      allowedDomains: [{ type: 'group', value: 'Deep Work', groupId: 90, groupIds: [91] }],
+      distractionsBlocked: 0,
+    };
+    const { focus, harness } = await loadFocus({
+      local: { focusState: stale },
+      groups: [{ id: 7, title: 'Deep Work' }],
+    });
+    const gate = createDeferred();
+    const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
+    chrome.tabGroups.query = async (...args) => {
+      const groups = await queryGroups(...args);
+      await gate.promise;
+      return groups;
+    };
+
+    const rebind = focus.rebindStoredFocusState();
+    while (harness.calls.tabGroups.query.length === 0) await Bun.sleep(1);
+
+    const stateDuringLookup = await focus.getFocusState();
+    expect(stateDuringLookup.allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+    expect(focus.getCachedFocusState().allowedDomains).toEqual(stateDuringLookup.allowedDomains);
+
+    gate.resolve();
+    await rebind;
+  });
+
+  test('failed rebinding keeps later storage reads and changes free of stale group IDs', async () => {
+    const stale = {
+      status: 'active',
+      startedAt: Date.now(),
+      duration: 25,
+      pausedAt: null,
+      pausedElapsed: 0,
+      allowedDomains: [{ type: 'group', value: 'Deep Work', groupId: 90, groupIds: [91] }],
+      distractionsBlocked: 0,
+    };
+    const { focus } = await loadFocus({
+      local: { focusState: stale },
+      failures: { 'tabGroups.query': new Error('synthetic lookup failure') },
+    });
+
+    await expect(focus.rebindStoredFocusState()).rejects.toThrow('synthetic lookup failure');
+    await chrome.storage.local.set({ focusState: stale });
+
+    expect(focus.getCachedFocusState().allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+    expect((await focus.getFocusState()).allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+  });
+
   test('resume replaces paused-state group bindings from one fresh query before persisting active state', async () => {
     const paused = {
       status: 'paused',

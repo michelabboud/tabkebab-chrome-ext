@@ -387,7 +387,7 @@ Before starting, configure:
    - **URL** — permits only the canonical exact URL; path, query, and fragment case is preserved and prefix extensions do not match
    - **Chrome Group** — stores the group's exact title and rebinds it to every live group with that title when a run starts, the worker restarts, or a paused run resumes. Untitled groups cannot be saved.
 
-Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated.
+Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated. If a tab is still navigating when Focus starts, its pending destination controls classification and is the URL preserved by a Focus stash. Duplicate legacy preferences collapse to one entry with the same type and value.
 
 ### The Focus HUD
 

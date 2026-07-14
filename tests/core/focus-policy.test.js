@@ -135,6 +135,44 @@ describe('Focus allowlist policy', () => {
     expect(isAllowed({ url: 'https://url.test/Exact/extra', groupId: -1 }, allowlist)).toBe(false);
   });
 
+  test('tab policy consistently prefers pendingUrl for exact, blocked, internal, and hostless targets', async () => {
+    const { evaluateFocusPolicy, isAllowed, isInternalUrl } = await loadPolicy();
+    const exactAllowedUrl = 'https://allowed.test/Exact';
+
+    expect(isAllowed({
+      url: 'https://committed.test/blocked',
+      pendingUrl: exactAllowedUrl,
+    }, [{ type: 'url', value: exactAllowedUrl }])).toBe(true);
+
+    expect(evaluateFocusPolicy({
+      url: exactAllowedUrl,
+      pendingUrl: 'https://blocked.test/pending',
+    }, {
+      allowedDomains: [{ type: 'url', value: exactAllowedUrl }],
+      blockedDomains: ['blocked.test'],
+      strictMode: false,
+      blockedCategories: [],
+    })).toEqual({ blocked: true, reason: 'blocklist', category: 'Blocked Domain' });
+
+    expect(isInternalUrl({
+      url: 'https://committed.test/',
+      pendingUrl: 'chrome://settings/',
+    })).toBe(true);
+    expect(isInternalUrl({
+      url: 'chrome://settings/',
+      pendingUrl: 'about:blank',
+    })).toBe(false);
+    expect(evaluateFocusPolicy({
+      url: exactAllowedUrl,
+      pendingUrl: 'about:blank',
+    }, {
+      allowedDomains: [{ type: 'url', value: exactAllowedUrl }],
+      blockedDomains: [],
+      strictMode: true,
+      blockedCategories: [],
+    })).toEqual({ blocked: true, reason: 'strict', category: 'Not in allowed list' });
+  });
+
   test('policy evaluation allows internal pages before every blocking mode', async () => {
     const { evaluateFocusPolicy } = await loadPolicy();
     const state = {
@@ -261,5 +299,22 @@ describe('Focus allowlist policy', () => {
     expect(createAllowlistEntry('group', 4, groups)).toBeNull();
     expect(createAllowlistEntry('group', 99, groups)).toBeNull();
     expect(createAllowlistEntry('unknown', 'value', groups)).toBeNull();
+  });
+
+  test('legacy and typed preferences deduplicate by stable type and value identity', async () => {
+    const { normalizeAllowlistPreferences } = await loadPolicy();
+
+    expect(normalizeAllowlistPreferences([
+      'Work.Test',
+      { type: 'domain', value: 'work.test' },
+      { type: 'group', value: 'Deep Work' },
+      { type: 'group', value: 'Deep Work' },
+      { type: 'url', value: 'https://work.test/' },
+      { type: 'domain', value: 'work.test' },
+    ])).toEqual([
+      { type: 'domain', value: 'work.test' },
+      { type: 'group', value: 'Deep Work' },
+      { type: 'url', value: 'https://work.test/' },
+    ]);
   });
 });

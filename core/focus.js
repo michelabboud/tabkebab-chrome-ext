@@ -18,19 +18,29 @@ const MAX_HISTORY = 50;
 
 // Module-level cache for fast sync access
 let _cachedState = null;
+let _runtimeGroupBindingsVerified = false;
+
+function isRuntimeFocusState(state) {
+  return state?.status === 'active' || state?.status === 'paused';
+}
+
+function cacheFocusState(state) {
+  _cachedState = isRuntimeFocusState(state) && !_runtimeGroupBindingsVerified
+    ? rebindFocusAllowlist(state, [])
+    : state;
+  return _cachedState;
+}
 
 // Initialize cache from storage
 const cacheReady = (async () => {
   const storedState = await Storage.get(FOCUS_STATE_KEY);
-  _cachedState = storedState && (storedState.status === 'active' || storedState.status === 'paused')
-    ? rebindFocusAllowlist(storedState, [])
-    : storedState;
+  cacheFocusState(storedState);
 })();
 
 // Keep cache in sync with storage changes
 Storage.onChange((changes) => {
   if (changes[FOCUS_STATE_KEY]) {
-    _cachedState = changes[FOCUS_STATE_KEY].newValue ?? null;
+    cacheFocusState(changes[FOCUS_STATE_KEY].newValue ?? null);
   }
 });
 
@@ -41,15 +51,17 @@ export function getCachedFocusState() {
 export async function getFocusState() {
   await cacheReady;
   const state = await Storage.get(FOCUS_STATE_KEY);
-  _cachedState = state;
-  return state;
+  return cacheFocusState(state);
 }
 
-async function saveFocusState(state) {
+async function saveFocusState(state, {
+  groupBindingsVerified = _runtimeGroupBindingsVerified,
+} = {}) {
   await cacheReady;
-  _cachedState = state;
-  if (state) {
-    await Storage.set(FOCUS_STATE_KEY, state);
+  _runtimeGroupBindingsVerified = Boolean(groupBindingsVerified) && isRuntimeFocusState(state);
+  const safeState = cacheFocusState(state);
+  if (safeState) {
+    await Storage.set(FOCUS_STATE_KEY, safeState);
   } else {
     await Storage.remove(FOCUS_STATE_KEY);
   }
@@ -211,7 +223,10 @@ export async function startFocus({
     }
   } else if (tabAction === 'stash' && nonFocusTabs.length > 0) {
     const stashTabs = nonFocusTabs.map(t => ({
-      url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
+      url: t.pendingUrl || t.url,
+      title: t.title,
+      favIconUrl: t.favIconUrl,
+      pinned: t.pinned || false,
     }));
     const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const stash = {
@@ -245,7 +260,7 @@ export async function startFocus({
   await updateBadge(state);
 
   // Persist
-  await saveFocusState(state);
+  await saveFocusState(state, { groupBindingsVerified: true });
 
   return state;
 }
@@ -321,26 +336,27 @@ export async function pauseFocus() {
 
 export async function rebindStoredFocusState() {
   await cacheReady;
-  const state = await Storage.get(FOCUS_STATE_KEY);
-  if (!state || (state.status !== 'active' && state.status !== 'paused')) {
-    _cachedState = state;
+  _runtimeGroupBindingsVerified = false;
+  const state = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+  if (!isRuntimeFocusState(state)) {
     return state;
   }
 
   // Never expose persisted runtime IDs while the current Chrome group query is pending.
-  const sanitized = rebindFocusAllowlist(state, []);
-  _cachedState = sanitized;
   let liveGroups;
   try {
     liveGroups = await chrome.tabGroups.query({});
   } catch (error) {
     // Preserve the title preference and run metadata, but remove numeric authority
     // that cannot be validated in this browser session.
-    await saveFocusState(sanitized);
+    const latest = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    await saveFocusState(latest, { groupBindingsVerified: false });
     throw error;
   }
-  const rebound = rebindFocusAllowlist(state, liveGroups);
-  await saveFocusState(rebound);
+  const latest = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+  if (!isRuntimeFocusState(latest)) return latest;
+  const rebound = rebindFocusAllowlist(latest, liveGroups);
+  await saveFocusState(rebound, { groupBindingsVerified: true });
   return rebound;
 }
 
@@ -354,7 +370,7 @@ export async function resumeFocus() {
   rebound.pausedAt = null;
   rebound.status = 'active';
   await updateBadge(rebound);
-  await saveFocusState(rebound);
+  await saveFocusState(rebound, { groupBindingsVerified: true });
   return rebound;
 }
 

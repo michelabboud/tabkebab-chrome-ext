@@ -756,16 +756,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Rebind persisted group titles before any Focus listener can trust runtime IDs.
+// Listeners still register synchronously, then await this shared startup barrier.
+const focusReadiness = rebindStoredFocusState().catch((error) => {
+  console.warn('[TabKebab] Focus group rebinding failed during worker startup:', error);
+  return getCachedFocusState();
+});
+
 // Ensure alarms exist (service worker can restart)
 (async () => {
-  // Rebind persisted group titles before any Focus listener can trust runtime IDs.
-  let focusState;
-  try {
-    focusState = await rebindStoredFocusState();
-  } catch (error) {
-    focusState = getCachedFocusState();
-    console.warn('[TabKebab] Focus group rebinding failed during worker startup:', error);
-  }
+  const focusState = await focusReadiness;
 
   const alarm = await chrome.alarms.get(ALARM_AUTO_SAVE);
   if (!alarm) await reconfigureAlarms();
@@ -841,6 +841,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   // Focus mode: intercept new tabs opened to blocked URLs
   if (tab.pendingUrl || tab.url) {
     const url = tab.pendingUrl || tab.url;
+    await focusReadiness;
     const state = getCachedFocusState();
     if (state?.status === 'active') {
       // Pass full tab object to check group membership
@@ -862,10 +863,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
   // Focus mode: intercept navigation to blocked domains
   if (changeInfo.url) {
+    await focusReadiness;
     const state = getCachedFocusState();
     if (state?.status === 'active') {
-      // Pass full tab object to check group membership
-      const tabWithUrl = { ...tab, url: changeInfo.url };
+      // changeInfo.url is the navigation that triggered this event. Do not let
+      // a stale tab.pendingUrl override that authoritative event URL.
+      const tabWithUrl = { ...tab, pendingUrl: '', url: changeInfo.url };
       const result = evaluateFocusPolicy(tabWithUrl, state);
       if (result.blocked) {
         handleDistraction(tabId, changeInfo.url, state, result.category);

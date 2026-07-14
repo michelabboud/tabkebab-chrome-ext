@@ -17,12 +17,15 @@ All notable changes to TabKebab are documented in this file.
 - Focus startup now resolves all live groups with an exact saved title before reading or mutating tabs, then stores numeric IDs only in the active runtime state.
 - Active and paused Focus runs rebind group titles during service-worker initialization and immediately before resume; profile preferences remain title-only.
 - Kebab and stash actions now affect only background non-focus tabs, group action receives only eligible focus tabs, and Chrome/extension pages are excluded from all startup actions.
+- Navigating tabs use their pending destination for startup classification and stash records; `tabs.onUpdated` still treats the event URL as authoritative.
+- Legacy and typed Focus preferences are normalized and deduplicated by their stable type-and-value identity before display or save.
 
 ### Fixed
 
 - Applied the same domain, exact-URL, and rebound-group predicate at startup and navigation time, eliminating URL-prefix and stale scalar-group-ID allowance.
 - Made strict mode with an empty allowlist block every non-internal URL, including hostless and non-HTTP URLs.
 - Removed stale numeric group authority when worker-startup rebinding fails, while preserving the run and title-based preferences for recovery.
+- Kept synchronous Focus listeners from dropping strict navigations during asynchronous worker startup, and prevented alarm, message, and storage reads from restoring unverified numeric group IDs while rebinding is pending or failed.
 - Prevented AI fallback from classifying internal or explicitly allowed pages.
 
 ## [1.2.4] — 2026-07-14

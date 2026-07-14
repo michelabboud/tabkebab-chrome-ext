@@ -4,6 +4,14 @@ import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
 
 let importNonce = 0;
 
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 async function importWorker() {
   return import(`../../service-worker.js?focus-worker=${++importNonce}`);
 }
@@ -41,6 +49,83 @@ function runtimeState(overrides = {}) {
 }
 
 describe('Focus service-worker integration', () => {
+  test('a strict navigation delivered before startup rebinding waits and is enforced', async () => {
+    const blockedUrl = 'https://blocked.test/pre-ready';
+    const harness = installChromeMock({
+      local: {
+        focusState: runtimeState({
+          strictMode: true,
+          allowedDomains: [{ type: 'group', value: 'Deep Work', groupIds: [91] }],
+        }),
+      },
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: blockedUrl, groupId: -1 }],
+    });
+    const gate = createDeferred();
+    const getStorage = chrome.storage.local.get.bind(chrome.storage.local);
+    let heldFocusRead = false;
+    chrome.storage.local.get = async (keys) => {
+      if (!heldFocusRead && keys === 'focusState') {
+        heldFocusRead = true;
+        await gate.promise;
+      }
+      return getStorage(keys);
+    };
+
+    await importWorker();
+    const navigation = chrome.tabs.onUpdated.dispatch(1, { url: blockedUrl }, {
+      ...harness.snapshot().tabs[0],
+      url: blockedUrl,
+    });
+    await Bun.sleep(1);
+    expect(harness.calls.tabs.goBack).toEqual([]);
+
+    gate.resolve();
+    await navigation;
+    await waitFor(
+      () => harness.calls.tabs.goBack.length === 1,
+      'pre-ready strict navigation was dropped instead of enforced after rebinding',
+    );
+    expect(harness.calls.tabs.goBack).toEqual([[1]]);
+  });
+
+  test('a strict tab creation delivered before startup rebinding waits and is enforced', async () => {
+    const blockedUrl = 'https://blocked.test/pre-ready-created';
+    const harness = installChromeMock({
+      local: {
+        focusState: runtimeState({
+          strictMode: true,
+          allowedDomains: [{ type: 'group', value: 'Deep Work', groupIds: [91] }],
+        }),
+      },
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: blockedUrl, groupId: -1 }],
+    });
+    const gate = createDeferred();
+    const getStorage = chrome.storage.local.get.bind(chrome.storage.local);
+    let heldFocusRead = false;
+    chrome.storage.local.get = async (keys) => {
+      if (!heldFocusRead && keys === 'focusState') {
+        heldFocusRead = true;
+        await gate.promise;
+      }
+      return getStorage(keys);
+    };
+
+    await importWorker();
+    const creation = chrome.tabs.onCreated.dispatch(harness.snapshot().tabs[0]);
+    await Bun.sleep(1);
+    expect(harness.calls.tabs.goBack).toEqual([]);
+
+    gate.resolve();
+    await creation;
+    await waitFor(
+      () => harness.calls.tabs.goBack.length === 1,
+      'pre-ready strict tab creation was dropped instead of enforced after rebinding',
+    );
+    expect(harness.calls.tabs.goBack).toEqual([[1]]);
+  });
+
   test('worker initialization rebinds a paused run and leaves title-only preferences unchanged', async () => {
     const preferences = {
       coding: { allowlist: [{ type: 'group', value: 'Deep Work' }] },
@@ -132,6 +217,53 @@ describe('Focus service-worker integration', () => {
     expect(harness.calls.tabs.goBack).toEqual([[1]]);
   });
 
+  test('alarm and message reads cannot restore stale group IDs while startup lookup is pending', async () => {
+    const staleState = runtimeState({
+      strictMode: true,
+      allowedDomains: [{
+        type: 'group',
+        value: 'Deep Work',
+        groupId: 90,
+        groupIds: [91],
+      }],
+    });
+    const harness = installChromeMock({
+      local: { focusState: staleState },
+      groups: [{ id: 7, title: 'Deep Work' }],
+    });
+    const gate = createDeferred();
+    const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
+    chrome.tabGroups.query = async (...args) => {
+      const groups = await queryGroups(...args);
+      await gate.promise;
+      return groups;
+    };
+
+    await importWorker();
+    await waitFor(
+      () => harness.calls.tabGroups.query.length === 1,
+      'worker startup did not enter its pending group lookup',
+    );
+
+    await chrome.alarms.onAlarm.dispatch({ name: 'focusTick' });
+    await waitFor(
+      () => harness.calls.action.setBadgeText.length > 0,
+      'focus alarm did not read the pending startup state',
+    );
+    const stateFromMessage = await chrome.runtime.sendMessage({ action: 'getFocusState' });
+
+    expect(stateFromMessage.allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+    expect(readStorageArea('local').focusState.allowedDomains).toEqual(staleState.allowedDomains);
+
+    gate.resolve();
+    await waitFor(
+      () => readStorageArea('local').focusState?.allowedDomains?.[0]?.groupIds?.[0] === 7,
+      'worker startup did not finish after the pending-boundary assertion',
+    );
+  });
+
   test('navigation applies exact URL and rebound group policy without prefix matching', async () => {
     const exactUrl = 'https://docs.test/Exact?Q=One#Part';
     const harness = installChromeMock({
@@ -199,5 +331,41 @@ describe('Focus service-worker integration', () => {
     await Bun.sleep(1);
     expect(harness.calls.tabs.goBack).toEqual([[1]]);
     expect(aiSettingsReadCount()).toBe(aiReadsBeforeAllowedNavigation);
+  });
+
+  test('onUpdated treats changeInfo.url as authoritative over a stale pendingUrl', async () => {
+    const pendingAllowedUrl = 'https://allowed.test/exact';
+    const blockedUrl = 'https://blocked.test/new-navigation';
+    const harness = installChromeMock({
+      local: {
+        focusState: runtimeState({
+          strictMode: true,
+          allowedDomains: [{ type: 'url', value: pendingAllowedUrl }],
+        }),
+      },
+      windows: [{ id: 1, focused: true }],
+      tabs: [{
+        id: 1,
+        windowId: 1,
+        url: 'https://committed.test/old',
+        pendingUrl: pendingAllowedUrl,
+      }],
+    });
+
+    await importWorker();
+    await waitFor(
+      () => harness.calls.tabGroups.query.length === 1,
+      'worker startup did not complete its group lookup',
+    );
+
+    await chrome.tabs.onUpdated.dispatch(1, { url: blockedUrl }, {
+      ...harness.snapshot().tabs[0],
+      url: blockedUrl,
+    });
+    await waitFor(
+      () => harness.calls.tabs.goBack.length === 1,
+      'changeInfo.url was ignored in favor of the tab pendingUrl',
+    );
+    expect(harness.calls.tabs.goBack).toEqual([[1]]);
   });
 });

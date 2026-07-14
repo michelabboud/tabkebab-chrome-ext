@@ -4,7 +4,7 @@ import { checkAgainstBlocklists } from './focus-blocklists.js';
 
 function tabUrl(tabOrUrl) {
   if (typeof tabOrUrl === 'string') return tabOrUrl;
-  return tabOrUrl?.url || tabOrUrl?.pendingUrl || '';
+  return tabOrUrl?.pendingUrl || tabOrUrl?.url || '';
 }
 
 function canonicalUrl(value) {
@@ -128,6 +128,35 @@ export function createAllowlistEntry(type, value, liveGroups = []) {
   const group = liveGroups.find((candidate) => candidate?.id === groupId);
   if (!group || typeof group.title !== 'string' || !group.title.trim()) return null;
   return { type: 'group', value: group.title };
+}
+
+/** Normalize title-only preferences and keep one entry per stable type/value identity. */
+export function normalizeAllowlistPreferences(allowList) {
+  if (!Array.isArray(allowList)) return [];
+
+  const normalized = [];
+  const identities = new Set();
+  for (const candidate of allowList) {
+    let entry = null;
+    if (typeof candidate === 'string') {
+      entry = createAllowlistEntry('domain', candidate);
+    } else if (candidate?.type === 'domain' || candidate?.type === 'url') {
+      entry = createAllowlistEntry(candidate.type, candidate.value);
+    } else if (
+      candidate?.type === 'group' &&
+      typeof candidate.value === 'string' &&
+      candidate.value.trim()
+    ) {
+      entry = { type: 'group', value: candidate.value };
+    }
+
+    if (!entry) continue;
+    const identity = JSON.stringify([entry.type, entry.value]);
+    if (identities.has(identity)) continue;
+    identities.add(identity);
+    normalized.push(entry);
+  }
+  return normalized;
 }
 
 /** Resolve title-only group preferences to every matching live Chrome group ID. */

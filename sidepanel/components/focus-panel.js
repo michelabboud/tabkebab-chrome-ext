@@ -1,7 +1,7 @@
 // sidepanel/components/focus-panel.js — Focus Mode UI: setup, timer HUD, report, history
 
 import { showToast } from './toast.js';
-import { createAllowlistEntry } from '../../core/focus-policy.js';
+import { createAllowlistEntry, normalizeAllowlistPreferences } from '../../core/focus-policy.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
 
@@ -142,10 +142,7 @@ export class FocusPanel {
 
     // Store current selections
     this._selectedProfile = profile;
-    // Convert legacy string domains to new format
-    this._allowlist = (profile.allowedDomains || []).map(d =>
-      typeof d === 'string' ? { type: 'domain', value: d } : d
-    );
+    this._allowlist = normalizeAllowlistPreferences(profile.allowedDomains);
     this._blockedDomains = [...(profile.blockedDomains || [])];
     this._blockedCategories = [...(profile.blockedCategories || [])];
     this._strictMode = false;
@@ -213,11 +210,7 @@ export class FocusPanel {
     // Apply saved preferences
     if (prefs.blockedCategories) this._blockedCategories = [...prefs.blockedCategories];
     if (prefs.allowlist) {
-      this._allowlist = prefs.allowlist.map((entry) => (
-        typeof entry === 'string'
-          ? { type: 'domain', value: entry }
-          : { type: entry.type, value: entry.value }
-      ));
+      this._allowlist = normalizeAllowlistPreferences(prefs.allowlist);
     }
     if (prefs.blockedDomains) this._blockedDomains = [...prefs.blockedDomains];
     if (prefs.strictMode !== undefined) this._strictMode = prefs.strictMode;
@@ -233,13 +226,10 @@ export class FocusPanel {
   }
 
   async _saveProfilePrefs(profileId) {
+    this._allowlist = normalizeAllowlistPreferences(this._allowlist);
     const prefs = {
       blockedCategories: this._blockedCategories,
-      allowlist: this._allowlist.map((entry) => (
-        typeof entry === 'string'
-          ? { type: 'domain', value: entry }
-          : { type: entry.type, value: entry.value }
-      )),
+      allowlist: this._allowlist,
       blockedDomains: this._blockedDomains,
       strictMode: this._strictMode,
       aiBlocking: this._aiBlocking,
@@ -364,9 +354,7 @@ export class FocusPanel {
         this._selectedProfile = profile;
 
         // Set defaults from profile
-        this._allowlist = (profile.allowedDomains || []).map(d =>
-          typeof d === 'string' ? { type: 'domain', value: d } : d
-        );
+        this._allowlist = normalizeAllowlistPreferences(profile.allowedDomains);
         this._blockedDomains = [...(profile.blockedDomains || [])];
         this._blockedCategories = [...(profile.blockedCategories || [])];
         this._strictMode = false;
