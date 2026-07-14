@@ -28,6 +28,7 @@ describe('restoreStash handler disposition', () => {
     const original = structuredClone(stash);
     const deleted = [];
     const saved = [];
+    installChromeMock({ windows: [{ id: 1, focused: true }] });
 
     const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
     await applyDisposition(stash, result, true, {
@@ -60,6 +61,7 @@ describe('restoreStash handler disposition', () => {
     const deleted = [];
     const saved = [];
     installChromeMock({
+      windows: [{ id: 1, focused: true }],
       failures: { 'tabs.create': [null, new Error('synthetic create failure')] },
     });
 

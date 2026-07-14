@@ -147,6 +147,24 @@ export async function restoreTabWindows(savedWindows, {
   });
 
   const total = preparedWindows.reduce((count, window) => count + window.tabs.length, 0);
+  let hereWindowId;
+  if (mode === 'here' && total > 0) {
+    try {
+      const currentWindow = await chrome.windows.getCurrent();
+      if (!Number.isInteger(currentWindow?.id) || currentWindow.id < 0) {
+        throw new Error('Current window did not contain a valid ID');
+      }
+      hereWindowId = currentWindow.id;
+    } catch (error) {
+      for (const preparedWindow of preparedWindows) {
+        for (const savedTab of preparedWindow.tabs) {
+          addError(outcome, 'create', savedTab, error);
+        }
+      }
+      return finalizeRestoreOutcome(outcome);
+    }
+  }
+
   const progress = { created: 0, loaded: 0, total };
   const pendingMuted = new Map();
 
@@ -341,19 +359,20 @@ export async function restoreTabWindows(savedWindows, {
     return promotedPair;
   }
 
-  async function restoreIntoExistingWindow(preparedWindow) {
+  async function restoreIntoExistingWindow(preparedWindow, windowId) {
     const pairs = [];
     for (let index = 0; index < preparedWindow.tabs.length; index += RESTORE_BATCH) {
       const batchPairs = await createTabBatch(
         preparedWindow.tabs.slice(index, index + RESTORE_BATCH),
         preparedWindow.sourceIndex,
+        windowId,
       );
       pairs.push(...batchPairs);
       await processPairs(batchPairs, discarded);
     }
 
     if (pairs.length > 0) {
-      await restoreGroups(preparedWindow, pairs, pairs[0].createdTab.windowId);
+      await restoreGroups(preparedWindow, pairs, windowId);
     }
   }
 
@@ -390,7 +409,7 @@ export async function restoreTabWindows(savedWindows, {
       }
     } else if (mode === 'here') {
       for (const preparedWindow of preparedWindows) {
-        await restoreIntoExistingWindow(preparedWindow);
+        await restoreIntoExistingWindow(preparedWindow, hereWindowId);
       }
     } else {
       const allTabs = preparedWindows.flatMap((preparedWindow) =>

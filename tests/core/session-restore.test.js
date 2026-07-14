@@ -14,6 +14,13 @@ function makeSession(tabs, groups = []) {
   };
 }
 
+function installHereChromeMock(overrides = {}) {
+  return installChromeMock({
+    windows: [{ id: 1, focused: true }],
+    ...overrides,
+  });
+}
+
 function observeDiscardAudioOrder() {
   const calls = [];
   chrome.tabs.onCreated.addListener((tab) => {
@@ -120,7 +127,7 @@ describe('restoreSession', () => {
 
   test('mutes, discards, and then unmutes a background restore tab in order', async () => {
     const session = makeSession([{ url: 'https://audio.test/background' }]);
-    const harness = installChromeMock({ local: { sessions: [session] } });
+    const harness = installHereChromeMock({ local: { sessions: [session] } });
     const calls = observeDiscardAudioOrder();
 
     const result = await restoreSession(session.id, { mode: 'here' });
@@ -138,13 +145,112 @@ describe('restoreSession', () => {
 
   test('never mutes a tab in non-discard mode', async () => {
     const session = makeSession([{ url: 'https://audio.test/loaded' }]);
-    const harness = installChromeMock({ local: { sessions: [session] } });
+    const harness = installHereChromeMock({ local: { sessions: [session] } });
 
     const result = await restoreSession(session.id, { mode: 'here', discarded: false });
 
     expect(harness.calls.tabs.update.filter(([, changes]) => changes.muted === true)).toEqual([]);
     expect(harness.calls.tabs.discard).toEqual([]);
     expect(result.complete).toBe(true);
+  });
+
+  test('keeps every here-mode batch in the initially current window after focus changes', async () => {
+    const session = makeSession(
+      Array.from({ length: 7 }, (_, index) => ({
+        url: `https://stable-here.test/${index + 1}`,
+        groupId: index < 2 ? 10 : -1,
+      })),
+      [{ id: 10, title: 'Stable target', color: 'blue' }],
+    );
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      windows: [
+        { id: 1, focused: true },
+        { id: 2, focused: false },
+      ],
+      tabs: [
+        { id: 10, windowId: 1, active: true, url: 'https://window-a.test/' },
+        { id: 20, windowId: 2, active: true, url: 'https://window-b.test/' },
+      ],
+    });
+    let createdCount = 0;
+    chrome.tabs.onCreated.addListener(async (tab) => {
+      if (!tab.url.startsWith('https://stable-here.test/')) return;
+      createdCount++;
+      if (createdCount === 6) {
+        await chrome.windows.update(2, { focused: true });
+      }
+    });
+
+    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
+    const restored = harness.snapshot().tabs.filter((tab) =>
+      tab.url.startsWith('https://stable-here.test/'),
+    );
+    const groupedIds = restored
+      .filter((tab) => tab.url.endsWith('/1') || tab.url.endsWith('/2'))
+      .map((tab) => tab.id);
+
+    expect(result).toEqual({
+      requestedCount: 7,
+      restoredCount: 7,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [],
+      complete: true,
+      windowsCreated: 0,
+      groupsRestored: 1,
+    });
+    expect(new Set(restored.map((tab) => tab.windowId))).toEqual(new Set([1]));
+    expect(harness.calls.windows.getCurrent).toEqual([[{}]]);
+    expect(harness.calls.tabs.create.every(([createProperties]) =>
+      createProperties?.windowId === 1,
+    )).toBe(true);
+    expect(harness.calls.tabs.group).toEqual([[
+      {
+        createProperties: { windowId: 1 },
+        tabIds: groupedIds,
+      },
+    ]]);
+  });
+
+  test('fails here-mode target lookup closed without creating tabs', async () => {
+    const session = makeSession([
+      { url: 'https://target-lookup.test/first' },
+      { url: 'https://target-lookup.test/second' },
+    ]);
+    const original = structuredClone(session);
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      failures: { 'windows.getCurrent': new Error('current window unavailable') },
+    });
+
+    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
+
+    expect(result).toEqual({
+      requestedCount: 2,
+      restoredCount: 0,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [
+        {
+          scope: 'create',
+          url: 'https://target-lookup.test/first',
+          message: 'current window unavailable',
+        },
+        {
+          scope: 'create',
+          url: 'https://target-lookup.test/second',
+          message: 'current window unavailable',
+        },
+      ],
+      complete: false,
+      windowsCreated: 0,
+      groupsRestored: 0,
+    });
+    expect(harness.calls.windows.getCurrent).toEqual([[{}]]);
+    expect(harness.calls.tabs.create).toEqual([]);
+    expect(harness.calls.tabs.group).toEqual([]);
+    expect(readStorageArea('local').sessions[0]).toEqual(original);
   });
 
   test('keeps the first visible tab active and unmuted', async () => {
@@ -401,7 +507,7 @@ describe('restoreSession', () => {
 
   test('unmutes through finally and reports a discard failure', async () => {
     const session = makeSession([{ url: 'https://audio.test/discard-failure' }]);
-    const harness = installChromeMock({
+    const harness = installHereChromeMock({
       local: { sessions: [session] },
       failures: { 'tabs.discard': new Error('synthetic discard failure') },
     });
@@ -427,7 +533,7 @@ describe('restoreSession', () => {
 
   test('retries pending unmute cleanup in the outer finally', async () => {
     const session = makeSession([{ url: 'https://audio.test/unmute-retry' }]);
-    const harness = installChromeMock({
+    const harness = installHereChromeMock({
       local: { sessions: [session] },
       failures: { 'tabs.update': [null, new Error('first unmute failed'), null] },
     });
@@ -451,7 +557,7 @@ describe('restoreSession', () => {
 
   test('reports a pin update failure without losing the created tab', async () => {
     const session = makeSession([{ url: 'https://metadata.test/pin', pinned: true }]);
-    const harness = installChromeMock({
+    const harness = installHereChromeMock({
       local: { sessions: [session] },
       failures: { 'tabs.update': new Error('synthetic pin failure') },
     });
@@ -472,7 +578,7 @@ describe('restoreSession', () => {
     const groupFailureSession = makeSession([
       { url: 'https://metadata.test/group', groupId: 10 },
     ], [group]);
-    installChromeMock({
+    installHereChromeMock({
       local: { sessions: [groupFailureSession] },
       failures: { 'tabs.group': new Error('synthetic group failure') },
     });
@@ -492,7 +598,7 @@ describe('restoreSession', () => {
     const updateFailureSession = makeSession([
       { url: 'https://metadata.test/update', groupId: 10 },
     ], [group]);
-    installChromeMock({
+    installHereChromeMock({
       local: { sessions: [updateFailureSession] },
       failures: { 'tabGroups.update': new Error('synthetic metadata failure') },
     });
@@ -513,7 +619,7 @@ describe('restoreSession', () => {
 
   test('reports a mute update failure while preserving an unmuted created tab', async () => {
     const session = makeSession([{ url: 'https://audio.test/mute-failure' }]);
-    const harness = installChromeMock({
+    const harness = installHereChromeMock({
       local: { sessions: [session] },
       failures: { 'tabs.update': new Error('synthetic mute failure') },
     });

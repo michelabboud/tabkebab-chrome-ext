@@ -13,6 +13,13 @@ function makeStash(tabs, groups = []) {
   };
 }
 
+function installHereChromeMock(overrides = {}) {
+  return installChromeMock({
+    windows: [{ id: 1, focused: true }],
+    ...overrides,
+  });
+}
+
 function observeDiscardAudioOrder() {
   const calls = [];
   chrome.tabs.onCreated.addListener((tab) => {
@@ -117,7 +124,7 @@ describe('restoreStashTabs', () => {
 
   test('mutes, discards, and then unmutes a background restore tab in order', async () => {
     const stash = makeStash([{ url: 'https://audio.test/background' }]);
-    const harness = installChromeMock();
+    const harness = installHereChromeMock();
     const calls = observeDiscardAudioOrder();
 
     const result = await restoreStashTabs(stash, { mode: 'here' });
@@ -135,7 +142,7 @@ describe('restoreStashTabs', () => {
 
   test('never mutes a tab in non-discard mode', async () => {
     const stash = makeStash([{ url: 'https://audio.test/loaded' }]);
-    const harness = installChromeMock();
+    const harness = installHereChromeMock();
 
     const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
 
@@ -162,7 +169,7 @@ describe('restoreStashTabs', () => {
 
   test('unmutes through finally and reports a discard failure', async () => {
     const stash = makeStash([{ url: 'https://audio.test/discard-failure' }]);
-    const harness = installChromeMock({
+    const harness = installHereChromeMock({
       failures: { 'tabs.discard': new Error('synthetic discard failure') },
     });
     const calls = observeDiscardAudioOrder();
