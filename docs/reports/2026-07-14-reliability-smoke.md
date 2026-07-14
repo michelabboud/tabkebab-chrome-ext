@@ -256,3 +256,5 @@ POST_CLEANUP_XVFB_TCP_LISTENERS=0
 ```
 
 An earlier harness attempt could not bind a Unix X socket because the host's shared `/tmp/.X11-unix` directory mode was not `1777`; it reached no Chrome or application boundary and supplied no evidence. Its uniquely named empty profile and Xvfb process were removed before the successful loopback-TCP Xvfb run. No Task 4 Chrome process, X server, listener, or disposable profile was left running.
+
+This rerun covered repair commit `9dc947050c6b5dca1aac612db22560c65e5eba4b`. The subsequent independent-review repair is limited to injected Chrome-group metadata, rollback, session-cleanup, and local-authority-write failure branches; it does not change the successful delayed-classification path above. Per controller direction, Chrome was not relaunched for those synthetic failure branches; deterministic Chrome-mock tests verify their tab mutation, cache, storage, and aggregate-error outcomes.

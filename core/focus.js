@@ -266,6 +266,65 @@ async function clearFocusGroupOwnership(runId, token) {
   }
 }
 
+function flattenErrors(error) {
+  return error instanceof AggregateError ? [...error.errors] : [error];
+}
+
+async function clearFocusGroupOwnershipWithRetry(runId, token) {
+  const failures = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await clearFocusGroupOwnership(runId, token);
+      return failures;
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  return failures;
+}
+
+async function rejectAfterFocusGroupRollback(primaryError, {
+  runId,
+  token,
+  tabIds,
+}) {
+  const errors = flattenErrors(primaryError);
+  try {
+    await ungroupTabs(tabIds);
+  } catch (error) {
+    errors.push(error);
+  } finally {
+    const cleanupFailures = await clearFocusGroupOwnershipWithRetry(runId, token);
+    errors.push(...cleanupFailures);
+  }
+
+  if (errors.length === 1 && errors[0] === primaryError) throw primaryError;
+  throw new AggregateError(errors, 'Focus group startup and rollback failed.');
+}
+
+async function findFocusGroupMutationTabIds(focusTabs) {
+  const originalGroupIds = new Map(focusTabs.map((tab) => [tab.id, tab.groupId]));
+  const settled = await Promise.allSettled(
+    focusTabs.map((tab) => chrome.tabs.get(tab.id)),
+  );
+  const failures = settled
+    .filter(({ status }) => status === 'rejected')
+    .map(({ reason }) => reason);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Could not inspect a partially created Focus group.');
+  }
+  return settled
+    .map(({ value }) => value)
+    .filter((tab) => tab.groupId !== originalGroupIds.get(tab.id))
+    .map((tab) => tab.id);
+}
+
+function clearFailedFocusStartCache() {
+  _runtimeGroupBindingsVerified = false;
+  _focusStateGeneration++;
+  cacheFocusState(null);
+}
+
 // ── Timer helpers ──
 
 export function getRemainingMs(state) {
@@ -490,6 +549,7 @@ async function performStartFocus({
   state.focusTabCount = focusTabs.length;
 
   // Apply tab action
+  let createdFocusGroup = null;
   if (tabAction === 'kebab' && nonFocusTabs.length > 0) {
     for (const tab of nonFocusTabs) {
       if (tab.discarded) continue;
@@ -529,9 +589,36 @@ async function performStartFocus({
     let groupId = null;
     try {
       groupId = await createNativeGroup(focusTabIds, profileName, chromeColor);
-    } catch {
-      await clearFocusGroupOwnership(runId, ownershipToken);
-      // Some tabs may not be groupable; startup can continue without a group.
+    } catch (groupError) {
+      let mutationTabIds;
+      try {
+        mutationTabIds = await findFocusGroupMutationTabIds(focusTabs);
+      } catch (inspectionError) {
+        await rejectAfterFocusGroupRollback(
+          new AggregateError(
+            [...flattenErrors(groupError), ...flattenErrors(inspectionError)],
+            'Focus group creation and mutation inspection failed.',
+          ),
+          { runId, token: ownershipToken, tabIds: focusTabIds },
+        );
+      }
+
+      if (mutationTabIds.length > 0) {
+        await rejectAfterFocusGroupRollback(groupError, {
+          runId,
+          token: ownershipToken,
+          tabIds: mutationTabIds,
+        });
+      }
+
+      const cleanupFailures = await clearFocusGroupOwnershipWithRetry(runId, ownershipToken);
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          [groupError, ...cleanupFailures],
+          'Focus group creation and ownership cleanup failed.',
+        );
+      }
+      // A pre-group Chrome failure made no tab mutation; startup can continue.
     }
 
     if (Number.isInteger(groupId) && groupId >= 0) {
@@ -540,36 +627,32 @@ async function performStartFocus({
       } catch (ownershipError) {
         // The provisional proof is not enough to authorize future teardown.
         // Roll back the just-created group before allowing startup to fail.
-        let rollbackError = null;
-        let ownershipCleanupError = null;
-        try {
-          await ungroupTabs(focusTabIds);
-        } catch (error) {
-          rollbackError = error;
-        } finally {
-          try {
-            await clearFocusGroupOwnership(runId, ownershipToken);
-          } catch (error) {
-            ownershipCleanupError = error;
-          }
-        }
-
-        const rollbackFailures = [rollbackError, ownershipCleanupError].filter(Boolean);
-        if (rollbackFailures.length > 0) {
-          throw new AggregateError(
-            [ownershipError, ...rollbackFailures],
-            'Focus group ownership persistence and rollback failed.',
-          );
-        }
-        throw ownershipError;
+        await rejectAfterFocusGroupRollback(ownershipError, {
+          runId,
+          token: ownershipToken,
+          tabIds: focusTabIds,
+        });
       }
       state.focusGroupId = groupId;
       state.focusGroupOwnershipToken = ownershipToken;
+      createdFocusGroup = { tabIds: focusTabIds, token: ownershipToken };
     }
   }
 
   // Persist authority before any run-owned alarm or badge work.
-  await saveFocusState(state, { groupBindingsVerified: true });
+  try {
+    await saveFocusState(state, { groupBindingsVerified: true });
+  } catch (authorityError) {
+    clearFailedFocusStartCache();
+    if (createdFocusGroup) {
+      await rejectAfterFocusGroupRollback(authorityError, {
+        runId,
+        token: createdFocusGroup.token,
+        tabIds: createdFocusGroup.tabIds,
+      });
+    }
+    throw authorityError;
+  }
 
   await chrome.alarms.create('focusTick', { periodInMinutes: 1 });
   await updateBadge(state, runId);

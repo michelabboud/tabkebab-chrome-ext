@@ -28,7 +28,7 @@ All notable changes to TabKebab are documented in this file.
 - Prevented old ticks, deferred resume/rebind/counter writes, concurrent teardown calls, cache-expiry timers, and delayed badge resets from mutating a replacement run.
 - Closed state-change races during both live-tab validation reads, including pause→resume ABA, without adding an await between the final URL check and navigation side effect.
 - Invalidated delayed classifications when pause→resume occurs before the AI result returns, even when the same run is active again.
-- Prevented reused Chrome group IDs from being ungrouped without matching browser-session proof; ownership-write failures abort before grouping or roll back the just-created group.
+- Prevented reused Chrome group IDs from being ungrouped without matching browser-session proof; ownership, group-metadata, and local Focus-authority write failures now abort before grouping or live-detect and roll back the just-created group, retry proof cleanup, fail the cache closed, and preserve aggregate cleanup errors.
 - Made ending recovery history-deduplicated and fail-closed despite partial cleanup failures, while avoiding repeated completed restore/ungroup work and retaining incomplete restores for retry.
 - Prevented Pause, Resume, and Extend from returning stale state when a replacement run arrives during badge reconciliation.
 - Rejected malformed, non-finite, string, and confidence-at-threshold AI decisions; only `distraction: true` with numeric confidence strictly greater than `0.7` can delegate.

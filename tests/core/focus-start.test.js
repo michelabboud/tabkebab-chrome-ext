@@ -262,6 +262,118 @@ describe('Focus startup policy and tab actions', () => {
     expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
   });
 
+  test('group metadata failure rolls back the partially created group before rejecting', async () => {
+    const metadataError = new Error('synthetic group metadata failure');
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: { 'tabGroups.update': metadataError },
+    });
+
+    let rejection;
+    try {
+      await focus.startFocus(makeStartOptions({
+        tabAction: 'group',
+        allowedDomains: ['focus.test'],
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBe(metadataError);
+    expect(harness.calls.tabs.ungroup).toEqual([[[1]]]);
+    expect(harness.snapshot().tabs[0].groupId).toBe(-1);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
+  test('metadata rollback and proof cleanup failures preserve every error and clear proof on retry', async () => {
+    const metadataError = new Error('synthetic group metadata failure');
+    const rollbackError = new Error('synthetic group rollback failure');
+    const cleanupError = new Error('synthetic ownership cleanup failure');
+    const { focus } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: {
+        'tabGroups.update': metadataError,
+        'tabs.ungroup': rollbackError,
+        'storage.session.remove': cleanupError,
+      },
+    });
+
+    let rejection;
+    try {
+      await focus.startFocus(makeStartOptions({
+        tabAction: 'group',
+        allowedDomains: ['focus.test'],
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(AggregateError);
+    expect(rejection.errors).toEqual([metadataError, rollbackError, cleanupError]);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
+  test('local Focus authority write failure rolls back group and cached authority', async () => {
+    const authorityError = new Error('synthetic focus authority write failure');
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: { 'storage.local.set': authorityError },
+    });
+
+    let rejection;
+    try {
+      await focus.startFocus(makeStartOptions({
+        tabAction: 'group',
+        allowedDomains: ['focus.test'],
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBe(authorityError);
+    expect(harness.calls.tabs.ungroup).toEqual([[[1]]]);
+    expect(harness.snapshot().tabs[0].groupId).toBe(-1);
+    expect(focus.getCachedFocusState()).toBeNull();
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
+  test('authority rollback and proof cleanup failures preserve every error and clear cached authority', async () => {
+    const authorityError = new Error('synthetic focus authority write failure');
+    const rollbackError = new Error('synthetic group rollback failure');
+    const cleanupError = new Error('synthetic ownership cleanup failure');
+    const { focus } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: {
+        'storage.local.set': authorityError,
+        'tabs.ungroup': rollbackError,
+        'storage.session.remove': cleanupError,
+      },
+    });
+
+    let rejection;
+    try {
+      await focus.startFocus(makeStartOptions({
+        tabAction: 'group',
+        allowedDomains: ['focus.test'],
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(AggregateError);
+    expect(rejection.errors).toEqual([authorityError, rollbackError, cleanupError]);
+    expect(focus.getCachedFocusState()).toBeNull();
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
   test('non-strict empty allowlist treats every eligible non-internal tab as focus', async () => {
     const { focus, harness } = await loadFocus({
       windows: [{ id: 1, focused: true }],

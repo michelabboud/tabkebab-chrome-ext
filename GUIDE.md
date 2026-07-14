@@ -376,7 +376,7 @@ Before starting, configure:
 2. **Tab Action** — what happens to non-focus tabs when you start:
    - **Kebab** — discard background non-focus tabs (they stay in the tab strip but unload); the active tab is never discarded
    - **Stash** — save and close background non-focus tabs (auto-restored when the session ends); the active tab is never closed
-   - **Group** — create a Chrome tab group containing only eligible focus tabs
+   - **Group** — create a Chrome tab group containing only eligible focus tabs. If Chrome metadata or Focus-state persistence fails after grouping begins, TabKebab rolls the partial group back instead of leaving it unmanaged.
    - **None** — monitor only, don't touch tabs
 3. **Blocking Mode**:
    - **Strict Mode** — only allowlisted entries are permitted. With an empty allowlist, every non-internal URL is blocked.
