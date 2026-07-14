@@ -163,6 +163,242 @@ describe('restoreSession', () => {
     expect(result.complete).toBe(true);
   });
 
+  test('windows mode retries a rejected seed and restores later siblings with aligned metadata', async () => {
+    const session = makeSession([
+      { url: 'https://seed-fallback.test/rejected', pinned: true, groupId: 20 },
+      { url: 'https://seed-fallback.test/visible', pinned: true, groupId: 10 },
+      { url: 'https://seed-fallback.test/background', pinned: false, groupId: 10 },
+    ], [
+      { id: 10, title: 'Survivors', color: 'blue', collapsed: true },
+      { id: 20, title: 'Rejected', color: 'red', collapsed: false },
+    ]);
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      failures: { 'windows.create': [new Error('first seed rejected'), null] },
+    });
+
+    const result = await restoreSession(session.id, { mode: 'windows', discarded: false });
+    const restored = harness.snapshot().tabs.filter((tab) =>
+      tab.url.startsWith('https://seed-fallback.test/'),
+    );
+    const visible = restored.find((tab) => tab.url.endsWith('/visible'));
+    const background = restored.find((tab) => tab.url.endsWith('/background'));
+
+    expect(result).toEqual({
+      requestedCount: 3,
+      restoredCount: 2,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [{
+        scope: 'create',
+        url: 'https://seed-fallback.test/rejected',
+        message: 'first seed rejected',
+      }],
+      complete: false,
+      windowsCreated: 1,
+      groupsRestored: 1,
+    });
+    expect(harness.calls.windows.create.map(([createData]) => createData.url)).toEqual([
+      'https://seed-fallback.test/rejected',
+      'https://seed-fallback.test/visible',
+    ]);
+    expect(harness.calls.tabs.create).toEqual([[
+      {
+        windowId: visible.windowId,
+        url: 'https://seed-fallback.test/background',
+        active: false,
+      },
+    ]]);
+    expect(visible).toEqual(expect.objectContaining({
+      active: true,
+      pinned: true,
+      discarded: false,
+    }));
+    expect(visible.mutedInfo.muted).toBe(false);
+    expect(background).toEqual(expect.objectContaining({
+      active: false,
+      pinned: false,
+      groupId: visible.groupId,
+    }));
+    expect(harness.snapshot().groups).toEqual([
+      expect.objectContaining({ title: 'Survivors', color: 'blue', collapsed: true }),
+    ]);
+  });
+
+  test('single-window mode retries a rejected seed and keeps the eventual visible tab unmuted', async () => {
+    const session = makeSession([
+      { url: 'https://single-seed.test/rejected' },
+      { url: 'https://single-seed.test/visible' },
+      { url: 'https://single-seed.test/background' },
+    ]);
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      failures: { 'windows.create': [new Error('single seed rejected'), null] },
+    });
+
+    const result = await restoreSession(session.id, {
+      mode: 'single-window',
+      discarded: false,
+    });
+    const restored = harness.snapshot().tabs.filter((tab) =>
+      tab.url.startsWith('https://single-seed.test/'),
+    );
+    const visible = restored.find((tab) => tab.url.endsWith('/visible'));
+    const background = restored.find((tab) => tab.url.endsWith('/background'));
+
+    expect(result).toEqual({
+      requestedCount: 3,
+      restoredCount: 2,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [{
+        scope: 'create',
+        url: 'https://single-seed.test/rejected',
+        message: 'single seed rejected',
+      }],
+      complete: false,
+      windowsCreated: 1,
+      groupsRestored: 0,
+    });
+    expect(harness.calls.windows.create.map(([createData]) => createData.url)).toEqual([
+      'https://single-seed.test/rejected',
+      'https://single-seed.test/visible',
+    ]);
+    expect(harness.calls.tabs.create).toEqual([[
+      {
+        windowId: visible.windowId,
+        url: 'https://single-seed.test/background',
+        active: false,
+      },
+    ]]);
+    expect(visible).toEqual(expect.objectContaining({ active: true, discarded: false }));
+    expect(visible.mutedInfo.muted).toBe(false);
+    expect(background).toEqual(expect.objectContaining({ active: false }));
+  });
+
+  test('accounts for every candidate when every single-window seed is rejected', async () => {
+    const session = makeSession([
+      { url: 'https://all-seeds.test/first' },
+      { url: 'https://all-seeds.test/second' },
+      { url: 'https://all-seeds.test/third' },
+    ]);
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      failures: {
+        'windows.create': [
+          new Error('first rejected'),
+          new Error('second rejected'),
+          new Error('third rejected'),
+        ],
+      },
+    });
+
+    const result = await restoreSession(session.id, {
+      mode: 'single-window',
+      discarded: false,
+    });
+
+    expect(result).toEqual({
+      requestedCount: 3,
+      restoredCount: 0,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [
+        { scope: 'create', url: 'https://all-seeds.test/first', message: 'first rejected' },
+        { scope: 'create', url: 'https://all-seeds.test/second', message: 'second rejected' },
+        { scope: 'create', url: 'https://all-seeds.test/third', message: 'third rejected' },
+      ],
+      complete: false,
+      windowsCreated: 0,
+      groupsRestored: 0,
+    });
+    expect(harness.calls.windows.create).toHaveLength(3);
+    expect(harness.calls.tabs.create).toEqual([]);
+  });
+
+  test('does not open another seed window after a post-create visibility update failure', async () => {
+    const session = makeSession([
+      { url: 'https://post-create.test/visible' },
+      { url: 'https://post-create.test/background' },
+    ]);
+    const harness = installChromeMock({
+      local: { sessions: [session] },
+      failures: { 'tabs.update': new Error('visibility update failed') },
+    });
+
+    const result = await restoreSession(session.id, {
+      mode: 'single-window',
+      discarded: false,
+    });
+    const visible = harness.snapshot().tabs.find((tab) =>
+      tab.url === 'https://post-create.test/visible',
+    );
+
+    expect(result.errors).toEqual([{
+      scope: 'update',
+      url: 'https://post-create.test/visible',
+      message: 'visibility update failed',
+    }]);
+    expect(result.restoredCount).toBe(2);
+    expect(harness.calls.windows.create).toHaveLength(1);
+    expect(harness.calls.tabs.create).toHaveLength(1);
+    expect(visible).toEqual(expect.objectContaining({ active: true, discarded: false }));
+    expect(visible.mutedInfo.muted).toBe(false);
+  });
+
+  test('reuses a created seed window when seed-tab discovery fails', async () => {
+    const session = makeSession([
+      { url: 'https://seed-discovery.test/unknown' },
+      { url: 'https://seed-discovery.test/survivor' },
+    ]);
+    const harness = installChromeMock({ local: { sessions: [session] } });
+    const createWindow = chrome.windows.create.bind(chrome.windows);
+    const queryTabs = chrome.tabs.query.bind(chrome.tabs);
+    chrome.windows.create = async (createData) => {
+      const window = await createWindow(createData);
+      return { ...window, tabs: [] };
+    };
+    chrome.tabs.query = async (queryInfo = {}) => {
+      if (queryInfo.windowId !== undefined) {
+        throw new Error('seed tab discovery failed');
+      }
+      return queryTabs(queryInfo);
+    };
+
+    const result = await restoreSession(session.id, {
+      mode: 'single-window',
+      discarded: false,
+    });
+    const survivor = harness.snapshot().tabs.find((tab) =>
+      tab.url === 'https://seed-discovery.test/survivor',
+    );
+
+    expect(result).toEqual({
+      requestedCount: 2,
+      restoredCount: 1,
+      skippedDuplicate: 0,
+      skippedInvalid: 0,
+      errors: [{
+        scope: 'create',
+        url: 'https://seed-discovery.test/unknown',
+        message: 'seed tab discovery failed',
+      }],
+      complete: false,
+      windowsCreated: 1,
+      groupsRestored: 0,
+    });
+    expect(harness.calls.windows.create).toHaveLength(1);
+    expect(harness.calls.tabs.create).toEqual([[
+      {
+        windowId: survivor.windowId,
+        url: 'https://seed-discovery.test/survivor',
+        active: false,
+      },
+    ]]);
+    expect(survivor).toEqual(expect.objectContaining({ active: true, discarded: false }));
+    expect(survivor.mutedInfo.muted).toBe(false);
+  });
+
   test('unmutes through finally and reports a discard failure', async () => {
     const session = makeSession([{ url: 'https://audio.test/discard-failure' }]);
     const harness = installChromeMock({

@@ -276,31 +276,69 @@ export async function restoreTabWindows(savedWindows, {
     }
   }
 
-  async function createVisibleWindowTab(savedTab, sourceIndex) {
+  async function makePairVisible(pair) {
     try {
-      const window = await chrome.windows.create({ url: savedTab.url });
-      outcome.windowsCreated++;
-      let createdTab = window.tabs?.[0];
-      if (!createdTab) {
-        const windowTabs = await chrome.tabs.query({ windowId: window.id });
-        createdTab = windowTabs[0];
-      }
-      if (!createdTab) throw new Error('Created window did not contain a tab');
+      pair.createdTab = await chrome.tabs.update(pair.createdTab.id, {
+        active: true,
+        muted: false,
+      });
+    } catch (error) {
+      addError(outcome, 'update', pair.savedTab, error);
+    }
+  }
 
-      const pair = await recordCreated(savedTab, createdTab, sourceIndex);
-      try {
-        pair.createdTab = await chrome.tabs.update(createdTab.id, {
-          active: true,
-          muted: false,
-        });
-      } catch (error) {
-        addError(outcome, 'update', savedTab, error);
-      }
-      return { pair, windowId: window.id };
+  async function createVisibleWindowTab(savedTab, sourceIndex) {
+    let window;
+    try {
+      window = await chrome.windows.create({ url: savedTab.url });
     } catch (error) {
       addError(outcome, 'create', savedTab, error);
       return null;
     }
+
+    outcome.windowsCreated++;
+    let createdTab = window.tabs?.[0];
+    if (!createdTab) {
+      try {
+        const windowTabs = await chrome.tabs.query({ windowId: window.id });
+        createdTab = windowTabs[0];
+      } catch (error) {
+        addError(outcome, 'create', savedTab, error);
+        return { pair: null, windowId: window.id };
+      }
+    }
+    if (!createdTab) {
+      addError(outcome, 'create', savedTab, new Error('Created window did not contain a tab'));
+      return { pair: null, windowId: window.id };
+    }
+
+    const pair = await recordCreated(savedTab, createdTab, sourceIndex);
+    await makePairVisible(pair);
+    return { pair, windowId: window.id };
+  }
+
+  async function createWindowFromCandidates(entries) {
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index];
+      const visible = await createVisibleWindowTab(entry.savedTab, entry.sourceIndex);
+      // Retry only a true windows.create rejection. Once a window exists, reuse it
+      // even if its seed tab could not be discovered, avoiding an orphan extra window.
+      if (visible) return { ...visible, nextIndex: index + 1 };
+    }
+    return null;
+  }
+
+  async function processBatchWithVisibleFallback(pairs, visiblePair) {
+    if (visiblePair || pairs.length === 0) {
+      await processPairs(pairs, discarded);
+      return visiblePair;
+    }
+
+    const [promotedPair, ...backgroundPairs] = pairs;
+    await makePairVisible(promotedPair);
+    await processPairs([promotedPair], false);
+    await processPairs(backgroundPairs, discarded);
+    return promotedPair;
   }
 
   async function restoreIntoExistingWindow(preparedWindow) {
@@ -321,23 +359,25 @@ export async function restoreTabWindows(savedWindows, {
 
   async function restoreIntoNewWindow(preparedWindow) {
     if (preparedWindow.tabs.length === 0) return;
-    const visible = await createVisibleWindowTab(
-      preparedWindow.tabs[0],
-      preparedWindow.sourceIndex,
-    );
+    const entries = preparedWindow.tabs.map((savedTab) => ({
+      savedTab,
+      sourceIndex: preparedWindow.sourceIndex,
+    }));
+    const visible = await createWindowFromCandidates(entries);
     if (!visible) return;
 
-    const pairs = [visible.pair];
-    await processPairs([visible.pair], false);
+    const pairs = visible.pair ? [visible.pair] : [];
+    let visiblePair = visible.pair;
+    if (visiblePair) await processPairs([visiblePair], false);
 
-    for (let index = 1; index < preparedWindow.tabs.length; index += RESTORE_BATCH) {
+    for (let index = visible.nextIndex; index < preparedWindow.tabs.length; index += RESTORE_BATCH) {
       const batchPairs = await createTabBatch(
         preparedWindow.tabs.slice(index, index + RESTORE_BATCH),
         preparedWindow.sourceIndex,
         visible.windowId,
       );
       pairs.push(...batchPairs);
-      await processPairs(batchPairs, discarded);
+      visiblePair = await processBatchWithVisibleFallback(batchPairs, visiblePair);
     }
 
     await restoreGroups(preparedWindow, pairs, visible.windowId);
@@ -361,13 +401,16 @@ export async function restoreTabWindows(savedWindows, {
       );
 
       if (allTabs.length > 0) {
-        const first = allTabs[0];
-        const visible = await createVisibleWindowTab(first.savedTab, first.sourceIndex);
+        const visible = await createWindowFromCandidates(allTabs);
         if (visible) {
-          const pairsBySource = new Map([[first.sourceIndex, [visible.pair]]]);
-          await processPairs([visible.pair], false);
+          const pairsBySource = new Map();
+          let visiblePair = visible.pair;
+          if (visiblePair) {
+            pairsBySource.set(visiblePair.sourceIndex, [visiblePair]);
+            await processPairs([visiblePair], false);
+          }
 
-          for (let index = 1; index < allTabs.length; index += RESTORE_BATCH) {
+          for (let index = visible.nextIndex; index < allTabs.length; index += RESTORE_BATCH) {
             const batch = allTabs.slice(index, index + RESTORE_BATCH);
             const settled = await Promise.allSettled(batch.map(({ savedTab }) =>
               chrome.tabs.create({
@@ -393,7 +436,7 @@ export async function restoreTabWindows(savedWindows, {
                 addError(outcome, 'create', entry.savedTab, settlement.reason);
               }
             }
-            await processPairs(batchPairs, discarded);
+            visiblePair = await processBatchWithVisibleFallback(batchPairs, visiblePair);
           }
 
           for (const preparedWindow of preparedWindows) {
