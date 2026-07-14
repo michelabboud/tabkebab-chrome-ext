@@ -319,22 +319,22 @@ export function createFocusAiChecker({ aiClient, onDistraction, cache, scheduleE
 
 `decision` is always `{ distraction: boolean, confidence: number }`. Deterministic strict/category decisions pass `{ distraction: true, confidence: 1 }`; AI decisions pass the parsed or cached values.
 
-- [ ] Write lifecycle tests first. Stub `crypto.randomUUID()` and assert each `startFocus()` stores a distinct `runId`. A legacy stored state without `runId` must be ended before the new run becomes active.
-- [ ] Add failing `validateDistractionTarget()` cases for missing state, paused state, ending state, mismatched run, removed tab, neither `tab.url` nor a non-empty `tab.pendingUrl` matching `classifiedUrl`, `distraction: false`, confidence `0.7`, and malformed confidence. Add passing cases for confidence `0.700001` when either the current URL or the pending URL matches, proving the approved current-or-pending rule is not accidentally implemented as current-and-pending.
-- [ ] Add integration tests with a deferred AI promise. While it is pending, exercise pause, end, start-new-run, and navigate-again. After resolution, assert no `tabs.goBack` or `tabs.remove` call occurs.
-- [ ] Add cached-result tests proving cached `confidence <= 0.7` never reaches `handleDistraction()` and cached high-confidence results still undergo point-of-side-effect revalidation.
-- [ ] Add `focus-ai` tests proving cached and fresh decisions use the identical finite-number/strictly-greater-than-`0.7` predicate, malformed/string confidence is rejected, cache expiry is run, and the checker forwards the captured run ID plus full decision without owning mutation authority.
-- [ ] Add an `endFocus()` test proving `{ status: 'ending', runId }` is persisted before stash restore or ungroup begins, and state is cleared only in final teardown after history/badge/alarm work. Add worker-recovery coverage proving an `ending` run resumes idempotent teardown and cannot duplicate history for the same `runId`.
-- [ ] Run `bun test tests/core/focus-lifecycle.test.js tests/core/focus-ai.test.js tests/integration/focus-navigation.test.js` and preserve current failures.
-- [ ] Generate `runId` with `crypto.randomUUID()` at the start of each run. If an existing state is present, end it safely first; legacy state without a run ID must never be reused.
-- [ ] Rework service-worker navigation handling to capture `{ runId, classifiedUrl }` when classification starts and pass the full decision to `handleDistraction()`.
-- [ ] Extract the cache/classification boundary into `createFocusAiChecker()`. Both cached and fresh decisions must pass `isConfidentDistraction()` and then delegate to `handleDistraction()` for live validation.
-- [ ] Implement `validateDistractionTarget()` so its final read order is storage state → tab existence → current/pending URL → decision threshold. Call it immediately before `goBack` or `remove`; return without side effects when it returns `null`.
-- [ ] Persist `ending` before recreating stashed tabs or ungrouping. Navigation listeners and Focus ticks must act only on `active` state. Keep notification/counter updates bound to the same validated run.
-- [ ] Make teardown resumable and idempotent. Deduplicate history by `runId`, allow service-worker initialization to finish an `ending` run, and ensure alarm/badge/state cleanup reaches a terminal state even if restore or ungroup reports errors; preserve/report those errors without reactivating blocking.
-- [ ] Run `bun test tests/core/focus-lifecycle.test.js tests/core/focus-ai.test.js tests/integration/focus-navigation.test.js`, then the full three-command gate.
-- [ ] In real Chrome, delay AI classification, then separately pause, end, and navigate to a new URL before it resolves. Confirm the current tab is never moved backward or removed; append evidence.
-- [ ] Update lifecycle documentation, then close the task using the global chain.
+- [x] Write lifecycle tests first. Stub `crypto.randomUUID()` and assert each `startFocus()` stores a distinct `runId`. A legacy stored state without `runId` must be ended before the new run becomes active.
+- [x] Add failing `validateDistractionTarget()` cases for missing state, paused state, ending state, mismatched run, removed tab, neither `tab.url` nor a non-empty `tab.pendingUrl` matching `classifiedUrl`, `distraction: false`, confidence `0.7`, and malformed confidence. Add passing cases for confidence `0.700001` when either the current URL or the pending URL matches, proving the approved current-or-pending rule is not accidentally implemented as current-and-pending.
+- [x] Add integration tests with a deferred AI promise. While it is pending, exercise pause, end, start-new-run, and navigate-again. After resolution, assert no `tabs.goBack` or `tabs.remove` call occurs.
+- [x] Add cached-result tests proving cached `confidence <= 0.7` never reaches `handleDistraction()` and cached high-confidence results still undergo point-of-side-effect revalidation.
+- [x] Add `focus-ai` tests proving cached and fresh decisions use the identical finite-number/strictly-greater-than-`0.7` predicate, malformed/string confidence is rejected, cache expiry is run, and the checker forwards the captured run ID plus full decision without owning mutation authority.
+- [x] Add an `endFocus()` test proving `{ status: 'ending', runId }` is persisted before stash restore or ungroup begins, and state is cleared only in final teardown after history/badge/alarm work. Add worker-recovery coverage proving an `ending` run resumes idempotent teardown and cannot duplicate history for the same `runId`.
+- [x] Run `bun test tests/core/focus-lifecycle.test.js tests/core/focus-ai.test.js tests/integration/focus-navigation.test.js` and preserve current failures.
+- [x] Generate `runId` with `crypto.randomUUID()` at the start of each run. If an existing state is present, end it safely first; legacy state without a run ID must never be reused.
+- [x] Rework service-worker navigation handling to capture `{ runId, classifiedUrl }` when classification starts and pass the full decision to `handleDistraction()`.
+- [x] Extract the cache/classification boundary into `createFocusAiChecker()`. Both cached and fresh decisions must pass `isConfidentDistraction()` and then delegate to `handleDistraction()` for live validation.
+- [x] Implement `validateDistractionTarget()` so its final read order is storage state → tab existence → current/pending URL → decision threshold. Call it immediately before `goBack` or `remove`; return without side effects when it returns `null`.
+- [x] Persist `ending` before recreating stashed tabs or ungrouping. Navigation listeners and Focus ticks must act only on `active` state. Keep notification/counter updates bound to the same validated run.
+- [x] Make teardown resumable and idempotent. Deduplicate history by `runId`, allow service-worker initialization to finish an `ending` run, and ensure alarm/badge/state cleanup reaches a terminal state even if restore or ungroup reports errors; preserve/report those errors without reactivating blocking.
+- [x] Run `bun test tests/core/focus-lifecycle.test.js tests/core/focus-ai.test.js tests/integration/focus-navigation.test.js`, then the full three-command gate.
+- [x] In real Chrome, delay AI classification, then separately pause, end, and navigate to a new URL before it resolves. Confirm the current tab is never moved backward or removed; append evidence.
+- [x] Update lifecycle documentation, then close the task using the global chain.
 
 ### Task 5: Make host matching exact and duplicate Undo lossless
 

@@ -11,18 +11,59 @@ import {
   rebindFocusAllowlist,
   resolveGroupAllowlist,
 } from './focus-policy.js';
+import { isConfidentDistraction } from './focus-ai.js';
 
 const FOCUS_STATE_KEY = 'focusState';
 const FOCUS_HISTORY_KEY = 'focusHistory';
 const MAX_HISTORY = 50;
 
+export const FocusStatus = Object.freeze({
+  ACTIVE: 'active',
+  PAUSED: 'paused',
+  ENDING: 'ending',
+});
+
 // Module-level cache for fast sync access
 let _cachedState = null;
 let _runtimeGroupBindingsVerified = false;
 let _runtimeGroupBindingWritesPending = 0;
+let _lifecycleQueue = Promise.resolve();
+const _endFlights = new Map();
+let _focusStateMutationQueue = Promise.resolve();
+let _badgeWriteQueue = Promise.resolve();
+let _focusStateGeneration = 0;
 
 function isRuntimeFocusState(state) {
-  return state?.status === 'active' || state?.status === 'paused';
+  return state?.status === FocusStatus.ACTIVE || state?.status === FocusStatus.PAUSED;
+}
+
+function hasRunId(state) {
+  return typeof state?.runId === 'string' && state.runId.length > 0;
+}
+
+function failureMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function createDistinctRunId(excludedRunIds = []) {
+  const excluded = new Set(excludedRunIds.filter(
+    (runId) => typeof runId === 'string' && runId.length > 0,
+  ));
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const runId = crypto.randomUUID();
+    if (typeof runId === 'string' && runId.length > 0 && !excluded.has(runId)) {
+      return runId;
+    }
+  }
+  throw new Error('Unable to create a distinct Focus run ID.');
+}
+
+async function getMatchingFocusState(runId, statuses = null) {
+  if (typeof runId !== 'string' || runId.length === 0) return null;
+  const state = await getFocusState();
+  if (!state || state.runId !== runId) return null;
+  if (statuses && !statuses.includes(state.status)) return null;
+  return state;
 }
 
 function cacheFocusState(state) {
@@ -43,6 +84,7 @@ const cacheReady = (async () => {
 // Keep cache in sync with storage changes
 Storage.onChange((changes) => {
   if (changes[FOCUS_STATE_KEY]) {
+    _focusStateGeneration++;
     cacheFocusState(changes[FOCUS_STATE_KEY].newValue ?? null);
   }
 });
@@ -57,10 +99,21 @@ export async function getFocusState() {
   return cacheFocusState(state);
 }
 
-async function saveFocusState(state, {
+function withFocusStateMutation(operation) {
+  const pending = _focusStateMutationQueue.then(operation, operation);
+  _focusStateMutationQueue = pending.catch(() => {});
+  return pending;
+}
+
+function withLifecycleOperation(operation) {
+  const pending = _lifecycleQueue.then(operation, operation);
+  _lifecycleQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function writeFocusStateUnlocked(state, {
   groupBindingsVerified = _runtimeGroupBindingsVerified,
 } = {}) {
-  await cacheReady;
   const verifiesRuntimeGroups = Boolean(groupBindingsVerified) && isRuntimeFocusState(state);
   const stateToPersist = isRuntimeFocusState(state) && !verifiesRuntimeGroups
     ? rebindFocusAllowlist(state, [])
@@ -76,6 +129,11 @@ async function saveFocusState(state, {
     } else {
       await Storage.remove(FOCUS_STATE_KEY);
     }
+    // storage.onChanged is the cross-context signal, but Chrome does not
+    // guarantee that its listener has run before the storage Promise settles.
+    // Advance locally as well so every completed durable mutation invalidates
+    // validators synchronously; a later onChanged increment is harmless.
+    _focusStateGeneration++;
   } catch (error) {
     _runtimeGroupBindingsVerified = false;
     _runtimeGroupBindingWritesPending--;
@@ -86,12 +144,65 @@ async function saveFocusState(state, {
   _runtimeGroupBindingsVerified = verifiesRuntimeGroups;
   _runtimeGroupBindingWritesPending--;
   cacheFocusState(stateToPersist);
+  return stateToPersist;
+}
+
+async function saveFocusState(state, options = {}) {
+  await cacheReady;
+  return withFocusStateMutation(() => writeFocusStateUnlocked(state, options));
+}
+
+async function mutateFocusState({
+  runId,
+  statuses,
+  groupBindingsVerified = _runtimeGroupBindingsVerified,
+}, transform) {
+  await cacheReady;
+  return withFocusStateMutation(async () => {
+    const current = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    if (!current || current.runId !== runId || !statuses.includes(current.status)) {
+      return null;
+    }
+    const next = transform(current);
+    if (!next) return null;
+    await writeFocusStateUnlocked(next, { groupBindingsVerified });
+    return next;
+  });
+}
+
+async function removeFocusStateIfEnding(runId) {
+  await cacheReady;
+  return withFocusStateMutation(async () => {
+    const current = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    if (current?.runId !== runId || current.status !== FocusStatus.ENDING) return false;
+    await writeFocusStateUnlocked(null);
+    return true;
+  });
+}
+
+async function markTeardownStepCompleted(runId, step) {
+  await cacheReady;
+  return withFocusStateMutation(async () => {
+    const current = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    if (current?.runId !== runId || current.status !== FocusStatus.ENDING) return null;
+    if (current.teardownCompleted?.[step]) return current;
+
+    const checkpointed = {
+      ...current,
+      teardownCompleted: {
+        ...(current.teardownCompleted || {}),
+        [step]: true,
+      },
+    };
+    await writeFocusStateUnlocked(checkpointed);
+    return checkpointed;
+  });
 }
 
 // ── Timer helpers ──
 
 export function getRemainingMs(state) {
-  if (!state || state.status !== 'active') return 0;
+  if (!state || state.status !== FocusStatus.ACTIVE) return 0;
   if (state.duration === 0) return Infinity; // open-ended
   const totalMs = state.duration * 60 * 1000;
   const elapsed = Date.now() - state.startedAt - state.pausedElapsed;
@@ -100,10 +211,19 @@ export function getRemainingMs(state) {
 
 export function getElapsedMs(state) {
   if (!state) return 0;
-  if (state.status === 'paused') {
+  if (state.status === FocusStatus.ENDING && Number.isFinite(state.actualDurationMs)) {
+    return state.actualDurationMs;
+  }
+  if (state.status === FocusStatus.PAUSED) {
     return state.pausedAt - state.startedAt - state.pausedElapsed;
   }
-  return Date.now() - state.startedAt - state.pausedElapsed;
+  if (state.status === FocusStatus.ENDING && Number.isFinite(state.pausedAt)) {
+    return state.pausedAt - state.startedAt - state.pausedElapsed;
+  }
+  const stoppedAt = state.status === FocusStatus.ENDING && Number.isFinite(state.endedAt)
+    ? state.endedAt
+    : Date.now();
+  return stoppedAt - state.startedAt - state.pausedElapsed;
 }
 
 export function formatTimeRemaining(ms) {
@@ -157,37 +277,82 @@ export function isFocusTab(tab, state) {
 
 // ── Badge ──
 
-export async function updateBadge(state) {
-  if (!state || !state.status) {
-    await chrome.action.setBadgeText({ text: '' });
-    return;
+function withBadgeWrite(operation) {
+  const pending = _badgeWriteQueue.then(operation, operation);
+  _badgeWriteQueue = pending.catch(() => {});
+  return pending;
+}
+
+function getBadgePresentation(state, { distractionRunId = null } = {}) {
+  if (state?.status === FocusStatus.ACTIVE &&
+      distractionRunId && state.runId === distractionRunId) {
+    return { text: '!', color: '#ef4444', runId: state.runId, distraction: true };
   }
-  if (state.status === 'paused') {
-    await chrome.action.setBadgeText({ text: '||' });
-    await chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
-    return;
+  if (state?.status === FocusStatus.PAUSED) {
+    return { text: '||', color: '#f59e0b', runId: state.runId, distraction: false };
   }
-  if (state.status === 'active') {
-    const remaining = getRemainingMs(state);
-    const text = formatBadgeTime(remaining);
-    await chrome.action.setBadgeText({ text });
-    await chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
-    return;
+  if (state?.status === FocusStatus.ACTIVE) {
+    return {
+      text: formatBadgeTime(getRemainingMs(state)),
+      color: '#2563eb',
+      runId: state.runId,
+      distraction: false,
+    };
+  }
+  return { text: '', color: null, runId: null, distraction: false };
+}
+
+async function reconcileBadgeUnlocked({ expectedRunId = null, distraction = false } = {}) {
+  await cacheReady;
+
+  // Chrome action writes are separate awaits. If Focus authority changes during
+  // either one, repaint from the latest durable state before releasing the queue.
+  while (true) {
+    const state = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    const generation = _focusStateGeneration;
+    const presentation = getBadgePresentation(state, {
+      distractionRunId: distraction ? expectedRunId : null,
+    });
+
+    await chrome.action.setBadgeText({ text: presentation.text });
+    if (generation !== _focusStateGeneration) continue;
+
+    if (presentation.color) {
+      await chrome.action.setBadgeBackgroundColor({ color: presentation.color });
+      if (generation !== _focusStateGeneration) continue;
+    }
+
+    return {
+      ...presentation,
+      expectedRunIsCurrent: !expectedRunId || presentation.runId === expectedRunId,
+    };
   }
 }
 
-export async function flashBadgeDistraction() {
-  await chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-  await chrome.action.setBadgeText({ text: '!' });
+export async function updateBadge(state, expectedRunId = state?.runId ?? null) {
+  const result = await withBadgeWrite(() => reconcileBadgeUnlocked({ expectedRunId }));
+  return result.expectedRunIsCurrent;
+}
+
+export async function flashBadgeDistraction(runId) {
+  const result = await withBadgeWrite(() => reconcileBadgeUnlocked({
+    expectedRunId: runId,
+    distraction: true,
+  }));
+  if (!result.expectedRunIsCurrent || !result.distraction) return false;
   setTimeout(async () => {
-    const state = getCachedFocusState();
-    if (state) await updateBadge(state);
+    await updateBadge(null, runId);
   }, 2000);
+  return true;
 }
 
 // ── Start focus ──
 
-export async function startFocus({
+export function startFocus(options, adapters = {}) {
+  return withLifecycleOperation(() => performStartFocus(options, adapters));
+}
+
+async function performStartFocus({
   profileId,
   duration,
   tabAction,
@@ -199,12 +364,32 @@ export async function startFocus({
 }, {
   saveStash: persistStash = saveStash,
 } = {}) {
+  let runId = createDistinctRunId();
+  const existingState = await Storage.get(FOCUS_STATE_KEY);
+  if (runId === existingState?.runId) {
+    runId = createDistinctRunId([existingState.runId]);
+  }
+  if (existingState) {
+    if (hasRunId(existingState)) {
+      await performEndFocus(existingState.runId);
+    } else {
+      const cleanupRunId = createDistinctRunId([runId]);
+      await performEndFocus(null, {}, cleanupRunId);
+    }
+
+    const remainingState = await Storage.get(FOCUS_STATE_KEY);
+    if (remainingState) {
+      throw new Error('The previous Focus run could not be fully closed.');
+    }
+  }
+
   const profile = getProfileById(profileId);
   const profileName = profile?.name || profileId;
   const profileColor = profile?.color || 'blue';
 
   const state = {
-    status: 'active',
+    status: FocusStatus.ACTIVE,
+    runId,
     startedAt: Date.now(),
     duration: duration || 0,
     pausedAt: null,
@@ -274,85 +459,215 @@ export async function startFocus({
     } catch { /* some tabs may not be groupable */ }
   }
 
-  // Create alarm
-  await chrome.alarms.create('focusTick', { periodInMinutes: 1 });
-
-  // Update badge
-  await updateBadge(state);
-
-  // Persist
+  // Persist authority before any run-owned alarm or badge work.
   await saveFocusState(state, { groupBindingsVerified: true });
 
-  return state;
+  await chrome.alarms.create('focusTick', { periodInMinutes: 1 });
+  await updateBadge(state, runId);
+
+  const authoritative = await getMatchingFocusState(runId, [FocusStatus.ACTIVE]);
+  if (!authoritative) {
+    throw new Error('Focus run lost authority during startup.');
+  }
+  return authoritative;
 }
 
 // ── End focus ──
 
-export async function endFocus() {
-  const state = await getFocusState();
-  if (!state) return null;
+export function endFocus(options = {}) {
+  const expectedRunId = typeof options === 'string'
+    ? options
+    : options?.expectedRunId ?? null;
+  const adapters = typeof options === 'object' && options?.adapters
+    ? options.adapters
+    : {};
+  const legacyCleanupRunId = typeof options === 'object'
+    ? options?.legacyCleanupRunId ?? null
+    : null;
 
-  // Restore stashed tabs
-  if (state.stashId) {
-    try {
-      const stash = await getStash(state.stashId);
-      if (stash) {
-        await restoreStashTabs(stash, { mode: 'here' });
+  const flightKey = expectedRunId
+    ? `run:${expectedRunId}`
+    : legacyCleanupRunId
+      ? `legacy:${legacyCleanupRunId}`
+      : 'current';
+  const existingFlight = _endFlights.get(flightKey);
+  if (existingFlight) return existingFlight;
+
+  const promise = withLifecycleOperation(() =>
+    performEndFocus(expectedRunId, adapters, legacyCleanupRunId));
+  _endFlights.set(flightKey, promise);
+  promise.finally(() => {
+    if (_endFlights.get(flightKey) === promise) _endFlights.delete(flightKey);
+  }).catch(() => {});
+  return promise;
+}
+
+async function performEndFocus(expectedRunId, {
+  getStash: loadStash = getStash,
+  restoreStashTabs: restoreTabs = restoreStashTabs,
+  ungroupTabs: ungroup = ungroupTabs,
+} = {}, legacyCleanupRunId = null) {
+  await cacheReady;
+  const state = await withFocusStateMutation(async () => {
+    const current = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
+    if (!current) return null;
+    if (expectedRunId && current.runId !== expectedRunId) return null;
+    if (![FocusStatus.ACTIVE, FocusStatus.PAUSED, FocusStatus.ENDING].includes(current.status)) {
+      return null;
+    }
+
+    let runId = current.runId;
+    if (typeof runId !== 'string' || runId.length === 0) {
+      runId = legacyCleanupRunId || crypto.randomUUID();
+      if (typeof runId !== 'string' || runId.length === 0) {
+        throw new Error('Unable to create a legacy Focus cleanup ID.');
       }
-    } catch (e) { console.warn('[TabKebab] Focus restore failed:', e); }
+    }
+
+    if (current.status === FocusStatus.ENDING && Number.isFinite(current.endedAt) &&
+        current.runId === runId) {
+      return current;
+    }
+
+    const endedAt = Number.isFinite(current.endedAt) ? current.endedAt : Date.now();
+    const ending = {
+      ...current,
+      status: FocusStatus.ENDING,
+      runId,
+      endedAt,
+      // Compute this while paused status still carries the pause boundary.
+      actualDurationMs: getElapsedMs(current),
+    };
+    // This write is the terminal transition. Do not begin teardown if it fails.
+    await writeFocusStateUnlocked(ending);
+    return ending;
+  });
+  if (!state) return null;
+  const runId = state.runId;
+
+  const teardownFailures = [];
+  const captureFailure = (step, error) => {
+    teardownFailures.push({ step, message: failureMessage(error) });
+  };
+
+  if (state.stashId && !state.teardownCompleted?.restore) {
+    let restoreCanCheckpoint = false;
+    try {
+      const stash = await loadStash(state.stashId);
+      if (stash) {
+        const outcome = await restoreTabs(stash, { mode: 'here' });
+        if (outcome && outcome.complete === false) {
+          captureFailure('restore', new Error(
+            `Focus stash restore was incomplete (${outcome.restoredCount ?? 0}/${outcome.requestedCount ?? 0}).`,
+          ));
+        } else {
+          restoreCanCheckpoint = true;
+        }
+      } else {
+        restoreCanCheckpoint = true;
+      }
+    } catch (error) {
+      captureFailure('restore', error);
+    }
+
+    if (restoreCanCheckpoint) {
+      try {
+        await markTeardownStepCompleted(runId, 'restore');
+      } catch (error) {
+        captureFailure('restore-checkpoint', error);
+      }
+    }
   }
 
-  // Ungroup focus tabs
-  if (state.focusGroupId) {
+  if (Number.isInteger(state.focusGroupId) && state.focusGroupId >= 0) {
     try {
       const groupTabs = await chrome.tabs.query({ groupId: state.focusGroupId });
       if (groupTabs.length > 0) {
-        await ungroupTabs(groupTabs.map(t => t.id));
+        await ungroup(groupTabs.map((tab) => tab.id));
       }
-    } catch { /* group may already be gone */ }
+    } catch (error) {
+      captureFailure('ungroup', error);
+    }
   }
 
-  // Clear alarm & badge
-  try { await chrome.alarms.clear('focusTick'); } catch {}
-  await chrome.action.setBadgeText({ text: '' });
+  try {
+    await chrome.alarms.clear('focusTick');
+  } catch (error) {
+    captureFailure('alarm', error);
+  }
+  try {
+    await updateBadge(state, runId);
+  } catch (error) {
+    captureFailure('badge', error);
+  }
 
-  // Save to history
-  const elapsed = getElapsedMs(state);
   const record = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    runId,
     profileId: state.profileId,
     profileName: state.profileName,
     profileColor: state.profileColor,
     startedAt: state.startedAt,
-    endedAt: Date.now(),
+    endedAt: state.endedAt,
     plannedDuration: state.duration,
-    actualDurationMs: elapsed,
+    actualDurationMs: Number.isFinite(state.actualDurationMs)
+      ? state.actualDurationMs
+      : getElapsedMs(state),
     distractionsBlocked: state.distractionsBlocked,
     focusTabCount: state.focusTabCount,
     tabAction: state.tabAction,
+    teardownFailures,
   };
 
-  const history = (await Storage.get(FOCUS_HISTORY_KEY)) || [];
-  history.unshift(record);
-  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-  await Storage.set(FOCUS_HISTORY_KEY, history);
+  try {
+    const history = (await Storage.get(FOCUS_HISTORY_KEY)) || [];
+    const existing = history.find((entry) => entry?.runId === runId);
+    if (existing) {
+      Object.assign(record, existing, { teardownFailures });
+    } else {
+      history.unshift(record);
+      if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+      await Storage.set(FOCUS_HISTORY_KEY, history);
+    }
+  } catch (error) {
+    captureFailure('history', error);
+  }
 
-  // Clear state
-  await saveFocusState(null);
+  // State removal is deliberately last and conditional: a stale teardown must
+  // never remove a replacement run.
+  try {
+    await removeFocusStateIfEnding(runId);
+  } catch (error) {
+    captureFailure('state', error);
+  }
 
+  record.teardownFailures = teardownFailures;
+  if (teardownFailures.length > 0) {
+    console.warn('[TabKebab] Focus teardown completed with failures:', teardownFailures);
+  }
   return record;
 }
 
 // ── Pause / Resume ──
 
-export async function pauseFocus() {
+export async function pauseFocus(expectedRunId = null) {
   const state = await getFocusState();
-  if (!state || state.status !== 'active') return null;
-  state.status = 'paused';
-  state.pausedAt = Date.now();
-  await updateBadge(state);
-  await saveFocusState(state);
-  return state;
+  if (!state || state.status !== FocusStatus.ACTIVE || !hasRunId(state)) return null;
+  if (expectedRunId && state.runId !== expectedRunId) return null;
+  const runId = state.runId;
+  const paused = await mutateFocusState({
+    runId,
+    statuses: [FocusStatus.ACTIVE],
+  }, (current) => ({
+    ...current,
+    status: FocusStatus.PAUSED,
+    pausedAt: Date.now(),
+  }));
+  if (!paused) return null;
+  // Paused authority is durable before any badge await.
+  if (!await getMatchingFocusState(runId, [FocusStatus.PAUSED])) return null;
+  await updateBadge(paused, runId);
+  return paused;
 }
 
 export async function rebindStoredFocusState() {
@@ -362,6 +677,7 @@ export async function rebindStoredFocusState() {
   if (!isRuntimeFocusState(state)) {
     return state;
   }
+  const runId = state.runId;
 
   // Never expose persisted runtime IDs while the current Chrome group query is pending.
   let liveGroups;
@@ -370,117 +686,205 @@ export async function rebindStoredFocusState() {
   } catch (error) {
     // Preserve the title preference and run metadata, but remove numeric authority
     // that cannot be validated in this browser session.
-    const latest = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
-    await saveFocusState(latest, { groupBindingsVerified: false });
+    await mutateFocusState({
+      runId,
+      statuses: [state.status],
+      groupBindingsVerified: false,
+    }, (current) => current);
     throw error;
   }
-  const latest = cacheFocusState(await Storage.get(FOCUS_STATE_KEY));
-  if (!isRuntimeFocusState(latest)) return latest;
-  const rebound = rebindFocusAllowlist(latest, liveGroups);
-  await saveFocusState(rebound, { groupBindingsVerified: true });
-  return rebound;
+  return mutateFocusState({
+    runId,
+    statuses: [state.status],
+    groupBindingsVerified: true,
+  }, (current) => rebindFocusAllowlist(current, liveGroups));
 }
 
-export async function resumeFocus() {
+export async function resumeFocus(expectedRunId = null) {
   const state = await getFocusState();
-  if (!state || state.status !== 'paused') return null;
+  if (!state || state.status !== FocusStatus.PAUSED || !hasRunId(state)) return null;
+  if (expectedRunId && state.runId !== expectedRunId) return null;
+  const runId = state.runId;
   const liveGroups = await chrome.tabGroups.query({});
-  const rebound = rebindFocusAllowlist(state, liveGroups);
-  const pauseDuration = Date.now() - rebound.pausedAt;
-  rebound.pausedElapsed += pauseDuration;
-  rebound.pausedAt = null;
-  rebound.status = 'active';
-  await updateBadge(rebound);
-  await saveFocusState(rebound, { groupBindingsVerified: true });
+  const rebound = await mutateFocusState({
+    runId,
+    statuses: [FocusStatus.PAUSED],
+    groupBindingsVerified: true,
+  }, (current) => {
+    const next = rebindFocusAllowlist(current, liveGroups);
+    const pauseDuration = Date.now() - next.pausedAt;
+    return {
+      ...next,
+      pausedElapsed: next.pausedElapsed + pauseDuration,
+      pausedAt: null,
+      status: FocusStatus.ACTIVE,
+    };
+  });
+  if (!rebound) return null;
+  if (!await getMatchingFocusState(runId, [FocusStatus.ACTIVE])) return null;
+  await updateBadge(rebound, runId);
   return rebound;
 }
 
 // ── Extend ──
 
-export async function extendFocus(minutes) {
+export async function extendFocus(minutes, expectedRunId = null) {
   const state = await getFocusState();
-  if (!state) return null;
-  state.duration += minutes;
-  await updateBadge(state);
-  await saveFocusState(state);
-  return state;
+  if (!isRuntimeFocusState(state) || !hasRunId(state)) return null;
+  if (expectedRunId && state.runId !== expectedRunId) return null;
+  const extended = await mutateFocusState({
+    runId: state.runId,
+    statuses: [state.status],
+  }, (current) => ({ ...current, duration: current.duration + minutes }));
+  if (!extended) return null;
+  if (!await getMatchingFocusState(state.runId, [state.status])) return null;
+  await updateBadge(extended, state.runId);
+  return extended;
 }
 
 // ── Distraction handling ──
 
-export async function handleDistraction(tabId, url, _cachedRef, category = null) {
-  let windowId;
+export async function validateDistractionTarget({
+  runId,
+  tabId,
+  classifiedUrl,
+  decision,
+}) {
+  // This order is intentional: stored authority, live tab, exact URL identity,
+  // then the untrusted decision predicate.
+  const generationBeforeRead = _focusStateGeneration;
+  const state = await Storage.get(FOCUS_STATE_KEY);
+  const authorityGeneration = _focusStateGeneration;
+  if (authorityGeneration !== generationBeforeRead) return null;
+  if (state?.status !== FocusStatus.ACTIVE || !hasRunId(state) || state.runId !== runId) {
+    return null;
+  }
+
+  let tab;
   try {
-    const tab = await chrome.tabs.get(tabId);
-    windowId = tab.windowId;
-    // If this is a new tab with no history, close it
-    // Otherwise, go back
-    if (!tab.url || tab.url === url) {
-      // Try goBack first
-      try {
-        await chrome.tabs.goBack(tabId);
-      } catch {
-        // No history — close the tab
-        try { await chrome.tabs.remove(tabId); } catch {}
-      }
-    } else {
-      await chrome.tabs.goBack(tabId);
-    }
+    tab = await chrome.tabs.get(tabId);
   } catch {
-    // Tab may already be gone
-    try { await chrome.tabs.remove(tabId); } catch {}
+    return null;
   }
 
-  // Open side panel to show the distraction notification
-  if (windowId) {
-    try { await chrome.sidePanel.open({ windowId }); } catch {}
+  // tabs.get() is the final await. A durable Focus transition while it was
+  // pending invalidates even an active->paused->active ABA cycle.
+  if (_focusStateGeneration !== authorityGeneration) return null;
+
+  const currentMatches = tab.url === classifiedUrl;
+  const pendingMatches = typeof tab.pendingUrl === 'string' &&
+    tab.pendingUrl.length > 0 && tab.pendingUrl === classifiedUrl;
+  if (!currentMatches && !pendingMatches) return null;
+  if (!isConfidentDistraction(decision)) return null;
+  return { state, tab };
+}
+
+export async function handleDistraction({
+  runId,
+  tabId,
+  classifiedUrl,
+  decision,
+  category,
+}) {
+  const target = await validateDistractionTarget({
+    runId,
+    tabId,
+    classifiedUrl,
+    decision,
+  });
+  if (!target) return null;
+
+  const windowId = target.tab.windowId;
+  let navigationApplied = false;
+  try {
+    // validateDistractionTarget was the immediately preceding await.
+    await chrome.tabs.goBack(tabId);
+    navigationApplied = true;
+  } catch {
+    const fallbackTarget = await validateDistractionTarget({
+      runId,
+      tabId,
+      classifiedUrl,
+      decision,
+    });
+    if (!fallbackTarget) return null;
+    try {
+      // The second live validation is immediately before destructive fallback.
+      await chrome.tabs.remove(tabId);
+      navigationApplied = true;
+    } catch {
+      return null;
+    }
+  }
+  if (!navigationApplied) return null;
+
+  if (windowId && await getMatchingFocusState(runId, [FocusStatus.ACTIVE])) {
+    try {
+      await chrome.sidePanel.open({ windowId });
+    } catch {
+      // Side-panel availability must not undo an already-applied navigation block.
+    }
   }
 
-  // Re-read state from storage to avoid stale data
-  const state = await getFocusState();
-  if (!state) return;
+  let state = await mutateFocusState({
+    runId,
+    statuses: [FocusStatus.ACTIVE],
+  }, (current) => ({
+    ...current,
+    distractionsBlocked: (Number(current.distractionsBlocked) || 0) + 1,
+  }));
+  if (!state) return null;
 
-  // Increment distraction counter
-  state.distractionsBlocked++;
-  await saveFocusState(state);
+  state = await getMatchingFocusState(runId, [FocusStatus.ACTIVE]);
+  if (!state) return null;
+  await flashBadgeDistraction(runId);
 
-  // Flash badge
-  await flashBadgeDistraction();
-
-  // Notify panel to switch to focus view and blink
-  const domain = extractDomain(url);
-  chrome.runtime.sendMessage({
+  state = await getMatchingFocusState(runId, [FocusStatus.ACTIVE]);
+  if (!state) return null;
+  const domain = extractDomain(classifiedUrl);
+  await chrome.runtime.sendMessage({
     type: 'focusDistraction',
+    runId,
     domain,
     category,
     count: state.distractionsBlocked,
     openFocusView: true,
     blink: true,
   }).catch(() => {});
+  return state;
 }
 
 // ── Tick (called by alarm) ──
 
-export async function handleFocusTick() {
+export async function handleFocusTick(expectedRunId = null) {
   const state = await getFocusState();
-  if (!state || state.status !== 'active') return;
+  if (!state || state.status !== FocusStatus.ACTIVE || !hasRunId(state)) return null;
+  const runId = state.runId;
+  if (expectedRunId && expectedRunId !== runId) return null;
 
   // Check if timer expired
   if (state.duration > 0) {
     const remaining = getRemainingMs(state);
     if (remaining <= 0) {
       // Timer expired — end session
-      const record = await endFocus();
-      chrome.runtime.sendMessage({
+      if (!await getMatchingFocusState(runId, [FocusStatus.ACTIVE])) return null;
+      const record = await endFocus({ expectedRunId: runId });
+      if (!record) return null;
+      const replacement = await Storage.get(FOCUS_STATE_KEY);
+      if (replacement && replacement.runId !== runId) return record;
+      await chrome.runtime.sendMessage({
         type: 'focusEnded',
+        runId,
         record,
       }).catch(() => {});
-      return;
+      return record;
     }
   }
 
-  // Update badge
-  await updateBadge(state);
+  const latest = await getMatchingFocusState(runId, [FocusStatus.ACTIVE]);
+  if (!latest) return null;
+  await updateBadge(latest, runId);
+  return latest;
 }
 
 // ── History ──

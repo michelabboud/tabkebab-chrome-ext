@@ -12,6 +12,7 @@ import { StashList } from './components/stash-list.js';
 import { SettingsManager } from './components/settings-manager.js';
 import { GlobalSearch } from './components/global-search.js';
 import { FocusPanel } from './components/focus-panel.js';
+import { routePanelFocusMessage } from './focus-events.js';
 
 // --- Initialize view controllers ---
 
@@ -96,7 +97,11 @@ settingsBtn.addEventListener('click', () => {
 });
 
 // --- Focus panel ---
-const focusPanel = new FocusPanel(document.getElementById('view-focus'));
+const focusPanel = new FocusPanel(document.getElementById('view-focus'), {
+  // The global listener below routes the event once so component and shell
+  // effects share one run-identity decision.
+  listenForRuntimeEvents: false,
+});
 const focusBtn = document.getElementById('btn-focus');
 
 function showFocusView() {
@@ -122,7 +127,10 @@ settingsBtn.addEventListener('click', () => focusBtn.classList.remove('active'))
 async function updateFocusBtnState() {
   try {
     const state = await chrome.runtime.sendMessage({ action: 'getFocusState' });
-    focusBtn.classList.toggle('focus-active', !!(state?.status === 'active' || state?.status === 'paused'));
+    const isRuntimeState = state?.status === 'active' || state?.status === 'paused';
+    focusPanel.state = isRuntimeState ? state : null;
+    focusBtn.classList.toggle('focus-active', isRuntimeState);
+    return focusPanel.state;
   } catch {}
 }
 updateFocusBtnState();
@@ -210,20 +218,15 @@ chrome.runtime.onMessage.addListener((message) => {
     controllers.tabs.refresh();
     refreshGlobalStats();
   }
-  if (message.type === 'focusEnded' || message.type === 'focusDistraction') {
-    updateFocusBtnState();
-  }
-  if (message.type === 'focusDistraction') {
-    // Switch to focus view
-    if (message.openFocusView) {
-      showFocusView();
-    }
-    // Blink the panel 3 times
-    if (message.blink) {
+  void routePanelFocusMessage(message, focusPanel, {
+    loadFocusState: () => chrome.runtime.sendMessage({ action: 'getFocusState' }),
+    updateFocusBtnState,
+    showFocusView,
+    blink() {
       document.body.classList.add('focus-blink');
       setTimeout(() => document.body.classList.remove('focus-blink'), 1500);
-    }
-  }
+    },
+  }).catch(() => {});
 });
 
 // --- Theme support ---

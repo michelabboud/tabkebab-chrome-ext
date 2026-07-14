@@ -389,6 +389,8 @@ Before starting, configure:
 
 Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated. If a tab is still navigating when Focus starts, its pending destination controls classification and is the URL preserved by a Focus stash. Duplicate legacy preferences collapse to one entry with the same type and value.
 
+Each session has a unique run ID. A deterministic or AI classification is applied only while that exact run is still active, the tab still exists, and either its current URL or its non-empty pending URL is exactly the URL that was classified. AI results must explicitly mark the page distracting with a finite numeric confidence strictly greater than `0.7`; fresh and cached results use the same rule. Pausing, ending, replacing the run, closing the tab, or navigating elsewhere while classification is pending makes the result a no-op.
+
 ### The Focus HUD
 
 Once started, the panel shows a colorful timer dashboard:
@@ -399,7 +401,7 @@ Once started, the panel shows a colorful timer dashboard:
 - **Stats** — distractions blocked and focus tab count
 - **Controls** — Pause, +5 min extend, End Session
 
-The extension badge also shows the remaining minutes during focus.
+The extension badge shows the remaining minutes during focus and `||` while paused. Pause, Resume, Extend, and End are bound to the run currently displayed by the panel; if that run has already been replaced, the stale command is ignored and the panel refreshes. Badge and side-panel updates are likewise tied to the current durable run, so a delayed event from an older run cannot repaint, blink, switch views, or clear a replacement session.
 
 ### Distraction Blocking
 
@@ -423,6 +425,8 @@ When the timer expires (or you click End Session):
    - Distractions blocked
    - Focus tabs count
 5. The session is saved to your focus history
+
+Ending intent is saved before teardown begins. If Chrome suspends or restarts the service worker, TabKebab resumes an unfinished ending run without duplicating its history or repeating a successfully checkpointed stash restore. An incomplete restore remains retryable rather than being marked complete. Restore, ungroup, alarm, or badge errors are recorded in the session result and do not reactivate blocking or prevent terminal state cleanup.
 
 ### Focus History
 

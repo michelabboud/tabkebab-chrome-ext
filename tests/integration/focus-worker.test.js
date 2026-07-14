@@ -27,6 +27,7 @@ async function waitFor(assertion, message) {
 function runtimeState(overrides = {}) {
   return {
     status: 'active',
+    runId: 'existing-focus-run',
     startedAt: Date.now(),
     duration: 25,
     pausedAt: null,
@@ -107,7 +108,9 @@ async function exerciseMutationAfterDeferredInitialization({ action, initialFail
 
     let settled = false;
     const responsePromise = chrome.runtime.sendMessage(
-      action === 'startFocus' ? startFocusMessage() : { action: 'resumeFocus' },
+      action === 'startFocus'
+        ? startFocusMessage()
+        : { action: 'resumeFocus', expectedRunId: 'existing-focus-run' },
     ).then((response) => {
       settled = true;
       return response;
@@ -298,10 +301,7 @@ describe('Focus service-worker integration', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0][0]).toContain('Focus group rebinding failed');
 
-    await chrome.tabs.onUpdated.dispatch(1, { url: 'https://blocked.test/next' }, {
-      ...harness.snapshot().tabs[0],
-      url: 'https://blocked.test/next',
-    });
+    await chrome.tabs.update(1, { url: 'https://blocked.test/next' });
     await waitFor(
       () => harness.calls.tabs.goBack.length === 1,
       'navigation trusted a stale group ID after startup query failure',
@@ -430,9 +430,9 @@ describe('Focus service-worker integration', () => {
 
   test('end, pause, and extend messages do not mutate Focus state before startup readiness', async () => {
     for (const message of [
-      { action: 'endFocus' },
-      { action: 'pauseFocus' },
-      { action: 'extendFocus', minutes: 5 },
+      { action: 'endFocus', expectedRunId: 'existing-focus-run' },
+      { action: 'pauseFocus', expectedRunId: 'existing-focus-run' },
+      { action: 'extendFocus', expectedRunId: 'existing-focus-run', minutes: 5 },
     ]) {
       const harness = installChromeMock({
         local: { focusState: runtimeState() },
@@ -466,6 +466,55 @@ describe('Focus service-worker integration', () => {
 
       expect(settledBeforeReadiness).toBe(false);
       expect(writesBeforeReadiness).toBe(0);
+    }
+  });
+
+  test('stale panel lifecycle commands cannot mutate a replacement run', async () => {
+    for (const message of [
+      { action: 'pauseFocus', expectedRunId: 'run-a' },
+      { action: 'resumeFocus', expectedRunId: 'run-a' },
+      { action: 'extendFocus', expectedRunId: 'run-a', minutes: 5 },
+      { action: 'endFocus', expectedRunId: 'run-a' },
+    ]) {
+      const replacement = runtimeState({
+        runId: 'run-b',
+        status: message.action === 'resumeFocus' ? 'paused' : 'active',
+        pausedAt: message.action === 'resumeFocus' ? Date.now() - 1_000 : null,
+      });
+      const harness = installChromeMock({ local: { focusState: replacement } });
+      await importWorker();
+      await waitFor(
+        () => harness.calls.tabGroups.query.length === 1,
+        `${message.action} worker startup did not complete`,
+      );
+      const before = readStorageArea('local').focusState;
+
+      expect(await chrome.runtime.sendMessage(message)).toBeNull();
+      expect(readStorageArea('local').focusState).toEqual(before);
+    }
+  });
+
+  test('panel lifecycle commands without a non-empty run ID fail closed', async () => {
+    for (const message of [
+      { action: 'pauseFocus' },
+      { action: 'resumeFocus', expectedRunId: '' },
+      { action: 'extendFocus', minutes: 5 },
+      { action: 'endFocus', expectedRunId: '' },
+    ]) {
+      const state = runtimeState({
+        status: message.action === 'resumeFocus' ? 'paused' : 'active',
+        pausedAt: message.action === 'resumeFocus' ? Date.now() - 1_000 : null,
+      });
+      const harness = installChromeMock({ local: { focusState: state } });
+      await importWorker();
+      await waitFor(
+        () => harness.calls.tabGroups.query.length === 1,
+        `${message.action} worker startup did not complete`,
+      );
+      const before = readStorageArea('local').focusState;
+
+      expect(await chrome.runtime.sendMessage(message)).toBeNull();
+      expect(readStorageArea('local').focusState).toEqual(before);
     }
   });
 
@@ -556,10 +605,7 @@ describe('Focus service-worker integration', () => {
     expect(aiSettingsReadCount()).toBe(aiReadsBeforeAllowedNavigation);
 
     const prefixExtension = `${exactUrl}/extra`;
-    await chrome.tabs.onUpdated.dispatch(1, { url: prefixExtension }, {
-      ...harness.snapshot().tabs.find(({ id }) => id === 1),
-      url: prefixExtension,
-    });
+    await chrome.tabs.update(1, { url: prefixExtension });
     await waitFor(
       () => harness.calls.tabs.goBack.length === 1,
       'strict navigation did not reject the URL prefix extension',
@@ -608,10 +654,7 @@ describe('Focus service-worker integration', () => {
       'worker startup did not complete its group lookup',
     );
 
-    await chrome.tabs.onUpdated.dispatch(1, { url: blockedUrl }, {
-      ...harness.snapshot().tabs[0],
-      url: blockedUrl,
-    });
+    await chrome.tabs.update(1, { url: blockedUrl });
     await waitFor(
       () => harness.calls.tabs.goBack.length === 1,
       'changeInfo.url was ignored in favor of the tab pendingUrl',

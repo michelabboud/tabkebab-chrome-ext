@@ -12,8 +12,9 @@ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as delet
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
-import { getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
+import { FocusStatus, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
+import { createFocusAiChecker } from './core/focus-ai.js';
 
 // ── Keep Awake Defaults ──
 
@@ -752,18 +753,27 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     case ALARM_AUTO_SYNC_DRIVE: autoSyncDrive(); break;
     case ALARM_RETENTION_CLEANUP: runRetentionCleanup(); break;
     case ALARM_AUTO_BOOKMARK:  createBookmarks(); break;
-    case ALARM_FOCUS_TICK:
+    case ALARM_FOCUS_TICK: {
+      const expectedRunId = getCachedFocusState()?.runId ?? null;
       void focusReadiness
-        .then(() => handleFocusTick())
+        .then((startupState) => handleFocusTick(expectedRunId ?? startupState?.runId ?? null))
         .catch((error) => console.warn('[TabKebab] Focus tick failed:', error));
       break;
+    }
   }
 });
 
 // Rebind persisted group titles before any Focus listener can trust runtime IDs.
 // Listeners still register synchronously, then await this shared startup barrier.
-const focusReadiness = rebindStoredFocusState().catch((error) => {
-  console.warn('[TabKebab] Focus group rebinding failed during worker startup:', error);
+const focusReadiness = (async () => {
+  let state = await rebindStoredFocusState();
+  if (state?.status === FocusStatus.ENDING && state.runId) {
+    await endFocus({ expectedRunId: state.runId });
+    state = await getFocusState();
+  }
+  return state;
+})().catch((error) => {
+  console.warn('[TabKebab] Focus group rebinding failed or ending recovery was incomplete during worker startup:', error);
   return getCachedFocusState();
 });
 
@@ -775,7 +785,7 @@ const focusReadiness = rebindStoredFocusState().catch((error) => {
   if (!alarm) await reconfigureAlarms();
 
   // Restore focus alarm + badge if a session was active before SW restart
-  if (focusState?.status === 'active') {
+  if (focusState?.status === FocusStatus.ACTIVE) {
     const existing = await chrome.alarms.get(ALARM_FOCUS_TICK);
     if (!existing) await chrome.alarms.create(ALARM_FOCUS_TICK, { periodInMinutes: 1 });
     await updateBadge(focusState);
@@ -794,47 +804,38 @@ function notifyPanel() {
 
 // AI-based domain categorization for focus mode
 const aiCheckCache = new Map(); // Cache AI results to avoid repeated calls
-async function checkWithAI(tabId, url, state, tabOrUrl = url) {
-  try {
-    if (isInternalUrl(tabOrUrl) || isAllowed(tabOrUrl, state?.allowedDomains)) return;
+const checkFocusWithAI = createFocusAiChecker({
+  aiClient: AIClient,
+  onDistraction: handleDistraction,
+  cache: aiCheckCache,
+  scheduleExpiry: setTimeout,
+  ttlMs: 60 * 60 * 1000,
+});
 
+async function checkWithAI({ runId, tabId, classifiedUrl, profileName }) {
+  try {
     const available = await AIClient.isAvailable();
     if (!available) return;
 
-    const hostname = extractDomain(url);
+    const hostname = extractDomain(classifiedUrl);
     if (!hostname || hostname === 'other') return;
 
-    // Check cache first
-    if (aiCheckCache.has(hostname)) {
-      const cached = aiCheckCache.get(hostname);
-      if (cached.distraction) {
-        handleDistraction(tabId, url, state, cached.category);
-      }
-      return;
-    }
-
-    // Ask AI to categorize the domain
-    const response = await AIClient.complete({
-      systemPrompt: `You are a productivity assistant. Categorize websites as either productive or distracting.
+    return await checkFocusWithAI({
+      runId,
+      tabId,
+      classifiedUrl,
+      cacheKey: hostname,
+      category: 'AI detected',
+      request: {
+        systemPrompt: `You are a productivity assistant. Categorize websites as either productive or distracting.
 Distracting categories: social media, gaming, video streaming, entertainment, news, shopping.
 Productive categories: work tools, documentation, education, development, communication (work).
 Respond with JSON only: {"distraction": true/false, "category": "category name", "confidence": 0.0-1.0}`,
-      userPrompt: `Is "${hostname}" a distracting website? The user is in focus mode for: ${state.profileName}`,
-      responseFormat: 'json',
-      temperature: 0.1,
+        userPrompt: `Is "${hostname}" a distracting website? The user is in focus mode for: ${profileName}`,
+        responseFormat: 'json',
+        temperature: 0.1,
+      },
     });
-
-    if (response.parsed) {
-      // Cache the result
-      aiCheckCache.set(hostname, response.parsed);
-
-      // Clear cache after 1 hour
-      setTimeout(() => aiCheckCache.delete(hostname), 60 * 60 * 1000);
-
-      if (response.parsed.distraction && response.parsed.confidence > 0.7) {
-        handleDistraction(tabId, url, state, response.parsed.category || 'AI detected');
-      }
-    }
   } catch (err) {
     console.warn('[TabKebab] AI check failed:', err.message);
   }
@@ -847,15 +848,26 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const url = tab.pendingUrl || tab.url;
     await focusReadiness;
     const state = getCachedFocusState();
-    if (state?.status === 'active') {
+    if (state?.status === FocusStatus.ACTIVE && typeof state.runId === 'string' && state.runId) {
       // Pass full tab object to check group membership
       const tabWithUrl = { ...tab, url };
       const result = evaluateFocusPolicy(tabWithUrl, state);
       if (result.blocked) {
-        handleDistraction(tab.id, url, state, result.category);
+        await handleDistraction({
+          runId: state.runId,
+          tabId: tab.id,
+          classifiedUrl: url,
+          decision: { distraction: true, confidence: 1 },
+          category: result.category,
+        });
       } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
         // Try AI categorization for unknown domains
-        checkWithAI(tab.id, url, state, tabWithUrl);
+        await checkWithAI({
+          runId: state.runId,
+          tabId: tab.id,
+          classifiedUrl: url,
+          profileName: state.profileName,
+        });
       }
     }
   }
@@ -869,16 +881,27 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url) {
     await focusReadiness;
     const state = getCachedFocusState();
-    if (state?.status === 'active') {
+    if (state?.status === FocusStatus.ACTIVE && typeof state.runId === 'string' && state.runId) {
       // changeInfo.url is the navigation that triggered this event. Do not let
       // a stale tab.pendingUrl override that authoritative event URL.
       const tabWithUrl = { ...tab, pendingUrl: '', url: changeInfo.url };
       const result = evaluateFocusPolicy(tabWithUrl, state);
       if (result.blocked) {
-        handleDistraction(tabId, changeInfo.url, state, result.category);
+        await handleDistraction({
+          runId: state.runId,
+          tabId,
+          classifiedUrl: changeInfo.url,
+          decision: { distraction: true, confidence: 1 },
+          category: result.category,
+        });
       } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
         // Try AI categorization for unknown domains
-        checkWithAI(tabId, changeInfo.url, state, tabWithUrl);
+        await checkWithAI({
+          runId: state.runId,
+          tabId,
+          classifiedUrl: changeInfo.url,
+          profileName: state.profileName,
+        });
       }
     }
   }
@@ -1582,19 +1605,23 @@ async function handleMessage(msg) {
 
     case 'endFocus':
       await focusReadiness;
-      return endFocus();
+      if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
+      return endFocus({ expectedRunId: msg.expectedRunId });
 
     case 'pauseFocus':
       await focusReadiness;
-      return pauseFocus();
+      if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
+      return pauseFocus(msg.expectedRunId);
 
     case 'resumeFocus':
       await focusReadiness;
-      return resumeFocus();
+      if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
+      return resumeFocus(msg.expectedRunId);
 
     case 'extendFocus':
       await focusReadiness;
-      return extendFocus(msg.minutes || 5);
+      if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
+      return extendFocus(msg.minutes || 5, msg.expectedRunId);
 
     case 'getFocusHistory':
       return getFocusHistory();

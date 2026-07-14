@@ -2,11 +2,12 @@
 
 import { showToast } from './toast.js';
 import { createAllowlistEntry, normalizeAllowlistPreferences } from '../../core/focus-policy.js';
+import { createFocusRunCommand, handleFocusPanelMessage } from '../focus-events.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
 
 export class FocusPanel {
-  constructor(rootEl) {
+  constructor(rootEl, { listenForRuntimeEvents = true } = {}) {
     this.root = rootEl;
     this.container = rootEl.querySelector('#focus-container');
     this.state = null;
@@ -15,15 +16,13 @@ export class FocusPanel {
     this._profilePrefs = {};
 
     // Listen for focus events from service worker
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg.type === 'focusDistraction') {
-        this._flashDistraction(msg.domain, msg.count);
-      }
-      if (msg.type === 'focusEnded') {
-        this.state = null;
-        this._showReport(msg.record);
-      }
-    });
+    if (listenForRuntimeEvents) {
+      chrome.runtime.onMessage.addListener((msg) => this.handleFocusMessage(msg));
+    }
+  }
+
+  handleFocusMessage(msg) {
+    return handleFocusPanelMessage(msg, this);
   }
 
   async refresh() {
@@ -552,26 +551,37 @@ export class FocusPanel {
 
   _wireHUDEvents() {
     this.container.querySelector('#btn-pause-focus')?.addEventListener('click', async () => {
-      if (this.state?.status === 'paused') {
-        this.state = await this.send({ action: 'resumeFocus' });
-      } else {
-        this.state = await this.send({ action: 'pauseFocus' });
+      const action = this.state?.status === 'paused' ? 'resumeFocus' : 'pauseFocus';
+      const nextState = await this.send(createFocusRunCommand(action, this.state));
+      if (!nextState) {
+        await this.refresh();
+        return;
       }
+      this.state = nextState;
       this._renderHUD();
     });
 
     this.container.querySelector('#btn-extend-focus')?.addEventListener('click', async () => {
-      this.state = await this.send({ action: 'extendFocus', minutes: 5 });
+      const nextState = await this.send(createFocusRunCommand(
+        'extendFocus',
+        this.state,
+        { minutes: 5 },
+      ));
+      if (!nextState) {
+        await this.refresh();
+        return;
+      }
+      this.state = nextState;
       showToast('Extended by 5 minutes', 'success');
     });
 
     const endHandler = async () => {
-      const record = await this.send({ action: 'endFocus' });
-      this.state = null;
+      const record = await this.send(createFocusRunCommand('endFocus', this.state));
       if (record) {
+        this.state = null;
         this._showReport(record);
       } else {
-        this.refresh();
+        await this.refresh();
       }
     };
 

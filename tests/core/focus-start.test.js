@@ -445,6 +445,7 @@ describe('Focus runtime group rebinding', () => {
   test('resume replaces paused-state group bindings from one fresh query before persisting active state', async () => {
     const paused = {
       status: 'paused',
+      runId: 'paused-run',
       startedAt: Date.now() - 10_000,
       duration: 25,
       pausedAt: Date.now() - 2_000,
@@ -477,6 +478,7 @@ describe('Focus runtime group rebinding', () => {
   test('resume leaves paused state unchanged when fresh group rebinding fails', async () => {
     const paused = {
       status: 'paused',
+      runId: 'paused-run',
       startedAt: Date.now() - 10_000,
       duration: 25,
       pausedAt: Date.now() - 2_000,

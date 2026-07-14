@@ -2,11 +2,11 @@
 
 ## Current state
 
-- Repository version: `1.2.5`
+- Repository version: `1.2.6`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–3 complete; restoration safety and one complete Focus allowlist policy established
+- Implementation status: Tasks 1–4 complete; restoration safety, unified Focus policy, and run-bound asynchronous Focus lifecycle established
 
 ## Completed implementation slices
 
@@ -32,6 +32,16 @@
 - Bound Focus ticks and all state-changing panel commands to the same readiness barrier, and made numeric group verification durable only after storage persistence succeeds.
 - Made pending destinations authoritative for startup classification and stashing, kept `tabs.onUpdated` authoritative to its event URL, and deduplicated legacy preferences by type and value.
 - Added named pure/startup/worker regression coverage, including group ID `0`, two same-title groups, deferred startup reads, query failure, pending/internal/hostless URLs, URL-prefix rejection, and the AI allowlist gate.
+
+### Task 4 — Run-bound asynchronous Focus lifecycle (`1.2.6`)
+
+- Added a unique UUID to every run before its first asynchronous lifecycle read and explicit active, paused, and recoverable ending states; collision retries and distinct one-time legacy cleanup IDs prevent reuse during replacement.
+- Captured run, tab, and exact classified-URL identity across deterministic and AI classification, then revalidated durable state generation, live tab existence, current-or-pending URL, and strict confidence immediately before every navigation side effect, including state-change and pause→resume ABA races during the tab read.
+- Unified fresh and cached AI decisions behind one finite-number predicate (`distraction: true`, confidence strictly greater than `0.7`) and generation-safe cache expiry.
+- Serialized Focus lifecycle intents, state mutations, and badge reconciliation so overlapping start/end, old ticks, deferred pause/resume/rebind/counter work, notifications, panel effects, and delayed badge resets cannot affect a replacement run.
+- Bound panel Pause/Resume/Extend/End commands to the displayed run and made the worker reject missing, empty, or stale run IDs.
+- Persisted ending before teardown, checkpointed only complete stash restoration, retried incomplete outcomes, deduplicated history by run ID, and made worker-startup recovery terminal while preserving structured partial-cleanup failures.
+- Added lifecycle, AI, delayed-navigation, side-panel event, and real Chrome 148 CDP-synthetic delayed-provider evidence for pause, end plus replacement, and navigation-away.
 
 ## Confirmed remediation scope
 
@@ -61,4 +71,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Task 4 binds every asynchronous Focus classification and side effect to its originating run and URL.
+Task 5 makes natural-language host matching exact and duplicate Undo lossless.
