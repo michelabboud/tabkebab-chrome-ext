@@ -185,7 +185,7 @@ DISPLAY=127.0.0.1:[redacted].0
   --no-first-run --no-default-browser-check about:blank
 ```
 
-The driver discovered and attached to the production Manifest V3 service worker, enabled CDP Fetch interception on its OpenAI-compatible custom-provider request, and held each `/v1/chat/completions` request until the tested state or URL transition was durably observable. It then fulfilled the request with a synthetic high-confidence JSON decision (`distraction: true`, confidence `0.99`). Pause, End, replacement Pause, and final cleanup commands supplied the exact `expectedRunId` returned by the preceding live `startFocus`/`getFocusState` response. No API key or external provider response was used.
+The driver discovered and attached to the production Manifest V3 service worker, enabled CDP Fetch interception on its OpenAI-compatible custom-provider request, and held each `/v1/chat/completions` request until the tested state or URL transition was durably observable. It then fulfilled the request with a synthetic high-confidence JSON decision (`distraction: true`, confidence `0.99`). Pause, same-run Pause→Resume, End, replacement Pause, and final cleanup commands supplied the exact `expectedRunId` returned by the preceding live `startFocus`/`getFocusState` response. No API key or external provider response was used.
 
 This is deliberately CDP-synthetic provider evidence. It validates the real service worker, AI client/provider request path, Chrome storage events, runtime messages, action badge, tab history, and tab side-effect boundary. It does not validate external provider availability, authentication, latency, or classification quality.
 
@@ -216,6 +216,16 @@ Each case used a unique classified host and a tab with an earlier synthetic HTTP
     "badgeText": "||",
     "staleEventCount": 0
   },
+  "pauseResume": {
+    "requestHeld": true,
+    "runPreserved": true,
+    "status": "active",
+    "tabExists": true,
+    "classifiedUrlPreserved": true,
+    "distractionsBlocked": 0,
+    "badgeText": "25m",
+    "staleEventCount": 0
+  },
   "navigateAway": {
     "requestHeld": true,
     "runPreserved": true,
@@ -229,11 +239,11 @@ Each case used a unique classified host and a tab with an earlier synthetic HTTP
 }
 ```
 
-All three released high-confidence decisions were no-ops. No tab moved backward or was removed, no distraction counter changed, no stale distraction/end runtime event reached the open side panel, and no old response repainted the replacement badge.
+All four released high-confidence decisions were no-ops. The same-run Pause→Resume case specifically proves a delayed classification cannot regain authority merely because the run is active again. No tab moved backward or was removed, no distraction counter changed, no stale distraction/end runtime event reached the open side panel, and no old response repainted the replacement badge.
 
 ## Task 4 cleanup
 
-The final exact-tree rerun after lifecycle-command and generation-token hardening reported:
+The final exact-tree rerun after lifecycle-command, classification-generation, restore-recovery, and group-ownership hardening reported:
 
 ```text
 DISPOSABLE_PROFILE_ENTRIES_BEFORE_CLEANUP=287

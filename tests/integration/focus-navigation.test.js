@@ -125,7 +125,7 @@ async function assertNoNewFocusEffects(harness, before) {
 }
 
 describe('deferred Focus classification authority', () => {
-  for (const lifecycle of ['pause', 'end', 'replacement', 'remove', 'navigate']) {
+  for (const lifecycle of ['pause', 'pause-resume', 'end', 'replacement', 'remove', 'navigate']) {
     test(`${lifecycle} while AI is pending makes the completion a no-op`, async () => {
       const context = await importWorkerWithDeferredAi();
       try {
@@ -135,12 +135,19 @@ describe('deferred Focus classification authority', () => {
           `${lifecycle}: navigation did not reach deferred AIClient.complete`,
         );
 
-        if (lifecycle === 'pause') {
+        if (lifecycle === 'pause' || lifecycle === 'pause-resume') {
           const response = await chrome.runtime.sendMessage({
             action: 'pauseFocus',
             expectedRunId: 'run-a',
           });
           expect(response.status).toBe('paused');
+          if (lifecycle === 'pause-resume') {
+            const resumed = await chrome.runtime.sendMessage({
+              action: 'resumeFocus',
+              expectedRunId: 'run-a',
+            });
+            expect(resumed.status).toBe('active');
+          }
         } else if (lifecycle === 'end') {
           await chrome.runtime.sendMessage({ action: 'endFocus', expectedRunId: 'run-a' });
           expect(readStorageArea('local').focusState).toBeUndefined();

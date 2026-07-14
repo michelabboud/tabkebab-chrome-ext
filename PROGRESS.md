@@ -36,12 +36,13 @@
 ### Task 4 — Run-bound asynchronous Focus lifecycle (`1.2.6`)
 
 - Added a unique UUID to every run before its first asynchronous lifecycle read and explicit active, paused, and recoverable ending states; collision retries and distinct one-time legacy cleanup IDs prevent reuse during replacement.
-- Captured run, tab, and exact classified-URL identity across deterministic and AI classification, then revalidated durable state generation, live tab existence, current-or-pending URL, and strict confidence immediately before every navigation side effect, including state-change and pause→resume ABA races during the tab read.
+- Captured run, tab, exact classified-URL identity, and lifecycle generation across deterministic and AI classification, then revalidated durable state, live tab existence, current-or-pending URL, and strict confidence immediately before every navigation side effect, including pause→resume before AI completion or during the tab read.
 - Unified fresh and cached AI decisions behind one finite-number predicate (`distraction: true`, confidence strictly greater than `0.7`) and generation-safe cache expiry.
 - Serialized Focus lifecycle intents, state mutations, and badge reconciliation so overlapping start/end, old ticks, deferred pause/resume/rebind/counter work, notifications, panel effects, and delayed badge resets cannot affect a replacement run.
 - Bound panel Pause/Resume/Extend/End commands to the displayed run and made the worker reject missing, empty, or stale run IDs.
-- Persisted ending before teardown, checkpointed only complete stash restoration, retried incomplete outcomes, deduplicated history by run ID, and made worker-startup recovery terminal while preserving structured partial-cleanup failures.
-- Added lifecycle, AI, delayed-navigation, side-panel event, and real Chrome 148 CDP-synthetic delayed-provider evidence for pause, end plus replacement, and navigation-away.
+- Persisted ending before teardown, retained incomplete stash restoration for retry, checkpointed completed ungroup work, and proved group ownership with a browser-session token before touching a numeric Chrome group ID.
+- Deduplicated history by run ID and durably merged teardown, state-removal, and recovery failures; Pause, Resume, and Extend now return only a final matching durable state after badge work.
+- Added lifecycle, AI, delayed-navigation, ownership-failure, side-panel event, and real Chrome 148 CDP-synthetic delayed-provider evidence for pause, pause→resume, end plus replacement, and navigation-away.
 
 ## Confirmed remediation scope
 

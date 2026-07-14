@@ -9,6 +9,7 @@ async function loadFocusAi() {
 function context(overrides = {}) {
   return {
     runId: 'run-a',
+    focusGeneration: 17,
     tabId: 9,
     classifiedUrl: 'https://classified.test/path',
     cacheKey: 'classified.test',
@@ -121,6 +122,7 @@ describe('createFocusAiChecker', () => {
     expect(await pending).toEqual(decision);
     expect(delegated).toEqual([{
       runId: 'run-a',
+      expectedGeneration: 17,
       tabId: 9,
       classifiedUrl: 'https://classified.test/path',
       decision,
@@ -189,6 +191,7 @@ describe('createFocusAiChecker', () => {
     expect(timers[0].delay).toBe(3210);
     expect(delegated).toEqual([{
       runId: 'run-a',
+      expectedGeneration: 17,
       tabId: 9,
       classifiedUrl: 'https://classified.test/path',
       decision,

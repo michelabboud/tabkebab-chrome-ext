@@ -186,7 +186,80 @@ describe('Focus startup policy and tab actions', () => {
     expect(harness.calls.tabs.group[0][0].tabIds).toEqual([1, 2]);
     expect(state.focusTabCount).toBe(2);
     expect(state.focusGroupId).toBeNumber();
+    expect(state.focusGroupOwnershipToken).toBe(`focus-group:${state.runId}`);
+    expect(readStorageArea('session').focusGroupOwnership).toEqual({
+      runId: state.runId,
+      groupId: state.focusGroupId,
+      token: state.focusGroupOwnershipToken,
+    });
     expect(harness.calls.tabGroups.query).toEqual([[{}]]);
+  });
+
+  test('group ownership persistence failure aborts before creating a Chrome group', async () => {
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: {
+        'storage.session.set': new Error('synthetic ownership write failure'),
+      },
+    });
+
+    await expect(focus.startFocus(makeStartOptions({
+      tabAction: 'group',
+      allowedDomains: ['focus.test'],
+    }))).rejects.toThrow('synthetic ownership write failure');
+
+    expect(harness.calls.tabs.group).toEqual([]);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
+  test('final group ownership persistence failure rolls back the created Chrome group', async () => {
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: {
+        'storage.session.set': [null, new Error('synthetic final ownership write failure')],
+      },
+    });
+
+    await expect(focus.startFocus(makeStartOptions({
+      tabAction: 'group',
+      allowedDomains: ['focus.test'],
+    }))).rejects.toThrow('synthetic final ownership write failure');
+
+    expect(harness.calls.tabs.group).toHaveLength(1);
+    expect(harness.calls.tabs.ungroup).toEqual([[[1]]]);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
+  });
+
+  test('failed group rollback still clears provisional ownership and reports both failures', async () => {
+    const ownershipError = new Error('synthetic final ownership write failure');
+    const rollbackError = new Error('synthetic group rollback failure');
+    const { focus } = await loadFocus({
+      windows: [{ id: 1, focused: true }],
+      tabs: [{ id: 1, windowId: 1, url: 'https://focus.test/', active: true }],
+      failures: {
+        'storage.session.set': [null, ownershipError],
+        'tabs.ungroup': rollbackError,
+      },
+    });
+
+    let rejection;
+    try {
+      await focus.startFocus(makeStartOptions({
+        tabAction: 'group',
+        allowedDomains: ['focus.test'],
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(AggregateError);
+    expect(rejection.errors).toEqual([ownershipError, rollbackError]);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+    expect(readStorageArea('session').focusGroupOwnership).toBeUndefined();
   });
 
   test('non-strict empty allowlist treats every eligible non-internal tab as focus', async () => {

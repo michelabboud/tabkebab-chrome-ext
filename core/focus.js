@@ -15,6 +15,7 @@ import { isConfidentDistraction } from './focus-ai.js';
 
 const FOCUS_STATE_KEY = 'focusState';
 const FOCUS_HISTORY_KEY = 'focusHistory';
+const FOCUS_GROUP_OWNERSHIP_KEY = 'focusGroupOwnership';
 const MAX_HISTORY = 50;
 
 export const FocusStatus = Object.freeze({
@@ -91,6 +92,10 @@ Storage.onChange((changes) => {
 
 export function getCachedFocusState() {
   return _cachedState;
+}
+
+export function getCachedFocusAuthority() {
+  return { state: _cachedState, generation: _focusStateGeneration };
 }
 
 export async function getFocusState() {
@@ -197,6 +202,68 @@ async function markTeardownStepCompleted(runId, step) {
     await writeFocusStateUnlocked(checkpointed);
     return checkpointed;
   });
+}
+
+function mergeTeardownFailures(...failureLists) {
+  const merged = [];
+  const seen = new Set();
+  for (const failure of failureLists.flat()) {
+    if (!failure || typeof failure.step !== 'string' || typeof failure.message !== 'string') {
+      continue;
+    }
+    const key = `${failure.step}\u0000${failure.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ step: failure.step, message: failure.message });
+  }
+  return merged;
+}
+
+async function persistFocusHistoryRecord(record) {
+  const history = (await Storage.get(FOCUS_HISTORY_KEY)) || [];
+  const index = history.findIndex((entry) => entry?.runId === record.runId);
+  if (index >= 0) {
+    const existing = history[index];
+    const merged = {
+      ...existing,
+      ...record,
+      id: existing.id || record.id,
+      teardownFailures: mergeTeardownFailures(
+        existing.teardownFailures || [],
+        record.teardownFailures || [],
+      ),
+    };
+    history[index] = merged;
+    Object.assign(record, merged);
+  } else {
+    record.teardownFailures = mergeTeardownFailures(record.teardownFailures || []);
+    history.unshift({ ...record });
+    if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  }
+  await Storage.set(FOCUS_HISTORY_KEY, history);
+  return record;
+}
+
+async function getFocusGroupOwnership() {
+  const stored = await chrome.storage.session.get(FOCUS_GROUP_OWNERSHIP_KEY);
+  return stored[FOCUS_GROUP_OWNERSHIP_KEY] ?? null;
+}
+
+function createFocusGroupOwnershipToken(runId) {
+  return `focus-group:${runId}`;
+}
+
+async function setFocusGroupOwnership(runId, token, groupId = null) {
+  await chrome.storage.session.set({
+    [FOCUS_GROUP_OWNERSHIP_KEY]: { runId, token, groupId },
+  });
+}
+
+async function clearFocusGroupOwnership(runId, token) {
+  const ownership = await getFocusGroupOwnership();
+  if (ownership?.runId === runId && ownership.token === token) {
+    await chrome.storage.session.remove(FOCUS_GROUP_OWNERSHIP_KEY);
+  }
 }
 
 // ── Timer helpers ──
@@ -406,6 +473,7 @@ async function performStartFocus({
     aiBlocking: aiBlocking || false,
     stashId: null,
     focusGroupId: null,
+    focusGroupOwnershipToken: null,
     distractionsBlocked: 0,
     focusTabCount: 0,
   };
@@ -453,10 +521,51 @@ async function performStartFocus({
     const profileColor = profile?.color || 'blue';
     const chromeColor = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'].includes(profileColor)
       ? profileColor : 'blue';
+    const ownershipToken = createFocusGroupOwnershipToken(runId);
+    // Prove this browser session owns the prospective group before asking
+    // Chrome to mutate tabs. Browser restart clears this provisional marker.
+    await setFocusGroupOwnership(runId, ownershipToken);
+
+    let groupId = null;
     try {
-      const groupId = await createNativeGroup(focusTabIds, profileName, chromeColor);
+      groupId = await createNativeGroup(focusTabIds, profileName, chromeColor);
+    } catch {
+      await clearFocusGroupOwnership(runId, ownershipToken);
+      // Some tabs may not be groupable; startup can continue without a group.
+    }
+
+    if (Number.isInteger(groupId) && groupId >= 0) {
+      try {
+        await setFocusGroupOwnership(runId, ownershipToken, groupId);
+      } catch (ownershipError) {
+        // The provisional proof is not enough to authorize future teardown.
+        // Roll back the just-created group before allowing startup to fail.
+        let rollbackError = null;
+        let ownershipCleanupError = null;
+        try {
+          await ungroupTabs(focusTabIds);
+        } catch (error) {
+          rollbackError = error;
+        } finally {
+          try {
+            await clearFocusGroupOwnership(runId, ownershipToken);
+          } catch (error) {
+            ownershipCleanupError = error;
+          }
+        }
+
+        const rollbackFailures = [rollbackError, ownershipCleanupError].filter(Boolean);
+        if (rollbackFailures.length > 0) {
+          throw new AggregateError(
+            [ownershipError, ...rollbackFailures],
+            'Focus group ownership persistence and rollback failed.',
+          );
+        }
+        throw ownershipError;
+      }
       state.focusGroupId = groupId;
-    } catch { /* some tabs may not be groupable */ }
+      state.focusGroupOwnershipToken = ownershipToken;
+    }
   }
 
   // Persist authority before any run-owned alarm or badge work.
@@ -545,11 +654,12 @@ async function performEndFocus(expectedRunId, {
   if (!state) return null;
   const runId = state.runId;
 
-  const teardownFailures = [];
+  let teardownFailures = [];
   const captureFailure = (step, error) => {
     teardownFailures.push({ step, message: failureMessage(error) });
   };
 
+  let restoreRetryPending = false;
   if (state.stashId && !state.teardownCompleted?.restore) {
     let restoreCanCheckpoint = false;
     try {
@@ -557,6 +667,7 @@ async function performEndFocus(expectedRunId, {
       if (stash) {
         const outcome = await restoreTabs(stash, { mode: 'here' });
         if (outcome && outcome.complete === false) {
+          restoreRetryPending = true;
           captureFailure('restore', new Error(
             `Focus stash restore was incomplete (${outcome.restoredCount ?? 0}/${outcome.requestedCount ?? 0}).`,
           ));
@@ -579,11 +690,25 @@ async function performEndFocus(expectedRunId, {
     }
   }
 
-  if (Number.isInteger(state.focusGroupId) && state.focusGroupId >= 0) {
+  if (Number.isInteger(state.focusGroupId) && state.focusGroupId >= 0 &&
+      !state.teardownCompleted?.ungroup) {
     try {
-      const groupTabs = await chrome.tabs.query({ groupId: state.focusGroupId });
-      if (groupTabs.length > 0) {
-        await ungroup(groupTabs.map((tab) => tab.id));
+      const ownership = await getFocusGroupOwnership();
+      if (typeof state.focusGroupOwnershipToken !== 'string' ||
+          state.focusGroupOwnershipToken.length === 0 ||
+          ownership?.runId !== runId ||
+          ownership.token !== state.focusGroupOwnershipToken ||
+          ownership.groupId !== state.focusGroupId) {
+        captureFailure('ungroup-ownership', new Error(
+          'Focus group ownership could not be verified.',
+        ));
+      } else {
+        const groupTabs = await chrome.tabs.query({ groupId: state.focusGroupId });
+        if (groupTabs.length > 0) {
+          await ungroup(groupTabs.map((tab) => tab.id));
+        }
+        await markTeardownStepCompleted(runId, 'ungroup');
+        await clearFocusGroupOwnership(runId, state.focusGroupOwnershipToken);
       }
     } catch (error) {
       captureFailure('ungroup', error);
@@ -616,32 +741,41 @@ async function performEndFocus(expectedRunId, {
     distractionsBlocked: state.distractionsBlocked,
     focusTabCount: state.focusTabCount,
     tabAction: state.tabAction,
-    teardownFailures,
+    teardownFailures: mergeTeardownFailures(teardownFailures),
   };
 
+  let persistedFailureSignature = null;
   try {
-    const history = (await Storage.get(FOCUS_HISTORY_KEY)) || [];
-    const existing = history.find((entry) => entry?.runId === runId);
-    if (existing) {
-      Object.assign(record, existing, { teardownFailures });
-    } else {
-      history.unshift(record);
-      if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-      await Storage.set(FOCUS_HISTORY_KEY, history);
-    }
+    await persistFocusHistoryRecord(record);
+    teardownFailures = record.teardownFailures;
+    persistedFailureSignature = JSON.stringify(teardownFailures);
   } catch (error) {
     captureFailure('history', error);
   }
 
   // State removal is deliberately last and conditional: a stale teardown must
-  // never remove a replacement run.
-  try {
-    await removeFocusStateIfEnding(runId);
-  } catch (error) {
-    captureFailure('state', error);
+  // never remove a replacement run. Incomplete restore keeps the non-blocking
+  // ending journal so a later call or worker restart can retry missing tabs.
+  if (!restoreRetryPending) {
+    try {
+      await removeFocusStateIfEnding(runId);
+    } catch (error) {
+      captureFailure('state', error);
+    }
   }
 
-  record.teardownFailures = teardownFailures;
+  record.teardownFailures = mergeTeardownFailures(record.teardownFailures, teardownFailures);
+  if (JSON.stringify(record.teardownFailures) !== persistedFailureSignature) {
+    try {
+      await persistFocusHistoryRecord(record);
+      teardownFailures = record.teardownFailures;
+    } catch (error) {
+      captureFailure('history', error);
+      record.teardownFailures = mergeTeardownFailures(record.teardownFailures, teardownFailures);
+    }
+  }
+
+  record.teardownFailures = mergeTeardownFailures(record.teardownFailures, teardownFailures);
   if (teardownFailures.length > 0) {
     console.warn('[TabKebab] Focus teardown completed with failures:', teardownFailures);
   }
@@ -666,8 +800,8 @@ export async function pauseFocus(expectedRunId = null) {
   if (!paused) return null;
   // Paused authority is durable before any badge await.
   if (!await getMatchingFocusState(runId, [FocusStatus.PAUSED])) return null;
-  await updateBadge(paused, runId);
-  return paused;
+  if (!await updateBadge(paused, runId)) return null;
+  return getMatchingFocusState(runId, [FocusStatus.PAUSED]);
 }
 
 export async function rebindStoredFocusState() {
@@ -722,8 +856,8 @@ export async function resumeFocus(expectedRunId = null) {
   });
   if (!rebound) return null;
   if (!await getMatchingFocusState(runId, [FocusStatus.ACTIVE])) return null;
-  await updateBadge(rebound, runId);
-  return rebound;
+  if (!await updateBadge(rebound, runId)) return null;
+  return getMatchingFocusState(runId, [FocusStatus.ACTIVE]);
 }
 
 // ── Extend ──
@@ -738,14 +872,15 @@ export async function extendFocus(minutes, expectedRunId = null) {
   }, (current) => ({ ...current, duration: current.duration + minutes }));
   if (!extended) return null;
   if (!await getMatchingFocusState(state.runId, [state.status])) return null;
-  await updateBadge(extended, state.runId);
-  return extended;
+  if (!await updateBadge(extended, state.runId)) return null;
+  return getMatchingFocusState(state.runId, [state.status]);
 }
 
 // ── Distraction handling ──
 
 export async function validateDistractionTarget({
   runId,
+  expectedGeneration = null,
   tabId,
   classifiedUrl,
   decision,
@@ -757,6 +892,9 @@ export async function validateDistractionTarget({
   const authorityGeneration = _focusStateGeneration;
   if (authorityGeneration !== generationBeforeRead) return null;
   if (state?.status !== FocusStatus.ACTIVE || !hasRunId(state) || state.runId !== runId) {
+    return null;
+  }
+  if (Number.isInteger(expectedGeneration) && expectedGeneration !== authorityGeneration) {
     return null;
   }
 
@@ -781,6 +919,7 @@ export async function validateDistractionTarget({
 
 export async function handleDistraction({
   runId,
+  expectedGeneration = null,
   tabId,
   classifiedUrl,
   decision,
@@ -788,6 +927,7 @@ export async function handleDistraction({
 }) {
   const target = await validateDistractionTarget({
     runId,
+    expectedGeneration,
     tabId,
     classifiedUrl,
     decision,
@@ -803,6 +943,7 @@ export async function handleDistraction({
   } catch {
     const fallbackTarget = await validateDistractionTarget({
       runId,
+      expectedGeneration,
       tabId,
       classifiedUrl,
       decision,

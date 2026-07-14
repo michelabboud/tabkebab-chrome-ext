@@ -37,6 +37,7 @@ function activeState(overrides = {}) {
     aiBlocking: false,
     stashId: null,
     focusGroupId: null,
+    focusGroupOwnershipToken: null,
     distractionsBlocked: 0,
     focusTabCount: 0,
     ...overrides,
@@ -134,9 +135,16 @@ describe('Focus run identity', () => {
   });
 
   test('a legacy state receives a one-time cleanup ID that is terminal before the new run is saved', async () => {
-    const legacy = activeState({ runId: undefined, focusGroupId: 0 });
+    const legacy = activeState({
+      runId: undefined,
+      focusGroupId: 0,
+      focusGroupOwnershipToken: 'legacy-token',
+    });
     const { focus, harness } = await loadFocus({
       local: { focusState: legacy },
+      session: {
+        focusGroupOwnership: { runId: 'legacy-cleanup', token: 'legacy-token', groupId: 0 },
+      },
       tabs: [{ id: 4, windowId: 1, url: 'https://work.test/', groupId: 0 }],
       groups: [{ id: 0, windowId: 1, title: 'Coding' }],
     });
@@ -264,6 +272,26 @@ describe('validateDistractionTarget', () => {
       });
     });
   }
+
+  test('reads durable state before rejecting a stale captured generation', async () => {
+    const classifiedUrl = 'https://classified.test/generation-order';
+    const { focus, harness } = await loadFocus({
+      local: { focusState: activeState() },
+      tabs: [{ id: 5, windowId: 1, url: classifiedUrl }],
+    });
+    const readsBefore = harness.calls.storage.local.get.length;
+
+    expect(await focus.validateDistractionTarget({
+      runId: 'run-a',
+      expectedGeneration: 999,
+      tabId: 5,
+      classifiedUrl,
+      decision: passingDecision,
+    })).toBeNull();
+
+    expect(harness.calls.storage.local.get.slice(readsBefore)).toEqual([['focusState']]);
+    expect(harness.calls.tabs.get).toEqual([]);
+  });
 
   for (const transition of ['pause', 'end', 'replacement']) {
     test(`rejects ${transition} while the first live tab read is pending`, async () => {
@@ -438,7 +466,14 @@ describe('ending and recovery', () => {
   test('persists ending before restore and group zero teardown, then removes state last', async () => {
     const order = [];
     const { focus, harness } = await loadFocus({
-      local: { focusState: activeState({ stashId: 'stash-1', focusGroupId: 0 }) },
+      local: { focusState: activeState({
+        stashId: 'stash-1',
+        focusGroupId: 0,
+        focusGroupOwnershipToken: 'token-a',
+      }) },
+      session: {
+        focusGroupOwnership: { runId: 'run-a', token: 'token-a', groupId: 0 },
+      },
       tabs: [{ id: 8, windowId: 1, url: 'https://work.test/', groupId: 0 }],
       groups: [{ id: 0, windowId: 1, title: 'Coding' }],
     });
@@ -478,7 +513,14 @@ describe('ending and recovery', () => {
 
   test('partial teardown failures are structured and do not prevent terminal cleanup', async () => {
     const { focus } = await loadFocus({
-      local: { focusState: activeState({ stashId: 'stash-1', focusGroupId: 0 }) },
+      local: { focusState: activeState({
+        stashId: 'stash-1',
+        focusGroupId: 0,
+        focusGroupOwnershipToken: 'token-a',
+      }) },
+      session: {
+        focusGroupOwnership: { runId: 'run-a', token: 'token-a', groupId: 0 },
+      },
       failures: {
         'tabs.query': new Error('group query failed'),
         'alarms.clear': new Error('alarm failed'),
@@ -521,7 +563,12 @@ describe('ending and recovery', () => {
       message: 'history write failed',
     });
     expect(readStorageArea('local').focusState).toBeUndefined();
-    expect(readStorageArea('local').focusHistory).toBeUndefined();
+    expect(readStorageArea('local').focusHistory).toEqual([
+      expect.objectContaining({
+        runId: 'run-a',
+        teardownFailures: [{ step: 'history', message: 'history write failed' }],
+      }),
+    ]);
     expect(warnings).toHaveLength(1);
   });
 
@@ -540,6 +587,10 @@ describe('ending and recovery', () => {
     });
     expect(readStorageArea('local').focusState.status).toBe('ending');
     expect(readStorageArea('local').focusHistory).toHaveLength(1);
+    expect(readStorageArea('local').focusHistory[0].teardownFailures).toContainEqual({
+      step: 'state',
+      message: 'synthetic final removal failure',
+    });
     expect(warnings).toHaveLength(1);
 
     await import(`../../service-worker.js?focus-recovery=${++importNonce}`);
@@ -549,6 +600,10 @@ describe('ending and recovery', () => {
     );
     expect(readStorageArea('local').focusHistory).toHaveLength(1);
     expect(readStorageArea('local').focusHistory[0].runId).toBe('run-a');
+    expect(readStorageArea('local').focusHistory[0].teardownFailures).toContainEqual({
+      step: 'state',
+      message: 'synthetic final removal failure',
+    });
   });
 
   test('recovery does not repeat a successfully checkpointed stash restore', async () => {
@@ -604,10 +659,10 @@ describe('ending and recovery', () => {
     };
     const { focus } = await loadFocus({
       local: { focusState: activeState({ stashId: 'stash-1' }) },
-      failures: { 'storage.local.remove': new Error('synthetic final removal failure') },
     });
 
     await captureWarnings(() => focus.endFocus({ expectedRunId: 'run-a', adapters }));
+    expect(readStorageArea('local').focusState.status).toBe('ending');
     expect(readStorageArea('local').focusState.teardownCompleted?.restore).not.toBeTrue();
 
     const recoveredFocus = await import(`../../core/focus.js?focus-incomplete-recovery=${++importNonce}`);
@@ -616,6 +671,62 @@ describe('ending and recovery', () => {
     expect(restoreCalls).toBe(2);
     expect(readStorageArea('local').focusState).toBeUndefined();
     expect(readStorageArea('local').focusHistory).toHaveLength(1);
+    expect(readStorageArea('local').focusHistory[0].teardownFailures).toContainEqual({
+      step: 'restore',
+      message: 'Focus stash restore was incomplete (0/1).',
+    });
+  });
+
+  test('successful ungroup is checkpointed and is not repeated during ending recovery', async () => {
+    let ungroupCalls = 0;
+    const adapters = {
+      ungroupTabs: async () => { ungroupCalls++; },
+    };
+    const { focus } = await loadFocus({
+      local: { focusState: activeState({
+        focusGroupId: 0,
+        focusGroupOwnershipToken: 'token-a',
+      }) },
+      session: {
+        focusGroupOwnership: { runId: 'run-a', token: 'token-a', groupId: 0 },
+      },
+      tabs: [{ id: 8, windowId: 1, url: 'https://work.test/', groupId: 0 }],
+      groups: [{ id: 0, windowId: 1, title: 'Coding' }],
+      failures: { 'storage.local.remove': new Error('synthetic final removal failure') },
+    });
+
+    await captureWarnings(() => focus.endFocus({ expectedRunId: 'run-a', adapters }));
+    expect(ungroupCalls).toBe(1);
+    expect(readStorageArea('local').focusState.teardownCompleted?.ungroup).toBeTrue();
+
+    const recovered = await import(`../../core/focus.js?focus-ungroup-recovery=${++importNonce}`);
+    await recovered.endFocus({ expectedRunId: 'run-a', adapters });
+
+    expect(ungroupCalls).toBe(1);
+    expect(readStorageArea('local').focusState).toBeUndefined();
+  });
+
+  test('ending recovery does not trust a reused group ID without matching session ownership', async () => {
+    const { focus, harness } = await loadFocus({
+      local: { focusState: activeState({
+        status: 'ending',
+        focusGroupId: 0,
+        focusGroupOwnershipToken: 'token-a',
+      }) },
+      session: {
+        focusGroupOwnership: { runId: 'other-run', token: 'other-token', groupId: 0 },
+      },
+      tabs: [{ id: 99, windowId: 1, url: 'https://replacement.test/', groupId: 0 }],
+      groups: [{ id: 0, windowId: 1, title: 'Replacement' }],
+    });
+
+    const record = await focus.endFocus({ expectedRunId: 'run-a' });
+
+    expect(harness.calls.tabs.ungroup).toEqual([]);
+    expect(record.teardownFailures).toContainEqual({
+      step: 'ungroup-ownership',
+      message: 'Focus group ownership could not be verified.',
+    });
   });
 
   test('concurrent end calls share one teardown flight', async () => {
@@ -729,6 +840,35 @@ describe('stale lifecycle continuations', () => {
 
     expect(observedStatuses).toEqual(['paused']);
   });
+
+  for (const operation of ['pause', 'resume', 'extend']) {
+    test(`${operation} returns null when replacement occurs during badge reconciliation`, async () => {
+      const initial = activeState({
+        status: operation === 'resume' ? 'paused' : 'active',
+        pausedAt: operation === 'resume' ? Date.now() - 1_000 : null,
+      });
+      const replacement = activeState({ runId: 'run-b', profileName: 'Replacement' });
+      const { focus } = await loadFocus({ local: { focusState: initial } });
+      const setBadgeText = chrome.action.setBadgeText.bind(chrome.action);
+      let replaced = false;
+      chrome.action.setBadgeText = async (...args) => {
+        if (!replaced) {
+          replaced = true;
+          await chrome.storage.local.set({ focusState: replacement });
+        }
+        return setBadgeText(...args);
+      };
+
+      const result = operation === 'pause'
+        ? await focus.pauseFocus('run-a')
+        : operation === 'resume'
+          ? await focus.resumeFocus('run-a')
+          : await focus.extendFocus(5, 'run-a');
+
+      expect(result).toBeNull();
+      expect(readStorageArea('local').focusState).toEqual(replacement);
+    });
+  }
 
   test('a state swap during badge text write repaints the latest run', async () => {
     const replacement = activeState({

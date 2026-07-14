@@ -12,7 +12,7 @@ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as delet
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
-import { FocusStatus, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
+import { FocusStatus, getCachedFocusAuthority, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
 import { createFocusAiChecker } from './core/focus-ai.js';
 
@@ -812,7 +812,7 @@ const checkFocusWithAI = createFocusAiChecker({
   ttlMs: 60 * 60 * 1000,
 });
 
-async function checkWithAI({ runId, tabId, classifiedUrl, profileName }) {
+async function checkWithAI({ runId, focusGeneration, tabId, classifiedUrl, profileName }) {
   try {
     const available = await AIClient.isAvailable();
     if (!available) return;
@@ -822,6 +822,7 @@ async function checkWithAI({ runId, tabId, classifiedUrl, profileName }) {
 
     return await checkFocusWithAI({
       runId,
+      focusGeneration,
       tabId,
       classifiedUrl,
       cacheKey: hostname,
@@ -847,7 +848,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   if (tab.pendingUrl || tab.url) {
     const url = tab.pendingUrl || tab.url;
     await focusReadiness;
-    const state = getCachedFocusState();
+    const { state, generation: focusGeneration } = getCachedFocusAuthority();
     if (state?.status === FocusStatus.ACTIVE && typeof state.runId === 'string' && state.runId) {
       // Pass full tab object to check group membership
       const tabWithUrl = { ...tab, url };
@@ -855,6 +856,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
       if (result.blocked) {
         await handleDistraction({
           runId: state.runId,
+          expectedGeneration: focusGeneration,
           tabId: tab.id,
           classifiedUrl: url,
           decision: { distraction: true, confidence: 1 },
@@ -864,6 +866,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
         // Try AI categorization for unknown domains
         await checkWithAI({
           runId: state.runId,
+          focusGeneration,
           tabId: tab.id,
           classifiedUrl: url,
           profileName: state.profileName,
@@ -880,7 +883,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Focus mode: intercept navigation to blocked domains
   if (changeInfo.url) {
     await focusReadiness;
-    const state = getCachedFocusState();
+    const { state, generation: focusGeneration } = getCachedFocusAuthority();
     if (state?.status === FocusStatus.ACTIVE && typeof state.runId === 'string' && state.runId) {
       // changeInfo.url is the navigation that triggered this event. Do not let
       // a stale tab.pendingUrl override that authoritative event URL.
@@ -889,6 +892,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (result.blocked) {
         await handleDistraction({
           runId: state.runId,
+          expectedGeneration: focusGeneration,
           tabId,
           classifiedUrl: changeInfo.url,
           decision: { distraction: true, confidence: 1 },
@@ -898,6 +902,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         // Try AI categorization for unknown domains
         await checkWithAI({
           runId: state.runId,
+          focusGeneration,
           tabId,
           classifiedUrl: changeInfo.url,
           profileName: state.profileName,

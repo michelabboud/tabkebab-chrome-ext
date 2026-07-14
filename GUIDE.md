@@ -389,7 +389,7 @@ Before starting, configure:
 
 Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated. If a tab is still navigating when Focus starts, its pending destination controls classification and is the URL preserved by a Focus stash. Duplicate legacy preferences collapse to one entry with the same type and value.
 
-Each session has a unique run ID. A deterministic or AI classification is applied only while that exact run is still active, the tab still exists, and either its current URL or its non-empty pending URL is exactly the URL that was classified. AI results must explicitly mark the page distracting with a finite numeric confidence strictly greater than `0.7`; fresh and cached results use the same rule. Pausing, ending, replacing the run, closing the tab, or navigating elsewhere while classification is pending makes the result a no-op.
+Each session has a unique run ID. A deterministic or AI classification is applied only while that exact run is still active, its captured lifecycle generation is unchanged, the tab still exists, and either its current URL or its non-empty pending URL is exactly the URL that was classified. AI results must explicitly mark the page distracting with a finite numeric confidence strictly greater than `0.7`; fresh and cached results use the same rule. Pausing, pausing and resuming the same run, ending, replacing the run, closing the tab, or navigating elsewhere while classification is pending makes the result a no-op.
 
 ### The Focus HUD
 
@@ -426,7 +426,7 @@ When the timer expires (or you click End Session):
    - Focus tabs count
 5. The session is saved to your focus history
 
-Ending intent is saved before teardown begins. If Chrome suspends or restarts the service worker, TabKebab resumes an unfinished ending run without duplicating its history or repeating a successfully checkpointed stash restore. An incomplete restore remains retryable rather than being marked complete. Restore, ungroup, alarm, or badge errors are recorded in the session result and do not reactivate blocking or prevent terminal state cleanup.
+Ending intent is saved before teardown begins. If Chrome suspends or restarts the service worker, TabKebab resumes an unfinished ending run without duplicating its history or repeating a successfully checkpointed stash restore or ungroup. An incomplete restore keeps the session in a non-blocking ending state until a later retry completes. A Focus-created group is ungrouped only when its durable token still matches browser-session ownership; after a full browser restart, a reused numeric group ID is left untouched. Restore, ownership, ungroup, alarm, badge, history, and final-state errors are merged into the session result without reactivating blocking.
 
 ### Focus History
 

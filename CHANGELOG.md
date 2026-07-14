@@ -10,6 +10,7 @@ All notable changes to TabKebab are documented in this file.
 
 - Unique UUID ownership and explicit `active`, `paused`, and recoverable `ending` states for every Focus run.
 - One provider-agnostic Focus AI decision boundary with an exact finite confidence threshold, generation-safe cache expiry, and immutable captured run/tab/URL context.
+- Browser-session ownership tokens and a durable ungroup checkpoint for Focus-created Chrome groups.
 - Lifecycle, AI-cache, delayed-navigation, badge-race, ending-recovery, and side-panel event regression coverage plus redacted Chrome 148 delayed-provider smoke evidence.
 
 ### Changed
@@ -17,6 +18,7 @@ All notable changes to TabKebab are documented in this file.
 - Deterministic and AI decisions now carry the originating run ID, tab ID, classified URL, and full decision to one live validation boundary immediately before navigation side effects.
 - Focus start and end now share one lifecycle queue; the run UUID is allocated before the first asynchronous read and collision-checked before replacement.
 - Focus teardown persists terminal intent before restore, ungroup, alarm, badge, history, and state cleanup; successful stash restoration is durably checkpointed before later recovery work.
+- Incomplete stash restoration retains a non-blocking ending journal for retry, while history is rewritten with the union of teardown, state-removal, and recovery failures.
 - Focus badge writes are serialized and repaint from current durable authority when state changes during a Chrome action write.
 - Focus side-panel events include their run ID and re-read durable state before report, view, blink, or button effects; lifecycle controls send the displayed run ID and the worker rejects missing or stale command authority.
 
@@ -25,7 +27,10 @@ All notable changes to TabKebab are documented in this file.
 - Prevented delayed fresh or cached AI decisions from moving backward, removing, counting, notifying, or flashing after pause, end, run replacement, tab removal, or navigation away.
 - Prevented old ticks, deferred resume/rebind/counter writes, concurrent teardown calls, cache-expiry timers, and delayed badge resets from mutating a replacement run.
 - Closed state-change races during both live-tab validation reads, including pause→resume ABA, without adding an await between the final URL check and navigation side effect.
-- Made ending recovery history-deduplicated and terminal despite partial cleanup failures, while avoiding a repeated complete stash restore and retrying an incomplete restore after restart.
+- Invalidated delayed classifications when pause→resume occurs before the AI result returns, even when the same run is active again.
+- Prevented reused Chrome group IDs from being ungrouped without matching browser-session proof; ownership-write failures abort before grouping or roll back the just-created group.
+- Made ending recovery history-deduplicated and fail-closed despite partial cleanup failures, while avoiding repeated completed restore/ungroup work and retaining incomplete restores for retry.
+- Prevented Pause, Resume, and Extend from returning stale state when a replacement run arrives during badge reconciliation.
 - Rejected malformed, non-finite, string, and confidence-at-threshold AI decisions; only `distraction: true` with numeric confidence strictly greater than `0.7` can delegate.
 
 ## [1.2.5] — 2026-07-14

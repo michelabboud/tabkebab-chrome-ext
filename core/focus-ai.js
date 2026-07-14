@@ -45,6 +45,7 @@ export function createFocusAiChecker({
   return async function checkFocusWithAi(input = {}) {
     const captured = Object.freeze({
       runId: input.runId,
+      focusGeneration: input.focusGeneration,
       tabId: input.tabId,
       classifiedUrl: input.classifiedUrl,
       cacheKey: input.cacheKey ?? input.classifiedUrl,
@@ -72,6 +73,7 @@ export function createFocusAiChecker({
     if (isConfidentDistraction(decision)) {
       await onDistraction({
         runId: captured.runId,
+        expectedGeneration: captured.focusGeneration,
         tabId: captured.tabId,
         classifiedUrl: captured.classifiedUrl,
         decision,
