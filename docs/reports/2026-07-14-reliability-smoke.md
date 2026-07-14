@@ -399,12 +399,15 @@ exit 0
 
 **BLOCKED — no live Drive claim was made.** The credential-safe preflight could not establish the prerequisite disposable OAuth boundary:
 
-- `manifest.json` contains the production OAuth client and has no manifest `key`, so a disposable unpacked checkout does not have a pinned development extension ID;
-- no registered disposable development OAuth client or approved pinned development ID is available in the checkout;
-- a fresh disposable Chrome profile has no authenticated test-user session, and no credential-safe autonomous authorization procedure is available.
+- the repository documents development extension ID `hkhlbjmokednepfjmnlglapgppfdpmck` and development OAuth client `873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com`; neither is absent;
+- the exact Task 6 `manifest.json` instead contains the production OAuth client and has no manifest `key` to pin an unpacked identity;
+- a clean disposable Chrome/Xvfb load of this exact worktree observed the TabKebab service-worker ID as `fignfifoniblkonapihmkfakmlgkbkcf`, which matches neither the documented development ID nor published ID `cgfnjdcioainbclbbihglaopbhikhdob` and therefore has no matching documented OAuth client;
+- the fresh disposable profile had no authenticated Google test-user session or credential-safe autonomous authorization procedure.
 
-Because the unpacked ID could not be authenticated against a registered development client, the run stopped before requesting or exposing a token, creating a Drive profile, seeding files, changing `modifiedTime`, or invoking destructive cleanup. Synthetic `fetch` responses are retained only as deterministic adapter tests and are not represented as real-Drive evidence. The mandatory canonical/newest/undated live preservation fixture therefore remains pending.
+Because the observed unpacked identity did not match a registered identity/client pair and the profile was not authenticated, the run stopped before requesting or exposing a token, making a Drive call, creating a Drive profile, seeding files, changing `modifiedTime`, or invoking destructive cleanup. Synthetic `fetch` responses are retained only as deterministic adapter tests and are not represented as real-Drive evidence. The mandatory canonical/newest/undated live preservation fixture therefore remains pending.
+
+Safe follow-up requires an approved registered environment and an operator-authenticated disposable test-user session, without transmitting credentials or tokens. A byte-exact gate can test a signed/published package built from the exact Task 6 bytes under the registered production identity/client. A development gate can instead use commit-exact production code with an explicit manifest-only overlay for the documented development identity/client, but its evidence must state that the resulting package is not byte-exact.
 
 ## Task 6 cleanup
 
-The preflight created no Drive folder or file and launched no Task 6 Chrome/Xvfb process. A host process check found zero command lines matching the Task 6 disposable prefix. There was no OAuth token, browser profile, Drive artifact, fixture server, or display process to remove.
+The identity-only preflight launched a clean disposable Chrome/Xvfb profile, observed the service-worker ID, and then shut down. It requested no OAuth token and created no Drive folder or file. A post-run host process check found zero command lines matching the Task 6 disposable prefix. The profile contained no authenticated Google state, and no Drive artifact, fixture server, or display process remained to clean up.

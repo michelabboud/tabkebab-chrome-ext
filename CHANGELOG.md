@@ -25,7 +25,7 @@ All notable changes to TabKebab are documented in this file.
 
 ### Verification note
 
-- Deterministic focused and full Bun gates pass. The mandatory live Drive fixture gate remains blocked because this checkout has the production OAuth client, no manifest key that pins an unpacked development ID, no registered disposable development client, and no credential-safe authenticated test-user session. No mock is represented as live-Drive evidence.
+- Deterministic focused and full Bun gates pass. The mandatory live Drive fixture gate remains blocked: although the repository documents a development extension ID and OAuth client, the exact Task 6 manifest uses the production client without a pinning `key`, and a clean disposable load observed extension ID `fignfifoniblkonapihmkfakmlgkbkcf` rather than the documented development or published ID. That observed identity has no matching documented client, and the disposable profile had no authenticated Google test-user session. The preflight requested no token and made no Drive call; no mock is represented as live-Drive evidence.
 
 ## [1.2.7] — 2026-07-14
 

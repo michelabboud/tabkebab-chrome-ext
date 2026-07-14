@@ -60,7 +60,7 @@
 - Routed scheduled and manual retention through one injectable coordinator that completes selection before destructive work, deduplicates file IDs, continues individual failures, and returns only serializable counts and plain errors.
 - Made archive-before-overwrite fail closed for JSON and raw HTML, removed stale profile-name caching, and required a non-empty OAuth token before the first Drive request.
 - Switched Settings cleanup to `sendOrThrow()`, strict `1..365` day validation, checked result-shape formatting, protected-file counts, and failure-only feedback for partial/returned/transport errors.
-- Added focused coverage across all 11 categories plus actual worker and SettingsManager entry points. The live Drive fixture remains honestly blocked by the production-client/unpinned-unpacked-ID OAuth configuration; no synthetic response is claimed as that proof.
+- Added focused coverage across all 11 categories plus actual worker and SettingsManager entry points. The live Drive fixture remains honestly blocked: the repository documents development ID `hkhlbjmokednepfjmnlglapgppfdpmck` and development OAuth client `873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com`, but the exact Task 6 manifest uses the production client without a pinning `key`; a clean disposable load instead observed ID `fignfifoniblkonapihmkfakmlgkbkcf`, which matches neither the documented development nor published ID and has no matching documented client. The disposable profile also lacked an authenticated Google test-user session. No token or Drive call was attempted, and no synthetic response is claimed as the live proof.
 
 ## Confirmed remediation scope
 
@@ -90,4 +90,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Provide a registered disposable development OAuth client (or an approved pinned development extension ID) and an authenticated disposable test-user session, then run and clean up the Task 6 real-Drive fixture. Only after that proof may the controller mark Phase 1 complete and publish `v1.2.8`.
+Use an approved, credential-safe registered environment plus an operator-authenticated disposable Google test-user session, without transmitting a token. Either test a signed/published package built from the exact Task 6 bytes under the registered production identity/client, or run commit-exact production code with an explicit manifest-only overlay for the documented development identity/client and record that the resulting package is not byte-exact. Then run and clean up the Task 6 real-Drive fixture. Only after that proof may the controller mark Phase 1 complete and publish `v1.2.8`.
