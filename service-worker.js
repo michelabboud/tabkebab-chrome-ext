@@ -12,6 +12,7 @@ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as delet
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
+import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from './core/drive-retention.js';
 import { FocusStatus, getCachedFocusAuthority, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
 import { createFocusAiChecker } from './core/focus-ai.js';
@@ -230,14 +231,46 @@ async function autoSyncDrive() {
   } catch (e) { console.warn('[TabKebab] auto Drive sync failed:', e); }
 }
 
-async function runRetentionCleanup() {
+export async function runDriveFileRetention(
+  { mode, days, neverDeleteFromDrive, connected },
+  {
+    now = Date.now,
+    listFiles = listAllDriveFiles,
+    deleteFile = deleteDriveFile,
+  } = {},
+) {
+  if (mode !== 'manual' && mode !== 'scheduled') {
+    throw new TypeError('Drive retention mode must be manual or scheduled');
+  }
+
+  if (mode === 'scheduled' && days === 0) return emptyDriveRetentionResult();
+  validateDriveRetentionDays(days);
+
+  // Persisted guard corruption is treated as disabled. Destructive work is
+  // allowed only for the exact affirmative state.
+  if (neverDeleteFromDrive !== false || connected !== true) {
+    return emptyDriveRetentionResult();
+  }
+  const nowMs = now();
+  const cutoffMs = retentionCutoff(days, nowMs);
+  return coordinateDriveRetention({ cutoffMs, listFiles, deleteFile });
+}
+
+export async function runRetentionCleanup({
+  getSettings: loadSettings = getSettings,
+  getStorage = (key) => Storage.get(key),
+  setStorage = (key, value) => Storage.set(key, value),
+  now = Date.now,
+  listFiles = listAllDriveFiles,
+  deleteFile = deleteDriveFile,
+} = {}) {
   try {
-    const settings = await getSettings();
+    const settings = await loadSettings();
 
     // Clean old auto-saves locally
     const retentionMs = (settings.autoSaveRetentionDays || 7) * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - retentionMs;
-    const sessions = (await Storage.get('sessions')) || [];
+    const sessions = (await getStorage('sessions')) || [];
     const autoSaves = sessions.filter(s => s.name.startsWith(AUTO_SAVE_PREFIX));
     const recentIds = new Set(autoSaves.slice(0, 2).map(s => s.id));
     const idsToDelete = new Set();
@@ -249,26 +282,20 @@ async function runRetentionCleanup() {
     }
 
     if (idsToDelete.size > 0) {
-      await Storage.set('sessions', sessions.filter(s => !idsToDelete.has(s.id)));
+      await setStorage('sessions', sessions.filter(s => !idsToDelete.has(s.id)));
     }
 
-    // Clean old Drive files
-    if (!settings.neverDeleteFromDrive && settings.driveRetentionDays > 0) {
-      const driveState = await Storage.get('driveSync');
-      if (driveState?.connected) {
-        try {
-          const driveCutoff = Date.now() - (settings.driveRetentionDays * 24 * 60 * 60 * 1000);
-          const allFiles = await listAllDriveFiles();
-          for (const file of allFiles) {
-            const fileTime = new Date(file.modifiedTime).getTime();
-            if (fileTime < driveCutoff) {
-              try { await deleteDriveFile(file.id); } catch (e) { console.warn('[TabKebab] Drive file cleanup failed:', file.id, e); }
-            }
-          }
-        } catch (e) { console.warn('[TabKebab] Drive retention cleanup failed:', e); }
-      }
-    }
-  } catch (e) { console.warn('[TabKebab] Drive retention cleanup failed:', e); }
+    const driveState = await getStorage('driveSync');
+    return await runDriveFileRetention({
+      mode: 'scheduled',
+      days: settings.driveRetentionDays,
+      neverDeleteFromDrive: settings.neverDeleteFromDrive,
+      connected: driveState?.connected,
+    }, { now, listFiles, deleteFile });
+  } catch {
+    console.warn('[TabKebab] Drive retention cleanup failed');
+    return emptyDriveRetentionResult();
+  }
 }
 
 // ── Bookmark system ──
@@ -915,6 +942,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Message handler — side panel communicates via chrome.runtime.sendMessage
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message).then(sendResponse).catch(err => {
+    if (message?.action === 'cleanDriveFiles') {
+      console.warn('[TabKebab] Drive cleanup handler failed');
+      sendResponse({ error: 'Drive cleanup failed' });
+      return;
+    }
     console.warn(`[TabKebab] handler error (${message?.action}):`, err);
     sendResponse({ error: err?.message || String(err) });
   });
@@ -984,7 +1016,13 @@ function isValidCloseConfirmation(parsedCommand) {
   return new Set(parsedCommand.tabIds).size === parsedCommand.tabIds.length;
 }
 
-async function handleMessage(msg) {
+export async function handleMessage(msg, {
+  getSettings: loadSettings = getSettings,
+  getStorage = (key) => Storage.get(key),
+  now = Date.now,
+  listFiles = listAllDriveFiles,
+  deleteFile = deleteDriveFile,
+} = {}) {
   switch (msg.action) {
     case 'getTabs':
       return getAllTabs({ allWindows: msg.allWindows ?? true });
@@ -1626,20 +1664,14 @@ async function handleMessage(msg) {
     }
 
     case 'cleanDriveFiles': {
-      const days = msg.days || 30;
-      const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-      const allFiles = await listAllDriveFiles();
-      let deleted = 0;
-      for (const file of allFiles) {
-        const fileTime = new Date(file.modifiedTime).getTime();
-        if (fileTime < cutoff) {
-          try {
-            await deleteDriveFile(file.id);
-            deleted++;
-          } catch (e) { console.warn('[TabKebab] Drive file delete failed:', file.id, e); }
-        }
-      }
-      return { deleted };
+      const settings = await loadSettings();
+      const driveState = await getStorage('driveSync');
+      return runDriveFileRetention({
+        mode: 'manual',
+        days: msg.days,
+        neverDeleteFromDrive: settings.neverDeleteFromDrive,
+        connected: driveState?.connected,
+      }, { now, listFiles, deleteFile });
     }
 
     // ── Bookmarks ──

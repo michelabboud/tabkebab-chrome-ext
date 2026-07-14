@@ -1,5 +1,7 @@
 // core/drive-client.js — Google Drive REST v3 client (visible TabKebab folder)
 
+import { isValidDriveFileId } from './drive-retention.js';
+
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_NAME = 'TabKebab';
@@ -14,13 +16,44 @@ const SUBFOLDER_ARCHIVE = 'archive';
 
 // ── Profile scoping ──────────────────────────────────
 
-let _cachedProfileName = null;
+const DRIVE_PROFILE_NAME = /^[A-Za-z0-9 _-]+$/;
+
+function validateProfileName(profileName) {
+  if (
+    typeof profileName !== 'string' ||
+    profileName.length < 1 ||
+    profileName.length > 50 ||
+    profileName !== profileName.trim() ||
+    !DRIVE_PROFILE_NAME.test(profileName)
+  ) {
+    throw new Error('Drive profile name is missing or invalid');
+  }
+  return profileName;
+}
 
 async function getProfileName() {
-  if (_cachedProfileName) return _cachedProfileName;
   const data = await chrome.storage.local.get('driveProfileName');
-  _cachedProfileName = data.driveProfileName || null;
-  return _cachedProfileName;
+  return validateProfileName(data.driveProfileName);
+}
+
+function requireDriveFileId(fileId, context = 'Drive file') {
+  if (!isValidDriveFileId(fileId)) throw new Error(`${context} has an invalid ID`);
+  return fileId;
+}
+
+function encodedDriveFileId(fileId, context) {
+  return encodeURIComponent(requireDriveFileId(fileId, context));
+}
+
+function validateListedFile(file) {
+  if (!file || typeof file !== 'object' || Array.isArray(file)) {
+    throw new Error('Drive file listing returned an invalid entry');
+  }
+  requireDriveFileId(file.id);
+  if (typeof file.name !== 'string' || file.name.length === 0) {
+    throw new Error(`Drive file ${file.id} has an invalid name`);
+  }
+  return file;
 }
 
 /**
@@ -41,6 +74,8 @@ async function getToken(interactive = false) {
     chrome.identity.getAuthToken({ interactive }, (token) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
+      } else if (typeof token !== 'string' || token.trim().length === 0) {
+        reject(new Error('Drive authentication token is unavailable'));
       } else {
         resolve(token);
       }
@@ -91,6 +126,24 @@ async function driveRequest(url, options = {}, interactive = false) {
   }
 }
 
+async function findUniqueDriveFile(query, fields, context) {
+  const url = new URL(`${DRIVE_API}/files`);
+  url.searchParams.set('q', query);
+  url.searchParams.set('fields', `nextPageToken,files(${fields})`);
+  url.searchParams.set('pageSize', '2');
+  url.searchParams.set('spaces', 'drive');
+  const resp = await driveRequest(url.toString());
+  const data = await resp.json();
+  if (!data || typeof data !== 'object' || !Array.isArray(data.files)) {
+    throw new Error(`${context} lookup returned an invalid page`);
+  }
+  if (data.nextPageToken != null || data.files.length > 1) {
+    throw new Error(`${context} lookup is ambiguous: multiple matches`);
+  }
+  if (data.files.length === 0) return null;
+  return validateListedFile(data.files[0]);
+}
+
 export async function authenticate() {
   return getToken(true);
 }
@@ -107,12 +160,8 @@ export async function disconnect() {
 // ── Folder management ─────────────────────────────────
 
 async function findFolder() {
-  const q = `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const resp = await driveRequest(
-    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
-  );
-  const data = await resp.json();
-  return data.files?.[0] || null;
+  const q = `name='${FOLDER_NAME}' and 'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  return findUniqueDriveFile(q, 'id,name', 'Drive root folder');
 }
 
 async function createFolder() {
@@ -131,19 +180,16 @@ async function createFolder() {
 async function getOrCreateFolder() {
   let folder = await findFolder();
   if (!folder) folder = await createFolder();
-  return folder.id;
+  return requireDriveFileId(folder.id, 'Drive root folder');
 }
 
 /**
  * Find or create a subfolder inside a parent folder.
  */
 async function findSubfolder(parentId, subName) {
+  requireDriveFileId(parentId, 'Drive parent folder');
   const q = `name='${subName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const resp = await driveRequest(
-    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`
-  );
-  const data = await resp.json();
-  return data.files?.[0] || null;
+  return findUniqueDriveFile(q, 'id,name', `Drive ${subName} folder`);
 }
 
 async function createSubfolder(parentId, subName) {
@@ -163,7 +209,7 @@ async function createSubfolder(parentId, subName) {
 async function getOrCreateSubfolder(parentId, subName) {
   let sub = await findSubfolder(parentId, subName);
   if (!sub) sub = await createSubfolder(parentId, subName);
-  return sub.id;
+  return requireDriveFileId(sub.id, 'Drive subfolder');
 }
 
 /**
@@ -191,12 +237,9 @@ export async function getBookmarksFolderId() {
 // ── File operations ───────────────────────────────────
 
 async function findFileInFolder(folderId, filename) {
+  requireDriveFileId(folderId, 'Drive parent folder');
   const q = `name='${filename}' and '${folderId}' in parents and trashed=false`;
-  const resp = await driveRequest(
-    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&spaces=drive`
-  );
-  const data = await resp.json();
-  return data.files?.[0] || null;
+  return findUniqueDriveFile(q, 'id,name,modifiedTime', `Drive file ${filename}`);
 }
 
 async function writeFileToFolder(folderId, filename, content, { archive: shouldArchive = false } = {}) {
@@ -206,9 +249,10 @@ async function writeFileToFolder(folderId, filename, content, { archive: shouldA
   if (existing) {
     // Archive before overwriting
     if (shouldArchive) {
-      try { await archiveFile(existing.id, filename); } catch (e) { console.warn('[TabKebab] archive before overwrite failed:', filename, e); }
+      await archiveFile(existing.id, filename);
     }
-    await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
+    const fileId = encodedDriveFileId(existing.id, 'Drive overwrite target');
+    await driveRequest(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body
@@ -234,7 +278,9 @@ async function writeFileToFolder(folderId, filename, content, { archive: shouldA
  * No download required — uses Drive's files.copy endpoint.
  */
 async function copyFile(fileId, newName, targetFolderId) {
-  const resp = await driveRequest(`${DRIVE_API}/files/${fileId}/copy`, {
+  const encodedId = encodedDriveFileId(fileId, 'Drive copy source');
+  requireDriveFileId(targetFolderId, 'Drive copy target folder');
+  const resp = await driveRequest(`${DRIVE_API}/files/${encodedId}/copy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: newName, parents: [targetFolderId] })
@@ -258,24 +304,53 @@ async function archiveFile(fileId, originalName) {
 }
 
 async function readFileById(fileId) {
-  const resp = await driveRequest(`${DRIVE_API}/files/${fileId}?alt=media`);
+  const encodedId = encodedDriveFileId(fileId, 'Drive read target');
+  const resp = await driveRequest(`${DRIVE_API}/files/${encodedId}?alt=media`);
   return resp.json();
 }
 
 async function deleteFileById(fileId) {
-  await driveRequest(`${DRIVE_API}/files/${fileId}`, { method: 'DELETE' });
+  const encodedId = encodedDriveFileId(fileId, 'Drive delete target');
+  await driveRequest(`${DRIVE_API}/files/${encodedId}`, { method: 'DELETE' });
 }
 
 /**
  * List all files in a folder.
  */
 async function listFilesInFolder(folderId) {
+  requireDriveFileId(folderId, 'Drive listing folder');
   const q = `'${folderId}' in parents and trashed=false and (mimeType='application/json' or mimeType='text/html')`;
-  const resp = await driveRequest(
-    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc&spaces=drive`
-  );
-  const data = await resp.json();
-  return data.files || [];
+  const files = [];
+  const seenPageTokens = new Set();
+  let pageToken = null;
+
+  while (true) {
+    const url = new URL(`${DRIVE_API}/files`);
+    url.searchParams.set('q', q);
+    url.searchParams.set('fields', 'nextPageToken,files(id,name,modifiedTime,size)');
+    url.searchParams.set('orderBy', 'modifiedTime desc');
+    url.searchParams.set('spaces', 'drive');
+    if (pageToken !== null) url.searchParams.set('pageToken', pageToken);
+
+    const resp = await driveRequest(url.toString());
+    const data = await resp.json();
+    if (!data || typeof data !== 'object' || !Array.isArray(data.files)) {
+      throw new Error('Drive file listing returned an invalid page');
+    }
+    files.push(...data.files.map(validateListedFile));
+
+    if (data.nextPageToken === undefined || data.nextPageToken === null) break;
+    if (typeof data.nextPageToken !== 'string' || data.nextPageToken.length === 0) {
+      throw new Error('Drive file listing returned an invalid page token');
+    }
+    if (seenPageTokens.has(data.nextPageToken)) {
+      throw new Error('Drive file listing repeated a page token');
+    }
+    seenPageTokens.add(data.nextPageToken);
+    pageToken = data.nextPageToken;
+  }
+
+  return files;
 }
 
 // ── Public API: Profiles ─────────────────────────────
@@ -392,8 +467,9 @@ export async function exportRawToSubfolder(subfolder, filename, rawContent, mime
   const existing = await findFileInFolder(folderId, filename);
 
   if (existing) {
-    try { await archiveFile(existing.id, filename); } catch (e) { console.warn('[TabKebab] archive before overwrite failed:', filename, e); }
-    await driveRequest(`${UPLOAD_API}/files/${existing.id}?uploadType=media`, {
+    await archiveFile(existing.id, filename);
+    const fileId = encodedDriveFileId(existing.id, 'Drive overwrite target');
+    await driveRequest(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
       method: 'PATCH',
       headers: { 'Content-Type': mimeType },
       body: rawContent
@@ -438,16 +514,12 @@ export async function listAllDriveFiles() {
   const profileFiles = await listFilesInFolder(profileId);
 
   const subfolders = [SUBFOLDER_SESSIONS, SUBFOLDER_STASHES, SUBFOLDER_BOOKMARKS, SUBFOLDER_ARCHIVE];
-  const allFiles = [...profileFiles];
+  const allFiles = profileFiles.map(file => ({ ...file, scope: 'profile' }));
 
   for (const sub of subfolders) {
-    try {
-      const subId = await getOrCreateSubfolder(profileId, sub);
-      const subFiles = await listFilesInFolder(subId);
-      allFiles.push(...subFiles);
-    } catch (e) {
-      console.warn('[TabKebab] subfolder listing skipped:', sub, e);
-    }
+    const subId = await getOrCreateSubfolder(profileId, sub);
+    const subFiles = await listFilesInFolder(subId);
+    allFiles.push(...subFiles.map(file => ({ ...file, scope: sub })));
   }
 
   return allFiles;

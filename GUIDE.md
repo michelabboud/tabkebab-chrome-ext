@@ -567,9 +567,12 @@ Google Drive/
 
 ### Retention & Cleanup
 
-- **Drive retention** — auto-delete files older than N days (default: 30)
+- **Drive retention** — auto-delete only strictly dated recoverable copies older than N days (default: 30)
 - **Never delete from Drive** — override retention, keep everything forever
-- Files are archived (copied with timestamp) before being overwritten
+- Canonical `tabkebab-sync.json` and `tabkebab-settings.json` files are never retention candidates
+- The newest copy in each bounded file category is preserved, including every tie; young, cutoff-equal, malformed, undated, wrong-folder, and unrelated JSON/HTML files are also preserved
+- Manual cleanup reports deleted files plus canonical, newest, and undated files protected; any partial deletion is shown as incomplete rather than success
+- Existing files are archived (copied with a timestamp) before overwrite; if the archive copy fails, the overwrite is aborted
 
 ### Cross-Profile Import
 
@@ -581,7 +584,7 @@ If you have multiple Chrome profiles connected to the same Google account, you c
 
 ### Disconnecting
 
-Click **Disconnect** to revoke the OAuth token and stop syncing. Your files remain on Google Drive — they're just regular files in your Drive.
+Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in TabKebab. This does not revoke the account-level grant; revoke that separately in your Google Account if desired. Your files remain regular files in Google Drive.
 
 ---
 

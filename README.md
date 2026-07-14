@@ -125,8 +125,8 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Profile-scoped** — each Chrome profile gets its own folder
 - **Folder structure**: `TabKebab / {profile} / sessions, stashes, bookmarks, archive`
 - **Manual or automatic** sync at configurable intervals
-- **Retention policy** with auto-cleanup of old files
-- **Archive before overwrite** — previous versions saved before updating
+- **Fail-closed retention** — only old, strictly dated recoverable copies are eligible; canonical, newest, young, malformed, undated, and unrelated files are protected
+- **Archive before overwrite** — previous versions must be copied successfully before existing content is updated
 - **Cross-profile settings import** from other profiles on the same Google account
 - **HTML bookmark export** alongside JSON
 

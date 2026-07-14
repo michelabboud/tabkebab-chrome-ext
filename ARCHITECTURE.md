@@ -24,6 +24,8 @@ Side-panel commands cross one checked runtime-message boundary. Background error
 
 `core/tab-restore.js` is the single session/stash restore coordinator. It clones saved inputs, preserves `{ savedTab, createdTab }` associations across settled batches, returns the fixed outcome from `core/restore-outcome.js`, and owns mute/discard/unmute cleanup. IndexedDB deletion remains in the service-worker boundary and is allowed only for a complete outcome.
 
+`core/drive-retention.js` is the pure source of truth for destructive Drive cleanup. It recognizes only the repository's exact dated recoverable-copy families in five authoritative scopes, bounds them to 11 fixed categories, protects canonical names before parsing, and computes all newest ties from valid `modifiedTime` values before selecting an old non-newest file. Scheduled and manual cleanup call one coordinator that completes inventory and selection before the first delete and returns only serializable counts and plain per-file errors.
+
 `core/focus-policy.js` is the pure source of truth for Focus allowlist construction, runtime Chrome-group rebinding, and deterministic blocking. Startup classification in `core/focus.js` and navigation interception in `service-worker.js` both delegate to its `isAllowed()` predicate. Domain entries match exact hosts or true subdomains, URL entries compare canonical exact URLs, and group preferences contain exact titles only.
 
 `core/focus-ai.js` owns the provider-agnostic delayed-classification boundary. It captures immutable run, tab, classified-URL, cache-key, category, and request context; fresh and cached decisions share one predicate requiring `distraction === true` and finite numeric confidence strictly greater than `0.7`. Cache expiry uses a per-key generation token plus entry identity so an old timer cannot delete a replacement entry.
@@ -46,6 +48,8 @@ Pure policy and merge decisions belong in core modules that can run without Chro
 - `chrome.storage.session`: decrypted API-key cache and ephemeral Focus-group ownership proof; Chrome clears it on browser restart, extension reload, update, or disable.
 - IndexedDB: stashes and their window/tab metadata.
 - Google Drive `drive.file`: profile-scoped canonical sync/settings files plus dated exports.
+
+Drive inventory is fail-closed and fully paginated. The adapter re-reads and validates the persisted profile name, resolves an unambiguous root/profile folder, rejects malformed pages, page-token cycles, unsafe IDs, and partial subfolder listings, then overwrites any remote `scope` field with the authoritative folder scope. Canonical sync/settings files, malformed/undated or unrelated files, young files, cutoff equality, and every newest category tie are outside the deletion set. Archive creation is a precondition for overwriting existing JSON or HTML content.
 
 Credentials, decrypted keys, OAuth tokens, caches, and active Focus Mode state are never included in portable exports.
 

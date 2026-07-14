@@ -54,7 +54,7 @@ Open `manifest.json` and replace the placeholder:
 "oauth2": {
   "client_id": "YOUR_ACTUAL_CLIENT_ID.apps.googleusercontent.com",
   "scopes": [
-    "https://www.googleapis.com/auth/drive.appdata"
+    "https://www.googleapis.com/auth/drive.file"
   ]
 }
 ```
@@ -65,7 +65,7 @@ Open `manifest.json` and replace the placeholder:
 2. Open TabKebab side panel
 3. Go to the sync/settings area and click **Connect Google Drive**
 4. A Google sign-in popup should appear
-5. Grant access to the `drive.appdata` scope
+5. Grant access to the `drive.file` scope
 6. Sync should now work
 
 ## Step 7: Publish the consent screen (before Web Store release)

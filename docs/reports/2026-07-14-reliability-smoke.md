@@ -346,3 +346,65 @@ POST_CLEANUP_XVFB_TCP_LISTENERS=0
 ```
 
 The one-run TLS key/certificate directory, browser profile, Chrome process, Xvfb process, and transient loopback display listener were removed. No browser, display server, fixture server, credential, or disposable profile remained.
+
+---
+
+Slice: Task 6, fail-closed Drive retention
+
+Extension version: `1.2.8`
+
+## Task 6 deterministic evidence
+
+The focused test-first run against the Task 5 tree failed as expected:
+
+```text
+bun test tests/core/drive-retention.test.js tests/integration/drive-cleanup.test.js
+1 pass
+20 fail
+8 expect() calls
+```
+
+The failures exposed the missing retention/formatter modules, unscoped first-page-only inventory, repeated-token acceptance, stale profile cache, swallowed JSON and raw-HTML archive failures, duplicated broad cleanup loops, absent strict guards/day validation, and unchecked SettingsManager responses.
+
+The final focused run reported:
+
+```text
+bun test tests/core/drive-retention.test.js tests/integration/drive-cleanup.test.js
+40 pass
+0 fail
+324 expect() calls
+```
+
+Coverage includes all 11 bounded normal/archive categories, exact embedded calendars/times/milliseconds and wrong scopes, every newest tie, offset-equivalent timestamps, cutoff equality, stable ordering and duplicate IDs, canonical/undated/malformed protection, complete paginated inventory, ambiguous and corrupted Drive state, zero-delete failure paths, partial deletion, actual scheduled/manual entry points, checked SettingsManager feedback, stale-profile prevention, and archive-before-overwrite failure.
+
+The final repository gates reported:
+
+```text
+bun test
+274 pass, 0 fail, 1170 expect() calls
+
+bun test --coverage
+274 pass, 0 fail, 1170 expect() calls
+all files: 42.52% functions, 47.01% lines
+core/drive-retention.js: 100.00% functions, 98.17% lines
+
+bun test tests/syntax.test.js
+2 pass, 0 fail, 84 expect() calls
+
+git diff --check
+exit 0
+```
+
+## Task 6 real Chrome/Drive boundary
+
+**BLOCKED — no live Drive claim was made.** The credential-safe preflight could not establish the prerequisite disposable OAuth boundary:
+
+- `manifest.json` contains the production OAuth client and has no manifest `key`, so a disposable unpacked checkout does not have a pinned development extension ID;
+- no registered disposable development OAuth client or approved pinned development ID is available in the checkout;
+- a fresh disposable Chrome profile has no authenticated test-user session, and no credential-safe autonomous authorization procedure is available.
+
+Because the unpacked ID could not be authenticated against a registered development client, the run stopped before requesting or exposing a token, creating a Drive profile, seeding files, changing `modifiedTime`, or invoking destructive cleanup. Synthetic `fetch` responses are retained only as deterministic adapter tests and are not represented as real-Drive evidence. The mandatory canonical/newest/undated live preservation fixture therefore remains pending.
+
+## Task 6 cleanup
+
+The preflight created no Drive folder or file and launched no Task 6 Chrome/Xvfb process. A host process check found zero command lines matching the Task 6 disposable prefix. There was no OAuth token, browser profile, Drive artifact, fixture server, or display process to remove.

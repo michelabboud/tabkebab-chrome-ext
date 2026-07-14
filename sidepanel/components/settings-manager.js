@@ -3,10 +3,19 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
+import { sendOrThrow } from '../message-client.js';
+import { formatDriveCleanupResult } from '../drive-cleanup-result.js';
 
 export class SettingsManager {
-  constructor(rootEl) {
+  constructor(rootEl, {
+    send = sendOrThrow,
+    confirm = showConfirm,
+    notify = showToast,
+  } = {}) {
     this.root = rootEl;
+    this.sendMessage = send;
+    this.confirm = confirm;
+    this.notify = notify;
 
     // Collect all setting inputs by data-setting attribute
     this.inputs = rootEl.querySelectorAll('[data-setting]');
@@ -148,10 +157,23 @@ export class SettingsManager {
 
   async cleanDriveFiles() {
     const daysInput = this.root.querySelector('#drive-cleanup-days');
-    const days = Number(daysInput?.value) || 30;
     const btn = this.root.querySelector('#btn-clean-drive');
+    const rawDays = daysInput?.value;
+    const normalizedDays = typeof rawDays === 'string' ? rawDays.trim() : '';
+    const days = Number(normalizedDays);
 
-    const ok = await showConfirm({
+    if (
+      normalizedDays === '' ||
+      !/^\d+$/.test(normalizedDays) ||
+      !Number.isInteger(days) ||
+      days < 1 ||
+      days > 365
+    ) {
+      this.notify('Cleanup days must be a whole number from 1 to 365', 'error');
+      return;
+    }
+
+    const ok = await this.confirm({
       title: 'Clean Drive files?',
       message: `Delete Drive files older than ${days} days? This cannot be undone.`,
       confirmLabel: 'Delete',
@@ -166,9 +188,10 @@ export class SettingsManager {
 
     try {
       const result = await this.send({ action: 'cleanDriveFiles', days });
-      showToast(`Deleted ${result.deleted} old Drive files`, 'success');
+      const feedback = formatDriveCleanupResult(result);
+      this.notify(feedback.message, feedback.type);
     } catch (err) {
-      showToast('Cleanup failed: ' + err.message, 'error');
+      this.notify('Cleanup failed: ' + (err?.message || String(err)), 'error');
     }
 
     if (btn) {
@@ -223,6 +246,6 @@ export class SettingsManager {
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return (this.sendMessage || sendOrThrow)(msg);
   }
 }

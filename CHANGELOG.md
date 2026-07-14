@@ -4,6 +4,29 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.8] — 2026-07-14
+
+### Added
+
+- A pure, bounded Drive-retention policy covering every dated session, stash, bookmark, portable-export, and archive family, with exact UTC calendar/time validation and stable newest-per-category selection.
+- Regression coverage for all 11 retention categories, pagination and scope authority, cutoff equality and newest ties, corrupted inventory/guards/profile state, partial deletion, archive failure, checked UI feedback, and actual scheduled/manual worker entry points.
+
+### Changed
+
+- Scheduled and manual cleanup now use one fail-closed coordinator. Inventory and selection finish before deletion; individual deletion failures continue deterministically and return only plain counted results.
+- Drive inventory follows every page, assigns authoritative profile/subfolder scope, rejects ambiguous folders and malformed pages, and re-reads a strictly validated profile name before each operation.
+- Cleanup UI uses the checked runtime-message boundary, validates retention days as an integer from 1 through 365, reports protected canonical/newest/undated counts, and treats partial or malformed results as failure.
+
+### Fixed
+
+- Canonical sync/settings files, unrelated or malformed files, young recoverable copies, and every newest tie in each bounded category can no longer be selected by age-only Drive cleanup.
+- Archive-copy failure now aborts both JSON and raw-HTML overwrite paths before canonical content can be patched.
+- Empty or malformed OAuth tokens and invalid Drive IDs fail before a Drive request; profile changes cannot reuse a stale cached folder.
+
+### Verification note
+
+- Deterministic focused and full Bun gates pass. The mandatory live Drive fixture gate remains blocked because this checkout has the production OAuth client, no manifest key that pins an unpacked development ID, no registered disposable development client, and no credential-safe authenticated test-user session. No mock is represented as live-Drive evidence.
+
 ## [1.2.7] — 2026-07-14
 
 ### Added

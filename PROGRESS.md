@@ -2,11 +2,12 @@
 
 ## Current state
 
-- Repository version: `1.2.7`
+- Repository version: `1.2.8`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–5 complete; restoration safety, run-bound Focus lifecycle, exact host filtering, and hash-safe duplicate Undo established
+- Implementation status: Tasks 1–6 implemented; restoration, Focus lifecycle, exact-host/duplicate Undo, and fail-closed Drive retention established
+- Phase 1 release status: implementation and deterministic gates complete; mandatory real Chrome/Drive fixture proof and controller-owned `v1.2.8` release remain pending because disposable OAuth cannot be established safely in this checkout
 
 ## Completed implementation slices
 
@@ -52,6 +53,15 @@
 - Kept opaque-origin Chrome pages distinct and excluded inactive Chrome new-tab pages from both duplicate and empty-page cleanup.
 - Added 30 focused regression tests and real Chrome 148 evidence proving exact/subdomain preview identity, both hostile-lookalike rejections, three distinct duplicate groups, exact close/Undo counts for two hash routes, and new-tab survival.
 
+### Task 6 — Fail-closed Drive retention (`1.2.8`)
+
+- Added exact classification for the 11 bounded dated recoverable-copy categories and stable selection that protects canonical sync/settings files, every newest tie, cutoff-equal/young files, malformed or unrelated files, and invalid metadata.
+- Made profile-root and subfolder inventory fully paginated and authoritatively scope-annotated; malformed pages, repeated tokens, unsafe IDs, ambiguous folders, corrupted profile names, and incomplete subfolder listings abort before deletion.
+- Routed scheduled and manual retention through one injectable coordinator that completes selection before destructive work, deduplicates file IDs, continues individual failures, and returns only serializable counts and plain errors.
+- Made archive-before-overwrite fail closed for JSON and raw HTML, removed stale profile-name caching, and required a non-empty OAuth token before the first Drive request.
+- Switched Settings cleanup to `sendOrThrow()`, strict `1..365` day validation, checked result-shape formatting, protected-file counts, and failure-only feedback for partial/returned/transport errors.
+- Added focused coverage across all 11 categories plus actual worker and SettingsManager entry points. The live Drive fixture remains honestly blocked by the production-client/unpinned-unpacked-ID OAuth configuration; no synthetic response is claimed as that proof.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -80,4 +90,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Task 6 restricts Google Drive retention cleanup to dated recoverable copies and preserves canonical sync/settings files.
+Provide a registered disposable development OAuth client (or an approved pinned development extension ID) and an authenticated disposable test-user session, then run and clean up the Task 6 real-Drive fixture. Only after that proof may the controller mark Phase 1 complete and publish `v1.2.8`.
