@@ -18,6 +18,10 @@ All notable changes to TabKebab are documented in this file.
 - Documented the automated commands and the boundary between mocked orchestration and mandatory real-Chrome verification.
 - Ignored generated Bun coverage output while retaining test evidence reports.
 
+### Fixed
+
+- Made Chrome-mock replacement teardown deterministic, bound controls to their owning harness, cloned runtime-handler messages in both directions, and preserved original tab indexes in move events.
+
 ## [1.2.2] — 2026-07-14
 
 ### Added

@@ -1,4 +1,5 @@
 const eventListeners = new WeakMap();
+const runtimePortControls = new WeakMap();
 
 let activeHarness = null;
 
@@ -91,7 +92,29 @@ export function createRuntimePortPair(name = 'test-port') {
     disconnect: disconnectPair,
   };
 
-  return { clientPort, workerPort };
+  const pair = { clientPort, workerPort };
+  runtimePortControls.set(pair, {
+    invalidate() {
+      disconnected = true;
+    },
+  });
+  return pair;
+}
+
+function discardActiveHarness() {
+  if (!activeHarness) return;
+
+  const harness = activeHarness;
+  for (const connection of harness.connections) {
+    runtimePortControls.get(connection)?.invalidate();
+  }
+  for (const event of harness.events) clearEvent(event);
+  if (harness.hadChrome) {
+    globalThis.chrome = harness.previousChrome;
+  } else {
+    delete globalThis.chrome;
+  }
+  activeHarness = null;
 }
 
 function createCalls() {
@@ -225,7 +248,7 @@ function wildcardMatches(value, pattern) {
 }
 
 export function installChromeMock(overrides = {}) {
-  resetChromeMock();
+  discardActiveHarness();
 
   const {
     local = {},
@@ -269,7 +292,7 @@ export function installChromeMock(overrides = {}) {
     },
   };
 
-  activeHarness = {
+  const harness = {
     calls,
     events: new Set(),
     hadChrome,
@@ -279,6 +302,7 @@ export function installChromeMock(overrides = {}) {
     runtimeHandler,
     connections: new Set(),
   };
+  activeHarness = harness;
 
   for (const seededWindow of windows) {
     const id = seededWindow.id ?? nextId(state.windows);
@@ -508,11 +532,15 @@ export function installChromeMock(overrides = {}) {
       record('runtime', 'sendMessage', args);
       failOnce('runtime.sendMessage', args);
       const message = args.length > 1 && typeof args[0] === 'string' ? args[1] : args[0];
-      if (activeHarness.runtimeHandler) {
-        return activeHarness.runtimeHandler(message, {
-          id: runtime.id,
-          url: runtime.getURL('sidepanel/panel.html'),
-        });
+      if (harness.runtimeHandler) {
+        const response = await harness.runtimeHandler(
+          clone(message),
+          {
+            id: runtime.id,
+            url: runtime.getURL('sidepanel/panel.html'),
+          },
+        );
+        return clone(response);
       }
 
       let response;
@@ -542,12 +570,15 @@ export function installChromeMock(overrides = {}) {
     },
 
     connect(...args) {
+      if (activeHarness !== harness) {
+        throw new Error('Chrome mock harness is no longer active');
+      }
       record('runtime', 'connect', args);
       failOnce('runtime.connect', args);
       const connectInfo =
         args.length > 1 && typeof args[0] === 'string' ? args[1] : args[0] ?? {};
       const pair = createRuntimePortPair(connectInfo.name ?? '');
-      activeHarness.connections.add(pair);
+      harness.connections.add(pair);
       void runtime.onConnect.dispatch(pair.workerPort);
       return pair.clientPort;
     },
@@ -717,6 +748,7 @@ export function installChromeMock(overrides = {}) {
       failOnce('tabs.move', [tabIds, moveProperties]);
       const requested = Array.isArray(tabIds) ? tabIds : [tabIds];
       const moving = requested.map(findTab);
+      const originalIndexes = new Map(moving.map((tab) => [tab.id, tab.index]));
       const affectedWindows = new Set(moving.map(({ windowId }) => windowId));
       const destinationWindowId = moveProperties.windowId ?? moving[0].windowId;
       findWindow(destinationWindowId);
@@ -744,7 +776,7 @@ export function installChromeMock(overrides = {}) {
         moving.map((tab) =>
           tabsApi.onMoved.dispatch(tab.id, {
             windowId: destinationWindowId,
-            fromIndex: tab.index,
+            fromIndex: originalIndexes.get(tab.id),
             toIndex: tab.index,
           }),
         ),
@@ -1226,7 +1258,7 @@ export function installChromeMock(overrides = {}) {
       if (handler !== null && typeof handler !== 'function') {
         throw new TypeError('Runtime handler must be a function or null');
       }
-      activeHarness.runtimeHandler = handler;
+      harness.runtimeHandler = handler;
     },
     snapshot,
     connect(name = 'test-port') {

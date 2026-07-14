@@ -50,6 +50,51 @@ describe('Chrome mock harness', () => {
     expect(() => previousWorkerPort.postMessage({ stale: true })).toThrow('disconnected');
   });
 
+  test('install cannot expose a replacement harness to prior asynchronous teardown', async () => {
+    const firstHarness = installChromeMock();
+    const clientPort = firstHarness.connect('async-teardown');
+    clientPort.onDisconnect.addListener(async () => {
+      await Promise.resolve();
+      await chrome.storage.local.set({ leakedFromPriorHarness: true });
+    });
+
+    const replacementHarness = installChromeMock();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(replacementHarness.snapshot().local).toEqual({});
+  });
+
+  test('stale harness controls cannot replace the active runtime handler', async () => {
+    const staleHarness = installChromeMock({
+      runtimeHandler: () => ({ owner: 'first' }),
+    });
+    installChromeMock({ runtimeHandler: () => ({ owner: 'current' }) });
+
+    staleHarness.setRuntimeHandler(() => ({ owner: 'stale' }));
+
+    await expect(chrome.runtime.sendMessage({ type: 'owner' })).resolves.toEqual({
+      owner: 'current',
+    });
+  });
+
+  test('runtime handlers receive and return serialized message values', async () => {
+    const callerMessage = { type: 'clone', nested: { owner: 'caller' } };
+    const handlerResponse = { ok: true, nested: { owner: 'handler' } };
+    installChromeMock({
+      runtimeHandler(message) {
+        message.nested.owner = 'mutated by handler';
+        return handlerResponse;
+      },
+    });
+
+    const received = await chrome.runtime.sendMessage(callerMessage);
+    received.nested.owner = 'mutated by caller';
+
+    expect(callerMessage).toEqual({ type: 'clone', nested: { owner: 'caller' } });
+    expect(handlerResponse).toEqual({ ok: true, nested: { owner: 'handler' } });
+  });
+
   test('local and session storage remain separate', async () => {
     await chrome.storage.local.set({ shared: 'local', localOnly: true });
     await chrome.storage.session.set({ shared: 'session', sessionOnly: true });
@@ -145,6 +190,25 @@ describe('Chrome mock harness', () => {
     expect(harness.calls.tabs.create).toHaveLength(1);
     expect(harness.calls.tabs.update).toHaveLength(1);
     expect(harness.calls.tabs.group).toHaveLength(1);
+  });
+
+  test('tabs.move reports the original and destination indexes', async () => {
+    installChromeMock({
+      windows: [{ id: 1, focused: true, state: 'normal', type: 'normal' }],
+      tabs: [
+        { id: 10, windowId: 1, index: 0, url: 'https://one.test/' },
+        { id: 11, windowId: 1, index: 1, url: 'https://two.test/' },
+        { id: 12, windowId: 1, index: 2, url: 'https://three.test/' },
+      ],
+    });
+    const moves = [];
+    chrome.tabs.onMoved.addListener((tabId, moveInfo) => moves.push([tabId, moveInfo]));
+
+    await chrome.tabs.move(10, { index: 2 });
+
+    expect(moves).toEqual([
+      [10, { windowId: 1, fromIndex: 0, toIndex: 2 }],
+    ]);
   });
 
   test('windows.create focuses a new window by default', async () => {
