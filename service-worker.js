@@ -12,7 +12,8 @@ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as delet
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
-import { getCachedFocusState, getFocusState, isBlockedDomain, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles } from './core/focus.js';
+import { getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
+import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
 
 // ── Keep Awake Defaults ──
 
@@ -757,11 +758,19 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Ensure alarms exist (service worker can restart)
 (async () => {
+  // Rebind persisted group titles before any Focus listener can trust runtime IDs.
+  let focusState;
+  try {
+    focusState = await rebindStoredFocusState();
+  } catch (error) {
+    focusState = getCachedFocusState();
+    console.warn('[TabKebab] Focus group rebinding failed during worker startup:', error);
+  }
+
   const alarm = await chrome.alarms.get(ALARM_AUTO_SAVE);
   if (!alarm) await reconfigureAlarms();
 
   // Restore focus alarm + badge if a session was active before SW restart
-  const focusState = await getFocusState();
   if (focusState?.status === 'active') {
     const existing = await chrome.alarms.get(ALARM_FOCUS_TICK);
     if (!existing) await chrome.alarms.create(ALARM_FOCUS_TICK, { periodInMinutes: 1 });
@@ -781,8 +790,10 @@ function notifyPanel() {
 
 // AI-based domain categorization for focus mode
 const aiCheckCache = new Map(); // Cache AI results to avoid repeated calls
-async function checkWithAI(tabId, url, state) {
+async function checkWithAI(tabId, url, state, tabOrUrl = url) {
   try {
+    if (isInternalUrl(tabOrUrl) || isAllowed(tabOrUrl, state?.allowedDomains)) return;
+
     const available = await AIClient.isAvailable();
     if (!available) return;
 
@@ -834,12 +845,12 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     if (state?.status === 'active') {
       // Pass full tab object to check group membership
       const tabWithUrl = { ...tab, url };
-      const result = isBlockedDomain(tabWithUrl, state);
+      const result = evaluateFocusPolicy(tabWithUrl, state);
       if (result.blocked) {
         handleDistraction(tab.id, url, state, result.category);
-      } else if (state.aiBlocking && !result.blocked) {
+      } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
         // Try AI categorization for unknown domains
-        checkWithAI(tab.id, url, state);
+        checkWithAI(tab.id, url, state, tabWithUrl);
       }
     }
   }
@@ -854,12 +865,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const state = getCachedFocusState();
     if (state?.status === 'active') {
       // Pass full tab object to check group membership
-      const result = isBlockedDomain(tab, state);
+      const tabWithUrl = { ...tab, url: changeInfo.url };
+      const result = evaluateFocusPolicy(tabWithUrl, state);
       if (result.blocked) {
         handleDistraction(tabId, changeInfo.url, state, result.category);
-      } else if (state.aiBlocking && !result.blocked) {
+      } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
         // Try AI categorization for unknown domains
-        checkWithAI(tabId, changeInfo.url, state);
+        checkWithAI(tabId, changeInfo.url, state, tabWithUrl);
       }
     }
   }

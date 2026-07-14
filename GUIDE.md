@@ -374,15 +374,20 @@ Before starting, configure:
 
 1. **Duration** — set minutes or check "Open-ended" for unlimited timer
 2. **Tab Action** — what happens to non-focus tabs when you start:
-   - **Kebab** — discard tabs (they stay in tab strip but unload)
-   - **Stash** — save and close tabs (auto-restored when session ends)
-   - **Group** — create a Chrome tab group for focus tabs
+   - **Kebab** — discard background non-focus tabs (they stay in the tab strip but unload); the active tab is never discarded
+   - **Stash** — save and close background non-focus tabs (auto-restored when the session ends); the active tab is never closed
+   - **Group** — create a Chrome tab group containing only eligible focus tabs
    - **None** — monitor only, don't touch tabs
 3. **Blocking Mode**:
-   - **Strict Mode** — only whitelisted domains allowed
+   - **Strict Mode** — only allowlisted entries are permitted. With an empty allowlist, every non-internal URL is blocked.
    - **Curated Categories** — select categories to block (Social, Video, Gaming, News, Shopping, Entertainment)
    - **AI Detection** — AI categorizes unknown domains in real-time
-4. **Allowlist** — add domains, URLs, or Chrome tab groups that are always permitted
+4. **Allowlist** — add entries that are always permitted:
+   - **Domain** — permits the exact host and true subdomains, but not lookalike suffixes
+   - **URL** — permits only the canonical exact URL; path, query, and fragment case is preserved and prefix extensions do not match
+   - **Chrome Group** — stores the group's exact title and rebinds it to every live group with that title when a run starts, the worker restarts, or a paused run resumes. Untitled groups cannot be saved.
+
+Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated.
 
 ### The Focus HUD
 
@@ -432,6 +437,8 @@ TabKebab remembers your choices for each profile:
 - Duration and tab action
 
 Switch profiles and your last configuration is restored.
+
+Chrome-group preferences remain title-only. Numeric Chrome group IDs are runtime data and are never saved as profile authority, so a browser restart cannot accidentally trust an ID that Chrome reused for another group.
 
 ---
 

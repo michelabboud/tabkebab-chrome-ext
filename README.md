@@ -94,10 +94,10 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **4 built-in profiles**: Coding, Writing, Research, Meeting — each with preset allowed/blocked domains
 - **Profile-colored HUD** — timer display glows in profile color (cyan, purple, green, blue)
 - **Distraction blocking** with three modes:
-  - **Strict Mode** — only allowlisted sites accessible
+  - **Strict Mode** — only allowlisted entries are accessible; an empty list blocks every non-internal URL
   - **Curated Categories** — block Social, Video, Gaming, News, Shopping, Entertainment
   - **AI Detection** — AI categorizes unknown domains in real-time
-- **Flexible allowlist** — whitelist domains, specific URLs, or entire Chrome tab groups
+- **Complete allowlist policy** — exact hosts/true subdomains, canonical exact URLs, and Chrome groups rebound by exact title on each run
 - **Tab actions on start** — Kebab, Stash, Group, or monitor-only
 - **Session reports** — stats on duration, distractions blocked, focus tabs
 - **Focus history** — review your last 50 sessions

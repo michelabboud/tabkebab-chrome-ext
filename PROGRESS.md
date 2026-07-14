@@ -2,11 +2,11 @@
 
 ## Current state
 
-- Repository version: `1.2.4`
+- Repository version: `1.2.5`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–2 complete; restore outcomes, recoverable stash retention, and audio-safe discard cleanup established
+- Implementation status: Tasks 1–3 complete; restoration safety and one complete Focus allowlist policy established
 
 ## Completed implementation slices
 
@@ -22,6 +22,13 @@
 - Added the fixed restore outcome and fail-closed stash deletion policy: incomplete outcomes retain the original IndexedDB record unchanged.
 - Limited muting to background discard candidates, unmuted in `finally` after success or failure, retried pending cleanup, and kept the first visible/non-discarding tabs unmuted.
 - Added focused orchestration, handler, audio-order, error-scope, and warning-feedback tests plus redacted Chrome 148 smoke evidence.
+
+### Task 3 — Complete Focus allowlist policy (`1.2.5`)
+
+- Added one pure policy for exact/subdomain host matching, canonical exact URLs, internal-page safety, strict-empty blocking, and exact-title Chrome-group rebinding.
+- Made startup and navigation share `isAllowed()`, limited destructive startup actions to background non-focus tabs, and excluded internal pages from every startup action.
+- Rebound active/paused runtime state at worker initialization and resume, removed stale IDs on lookup failure, and kept profile preferences title-only.
+- Added named pure/startup/worker regression coverage, including group ID `0`, two same-title groups, query failure, URL-prefix rejection, and the AI allowlist gate.
 
 ## Confirmed remediation scope
 
@@ -51,4 +58,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Task 3 applies one complete Focus Mode allowlist policy at startup and navigation time.
+Task 4 binds every asynchronous Focus classification and side effect to its originating run and URL.

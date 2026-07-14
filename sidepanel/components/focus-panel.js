@@ -1,6 +1,7 @@
 // sidepanel/components/focus-panel.js — Focus Mode UI: setup, timer HUD, report, history
 
 import { showToast } from './toast.js';
+import { createAllowlistEntry } from '../../core/focus-policy.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
 
@@ -89,7 +90,7 @@ export class FocusPanel {
             <label class="focus-toggle-row">
               <input type="checkbox" id="focus-strict-mode">
               <span class="focus-toggle-label">Strict Mode</span>
-              <span class="focus-toggle-hint">Block everything except allowed domains</span>
+              <span class="focus-toggle-hint">Block everything except allowed entries</span>
             </label>
             <label class="focus-toggle-row" id="focus-ai-row" hidden>
               <input type="checkbox" id="focus-ai-blocking">
@@ -105,11 +106,12 @@ export class FocusPanel {
 
         <div class="focus-allowlist-section">
           <label class="focus-label">Allowed (whitelist)</label>
-          <p class="focus-hint">Tabs matching these will never be blocked</p>
+          <p class="focus-hint">Domains include true subdomains, URLs are exact, and Chrome groups rebind by exact title at each run.</p>
           <div class="focus-allowlist-tags" id="focus-allowlist-tags"></div>
           <div class="focus-allowlist-add">
             <select id="focus-add-type" class="input focus-add-type-select">
               <option value="domain">Domain</option>
+              <option value="url">URL</option>
               <option value="group">Chrome Group</option>
             </select>
             <input type="text" id="focus-add-value" class="input" placeholder="e.g. github.com">
@@ -159,7 +161,7 @@ export class FocusPanel {
     if (strictCb) strictCb.checked = this._strictMode;
     if (aiCb) aiCb.checked = this._aiBlocking;
 
-    this._loadChromeGroups();
+    await this._loadChromeGroups();
     this._renderAllowlistTags();
     this._renderDomainTags();
     this._renderCategoryChips();
@@ -173,12 +175,14 @@ export class FocusPanel {
       const groups = await chrome.tabGroups.query({});
       this._chromeGroups = groups.map(g => ({
         id: g.id,
-        title: g.title || `Group ${g.id}`,
+        title: g.title || '',
+        displayTitle: g.title || `Group ${g.id} (untitled)`,
         color: g.color,
       }));
       this._updateGroupDropdown();
     } catch {
       this._chromeGroups = [];
+      this._updateGroupDropdown();
     }
   }
 
@@ -188,7 +192,7 @@ export class FocusPanel {
     select.innerHTML = this._chromeGroups.length === 0
       ? '<option value="">No groups available</option>'
       : this._chromeGroups.map(g =>
-          `<option value="${g.id}">${this._esc(g.title)}</option>`
+          `<option value="${g.id}">${this._esc(g.displayTitle)}</option>`
         ).join('');
   }
 
@@ -208,7 +212,13 @@ export class FocusPanel {
 
     // Apply saved preferences
     if (prefs.blockedCategories) this._blockedCategories = [...prefs.blockedCategories];
-    if (prefs.allowlist) this._allowlist = [...prefs.allowlist];
+    if (prefs.allowlist) {
+      this._allowlist = prefs.allowlist.map((entry) => (
+        typeof entry === 'string'
+          ? { type: 'domain', value: entry }
+          : { type: entry.type, value: entry.value }
+      ));
+    }
     if (prefs.blockedDomains) this._blockedDomains = [...prefs.blockedDomains];
     if (prefs.strictMode !== undefined) this._strictMode = prefs.strictMode;
     if (prefs.aiBlocking !== undefined) this._aiBlocking = prefs.aiBlocking;
@@ -225,7 +235,11 @@ export class FocusPanel {
   async _saveProfilePrefs(profileId) {
     const prefs = {
       blockedCategories: this._blockedCategories,
-      allowlist: this._allowlist,
+      allowlist: this._allowlist.map((entry) => (
+        typeof entry === 'string'
+          ? { type: 'domain', value: entry }
+          : { type: entry.type, value: entry.value }
+      )),
       blockedDomains: this._blockedDomains,
       strictMode: this._strictMode,
       aiBlocking: this._aiBlocking,
@@ -241,7 +255,7 @@ export class FocusPanel {
     if (!container) return;
 
     if (this._allowlist.length === 0) {
-      container.innerHTML = '<span class="focus-domain-empty">No items - all domains allowed (use blocklist/categories)</span>';
+      container.innerHTML = '<span class="focus-domain-empty">No items — non-strict allows all; strict blocks every non-internal page.</span>';
       return;
     }
 
@@ -398,7 +412,9 @@ export class FocusPanel {
         const isGroup = addTypeSelect.value === 'group';
         addValueInput.hidden = isGroup;
         addGroupSelect.hidden = !isGroup;
-        addValueInput.placeholder = isGroup ? '' : 'e.g. github.com';
+        addValueInput.placeholder = isGroup
+          ? ''
+          : addTypeSelect.value === 'url' ? 'https://example.com/exact-path' : 'e.g. github.com';
       });
     }
 
@@ -406,21 +422,29 @@ export class FocusPanel {
     const addAllowlistBtn = this.container.querySelector('#btn-add-allowlist');
     addAllowlistBtn?.addEventListener('click', () => {
       const type = addTypeSelect?.value || 'domain';
-      if (type === 'group') {
-        const groupId = parseInt(addGroupSelect?.value);
-        const group = this._chromeGroups.find(g => g.id === groupId);
-        if (group && !this._allowlist.some(e => e.type === 'group' && e.groupId === groupId)) {
-          this._allowlist.push({ type: 'group', value: group.title, groupId });
-          this._renderAllowlistTags();
-        }
-      } else {
-        const val = addValueInput?.value.trim().toLowerCase();
-        if (val && !this._allowlist.some(e => e.type === 'domain' && e.value === val)) {
-          this._allowlist.push({ type: 'domain', value: val });
-          addValueInput.value = '';
-          this._renderAllowlistTags();
-        }
+      const value = type === 'group' ? addGroupSelect?.value : addValueInput?.value;
+      const entry = createAllowlistEntry(type, value, this._chromeGroups);
+      if (!entry) {
+        showToast(
+          type === 'group'
+            ? 'Select a titled Chrome group.'
+            : `Enter a valid ${type === 'url' ? 'absolute URL' : 'domain'}.`,
+          'error',
+        );
+        return;
       }
+
+      const duplicate = this._allowlist.some((candidate) => (
+        candidate?.type === entry.type && candidate?.value === entry.value
+      ));
+      if (duplicate) {
+        showToast('That allowlist entry already exists.', 'error');
+        return;
+      }
+
+      this._allowlist.push(entry);
+      if (type !== 'group') addValueInput.value = '';
+      this._renderAllowlistTags();
     });
 
     // Add blocked domain

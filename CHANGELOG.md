@@ -4,6 +4,27 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.5] — 2026-07-14
+
+### Added
+
+- One pure Focus policy module for legacy/typed domains, canonical exact URLs, Chrome-group title rebinding, internal-page safety, and deterministic block decisions.
+- Focus policy, startup-action, resume, worker-initialization, navigation, AI-gate, and failed-group-query regression coverage.
+- URL entry construction in the Focus panel with visible validation and exact-match guidance.
+
+### Changed
+
+- Focus startup now resolves all live groups with an exact saved title before reading or mutating tabs, then stores numeric IDs only in the active runtime state.
+- Active and paused Focus runs rebind group titles during service-worker initialization and immediately before resume; profile preferences remain title-only.
+- Kebab and stash actions now affect only background non-focus tabs, group action receives only eligible focus tabs, and Chrome/extension pages are excluded from all startup actions.
+
+### Fixed
+
+- Applied the same domain, exact-URL, and rebound-group predicate at startup and navigation time, eliminating URL-prefix and stale scalar-group-ID allowance.
+- Made strict mode with an empty allowlist block every non-internal URL, including hostless and non-HTTP URLs.
+- Removed stale numeric group authority when worker-startup rebinding fails, while preserving the run and title-based preferences for recovery.
+- Prevented AI fallback from classifying internal or explicitly allowed pages.
+
 ## [1.2.4] — 2026-07-14
 
 ### Added

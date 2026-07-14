@@ -24,6 +24,10 @@ Side-panel commands cross one checked runtime-message boundary. Background error
 
 `core/tab-restore.js` is the single session/stash restore coordinator. It clones saved inputs, preserves `{ savedTab, createdTab }` associations across settled batches, returns the fixed outcome from `core/restore-outcome.js`, and owns mute/discard/unmute cleanup. IndexedDB deletion remains in the service-worker boundary and is allowed only for a complete outcome.
 
+`core/focus-policy.js` is the pure source of truth for Focus allowlist construction, runtime Chrome-group rebinding, and deterministic blocking. Startup classification in `core/focus.js` and navigation interception in `service-worker.js` both delegate to its `isAllowed()` predicate. Domain entries match exact hosts or true subdomains, URL entries compare canonical exact URLs, and group preferences contain exact titles only.
+
+Focus startup queries live Chrome groups once before it reads or mutates tabs. The active runtime state receives fresh `groupIds` for every live exact-title match; profile preferences never receive numeric IDs. Active and paused runs rebind during service-worker initialization and immediately before resume. If initialization cannot query groups, persisted runtime IDs are stripped before navigation can use the run, while title preferences and the rest of the run remain recoverable.
+
 Pure policy and merge decisions belong in core modules that can run without Chrome. Chrome API calls remain at explicit adapters and orchestration boundaries.
 
 ## Persistence

@@ -4,7 +4,13 @@ import { Storage } from './storage.js';
 import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs } from './tabs-api.js';
 import { saveStash, restoreStashTabs, getStash } from './stash-db.js';
 import { getProfileById, getAllProfiles } from './focus-profiles.js';
-import { checkAgainstBlocklists, BLOCKLIST_CATEGORIES } from './focus-blocklists.js';
+import {
+  evaluateFocusPolicy,
+  isAllowed,
+  isInternalUrl,
+  rebindFocusAllowlist,
+  resolveGroupAllowlist,
+} from './focus-policy.js';
 
 const FOCUS_STATE_KEY = 'focusState';
 const FOCUS_HISTORY_KEY = 'focusHistory';
@@ -14,8 +20,11 @@ const MAX_HISTORY = 50;
 let _cachedState = null;
 
 // Initialize cache from storage
-(async () => {
-  _cachedState = await Storage.get(FOCUS_STATE_KEY);
+const cacheReady = (async () => {
+  const storedState = await Storage.get(FOCUS_STATE_KEY);
+  _cachedState = storedState && (storedState.status === 'active' || storedState.status === 'paused')
+    ? rebindFocusAllowlist(storedState, [])
+    : storedState;
 })();
 
 // Keep cache in sync with storage changes
@@ -30,12 +39,14 @@ export function getCachedFocusState() {
 }
 
 export async function getFocusState() {
+  await cacheReady;
   const state = await Storage.get(FOCUS_STATE_KEY);
   _cachedState = state;
   return state;
 }
 
 async function saveFocusState(state) {
+  await cacheReady;
   _cachedState = state;
   if (state) {
     await Storage.set(FOCUS_STATE_KEY, state);
@@ -80,71 +91,6 @@ export function formatBadgeTime(ms) {
 // ── Allowlist matching ──
 
 /**
- * Allowlist entry types:
- * - { type: 'domain', value: 'github.com' }
- * - { type: 'url', value: 'https://docs.google.com/...' }
- * - { type: 'group', value: 'Work', groupId: 123 } // Chrome tab group
- * - { type: 'custom', value: 'Project Alpha' } // TabKebab custom group
- *
- * Legacy support: plain strings are treated as domains
- */
-
-function domainMatches(tabUrl, domainList) {
-  if (!domainList || domainList.length === 0) return false;
-  const hostname = extractDomain(tabUrl);
-  if (!hostname || hostname === 'other') return false;
-  return domainList.some(d => {
-    const domain = typeof d === 'string' ? d : (d.type === 'domain' ? d.value : null);
-    if (!domain) return false;
-    return hostname === domain || hostname.endsWith('.' + domain);
-  });
-}
-
-function urlMatches(tabUrl, allowList) {
-  if (!allowList || allowList.length === 0) return false;
-  return allowList.some(entry => {
-    if (typeof entry !== 'object' || entry.type !== 'url') return false;
-    // Exact URL match or prefix match
-    return tabUrl === entry.value || tabUrl.startsWith(entry.value);
-  });
-}
-
-/**
- * Check if a tab is in an allowed Chrome group.
- * @param {Object} tab - Tab object with groupId
- * @param {Array} allowList - Allowlist entries
- * @returns {boolean}
- */
-function groupMatches(tab, allowList) {
-  if (!tab?.groupId || tab.groupId === -1) return false;
-  if (!allowList || allowList.length === 0) return false;
-  return allowList.some(entry => {
-    if (typeof entry !== 'object' || entry.type !== 'group') return false;
-    return entry.groupId === tab.groupId;
-  });
-}
-
-/**
- * Check if tab is allowed by any entry in the allowlist.
- * Supports domains (legacy strings), URLs, Chrome groups.
- */
-function isAllowed(tab, allowList) {
-  if (!allowList || allowList.length === 0) return false;
-  const url = tab?.url || tab;
-
-  // Check domains (including legacy string format)
-  if (domainMatches(url, allowList)) return true;
-
-  // Check exact URLs
-  if (urlMatches(url, allowList)) return true;
-
-  // Check Chrome groups
-  if (typeof tab === 'object' && groupMatches(tab, allowList)) return true;
-
-  return false;
-}
-
-/**
  * Check if a tab/URL should be blocked based on current focus state.
  * Blocking modes (in order of priority):
  * 1. Allowed entries always pass (domains, URLs, groups)
@@ -158,48 +104,7 @@ function isAllowed(tab, allowList) {
  * @returns {{ blocked: boolean, reason: string|null, category: string|null }}
  */
 export function isBlockedDomain(tabOrUrl, state) {
-  const url = typeof tabOrUrl === 'string' ? tabOrUrl : tabOrUrl?.url;
-  const hostname = extractDomain(url);
-
-  if (!hostname || hostname === 'other') {
-    return { blocked: false, reason: null, category: null };
-  }
-
-  // Chrome internal pages are never blocked
-  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
-    return { blocked: false, reason: null, category: null };
-  }
-
-  // 1. Check against allowlist (domains, URLs, groups)
-  if (isAllowed(tabOrUrl, state?.allowedDomains)) {
-    return { blocked: false, reason: null, category: null };
-  }
-
-  // 2. Explicit blocked domains always block
-  if (domainMatches(url, state?.blockedDomains)) {
-    return { blocked: true, reason: 'blocklist', category: 'Blocked Domain' };
-  }
-
-  // 3. Strict mode: block everything not in allowed list
-  if (state?.strictMode) {
-    const hasAllowlist = state?.allowedDomains?.length > 0;
-    if (hasAllowlist) {
-      return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
-    }
-  }
-
-  // 4. Curated categories
-  if (state?.blockedCategories?.length > 0) {
-    const result = checkAgainstBlocklists(hostname, state.blockedCategories);
-    if (result.blocked) {
-      return { blocked: true, reason: 'category', category: result.category };
-    }
-  }
-
-  // 5. AI mode handled separately (async) - return not blocked here
-  // The service worker will call checkWithAI if aiBlocking is enabled
-
-  return { blocked: false, reason: null, category: null };
+  return evaluateFocusPolicy(tabOrUrl, state);
 }
 
 /**
@@ -209,10 +114,12 @@ export function isBlockedDomainSimple(url, state) {
   return isBlockedDomain(url, state).blocked;
 }
 
-function isFocusTab(tab, state) {
-  // Allowed domains means "focus" tabs
-  if (state.allowedDomains.length === 0) return true; // no filter = all are focus
-  return domainMatches(tab.url, state.allowedDomains);
+export function isFocusTab(tab, state) {
+  if (isInternalUrl(tab)) return true;
+  if (!state?.strictMode && (!state?.allowedDomains || state.allowedDomains.length === 0)) {
+    return true;
+  }
+  return isAllowed(tab, state?.allowedDomains);
 }
 
 // ── Badge ──
@@ -256,7 +163,9 @@ export async function startFocus({
   strictMode,
   blockedCategories,
   aiBlocking,
-}) {
+}, {
+  saveStash: persistStash = saveStash,
+} = {}) {
   const profile = getProfileById(profileId);
   const profileName = profile?.name || profileId;
   const profileColor = profile?.color || 'blue';
@@ -283,9 +192,15 @@ export async function startFocus({
     focusTabCount: 0,
   };
 
+  // Resolve group titles before reading or mutating tabs. A failed query must
+  // leave both browser tabs and persisted Focus state untouched.
+  const liveGroups = await chrome.tabGroups.query({});
+  state.allowedDomains = resolveGroupAllowlist(state.allowedDomains, liveGroups);
+
   const allTabs = await getAllTabs({ allWindows: true });
-  const focusTabs = allTabs.filter(t => isFocusTab(t, state) && !t.url.startsWith('chrome://'));
-  const nonFocusTabs = allTabs.filter(t => !isFocusTab(t, state) && !t.active && !t.url.startsWith('chrome://'));
+  const eligibleTabs = allTabs.filter((tab) => !isInternalUrl(tab));
+  const focusTabs = eligibleTabs.filter((tab) => isFocusTab(tab, state));
+  const nonFocusTabs = eligibleTabs.filter((tab) => !isFocusTab(tab, state) && !tab.active);
   state.focusTabCount = focusTabs.length;
 
   // Apply tab action
@@ -308,7 +223,7 @@ export async function startFocus({
       tabCount: stashTabs.length,
       windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
     };
-    await saveStash(stash);
+    await persistStash(stash);
     state.stashId = stashId;
     const closableIds = nonFocusTabs.map(t => t.id);
     if (closableIds.length > 0) await closeTabs(closableIds);
@@ -404,16 +319,43 @@ export async function pauseFocus() {
   return state;
 }
 
+export async function rebindStoredFocusState() {
+  await cacheReady;
+  const state = await Storage.get(FOCUS_STATE_KEY);
+  if (!state || (state.status !== 'active' && state.status !== 'paused')) {
+    _cachedState = state;
+    return state;
+  }
+
+  // Never expose persisted runtime IDs while the current Chrome group query is pending.
+  const sanitized = rebindFocusAllowlist(state, []);
+  _cachedState = sanitized;
+  let liveGroups;
+  try {
+    liveGroups = await chrome.tabGroups.query({});
+  } catch (error) {
+    // Preserve the title preference and run metadata, but remove numeric authority
+    // that cannot be validated in this browser session.
+    await saveFocusState(sanitized);
+    throw error;
+  }
+  const rebound = rebindFocusAllowlist(state, liveGroups);
+  await saveFocusState(rebound);
+  return rebound;
+}
+
 export async function resumeFocus() {
   const state = await getFocusState();
   if (!state || state.status !== 'paused') return null;
-  const pauseDuration = Date.now() - state.pausedAt;
-  state.pausedElapsed += pauseDuration;
-  state.pausedAt = null;
-  state.status = 'active';
-  await updateBadge(state);
-  await saveFocusState(state);
-  return state;
+  const liveGroups = await chrome.tabGroups.query({});
+  const rebound = rebindFocusAllowlist(state, liveGroups);
+  const pauseDuration = Date.now() - rebound.pausedAt;
+  rebound.pausedElapsed += pauseDuration;
+  rebound.pausedAt = null;
+  rebound.status = 'active';
+  await updateBadge(rebound);
+  await saveFocusState(rebound);
+  return rebound;
 }
 
 // ── Extend ──
