@@ -1,6 +1,39 @@
 // core/nl-executor.js — Natural language command filter + execution logic
 
 import { closeTabs, focusTab, createNativeGroup } from './tabs-api.js';
+import { canonicalHostname, hostnameMatches } from './url-match.js';
+
+const FILTER_KEYS = Object.freeze(['domain', 'titleContains', 'urlContains']);
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+
+function isPlainRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+export function isValidTabFilter(filter) {
+  if (!isPlainRecord(filter)) return false;
+
+  let recognized = 0;
+  for (const key of FILTER_KEYS) {
+    if (!hasOwn(filter, key)) continue;
+    recognized++;
+
+    const value = filter[key];
+    if (key === 'domain') {
+      if (!canonicalHostname(value)) return false;
+    } else if (typeof value !== 'string' || value.trim().length === 0) {
+      return false;
+    }
+  }
+
+  return recognized > 0;
+}
 
 /**
  * Filter tabs based on an AI-parsed filter object.
@@ -9,30 +42,28 @@ import { closeTabs, focusTab, createNativeGroup } from './tabs-api.js';
  * @returns {Array} Matching tabs
  */
 export function filterTabs(tabs, filter) {
-  if (!filter || Object.keys(filter).length === 0) return [];
+  if (!Array.isArray(tabs) || !isValidTabFilter(filter)) return [];
+
+  const hasDomain = hasOwn(filter, 'domain');
+  const hasTitle = hasOwn(filter, 'titleContains');
+  const hasUrl = hasOwn(filter, 'urlContains');
+  const titleNeedle = hasTitle ? filter.titleContains.toLowerCase() : '';
+  const urlNeedle = hasUrl ? filter.urlContains.toLowerCase() : '';
 
   return tabs.filter(t => {
-    const url = (t.url || t.pendingUrl || '').toLowerCase();
-    const title = (t.title || '').toLowerCase();
-    let domain = '';
     try {
-      domain = new URL(url).hostname.toLowerCase();
-    } catch { /* ignore */ }
+      const rawUrl = t?.url || t?.pendingUrl || '';
+      const url = typeof rawUrl === 'string' ? rawUrl.toLowerCase() : '';
+      const title = typeof t?.title === 'string' ? t.title.toLowerCase() : '';
 
-    if (filter.domain) {
-      const fd = filter.domain.toLowerCase();
-      if (!domain.includes(fd)) return false;
+      if (hasDomain && !hostnameMatches(rawUrl, filter.domain)) return false;
+      if (hasTitle && !title.includes(titleNeedle)) return false;
+      if (hasUrl && !url.includes(urlNeedle)) return false;
+      return true;
+    } catch (error) {
+      if (error instanceof TypeError) return false;
+      throw error;
     }
-
-    if (filter.titleContains) {
-      if (!title.includes(filter.titleContains.toLowerCase())) return false;
-    }
-
-    if (filter.urlContains) {
-      if (!url.includes(filter.urlContains.toLowerCase())) return false;
-    }
-
-    return true;
   });
 }
 
@@ -43,7 +74,9 @@ export function filterTabs(tabs, filter) {
  * @returns {Promise<Object>} Result with { executed, message } or { error }
  */
 export async function executeNLAction(parsed, tabs) {
-  const tabIds = parsed.tabIds || tabs.map(t => t.id);
+  const tabIds = Array.isArray(tabs)
+    ? tabs.map((tab) => tab?.id).filter((tabId) => Number.isInteger(tabId))
+    : [];
 
   switch (parsed.action) {
     case 'close':

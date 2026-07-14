@@ -4,6 +4,25 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.7] — 2026-07-14
+
+### Added
+
+- Exact-host and true-subdomain URL helpers plus regression coverage for malformed/present-invalid filters, hostile lookalikes, trailing-dot hosts, and destructive-command tab authority.
+- Hash-route restoration and lossless duplicate-Undo coverage for sessions, stashes, and Chrome-rendered production Duplicates panel DOM/events.
+
+### Changed
+
+- Natural-language close previews and confirmations now re-query live tabs, reapply the original filter, and intersect with preview-approved IDs before execution.
+- Destructive title filters now fail closed while a tab has a pending destination because Chrome still exposes the committed page's stale title until navigation settles.
+- Duplicate groups retain each tab's exact original URL, and bulk-close Undo snapshots those URLs before the first close or rescan.
+
+### Fixed
+
+- Prevented `github.com` filters from matching suffix or sibling lookalikes such as `notgithub.com` and `github.com.evil.test`.
+- Preserved URL fragments during duplicate grouping and restore duplicate checks, so distinct hash routes no longer collapse together or reopen as a normalized surrogate.
+- Kept opaque-origin Chrome pages distinct and excluded Chrome new-tab pages from duplicate and empty-page cleanup.
+
 ## [1.2.6] — 2026-07-14
 
 ### Added

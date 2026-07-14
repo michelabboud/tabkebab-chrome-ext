@@ -163,15 +163,18 @@ The **Duplicates** sub-tab shows a **red badge** on the tab button with the curr
 Click **Scan for Duplicates** to refresh the list. Results show:
 - Number of duplicates found per URL
 - Each duplicate group with checkboxes (first tab marked "KEEP", rest pre-checked for closing)
-- **Close** button per tab or **Close All Duplicates** for bulk removal with undo support
+- **Close** button per tab or **Close All Duplicates** for bulk removal with lossless undo from each selected tab's exact original URL
 - Badge resets to zero when all duplicates are resolved
+
+URL fragments are part of duplicate identity. For example, `https://app.test/#/one` and `https://app.test/#/two` are different pages, while two exact copies of either route form their own duplicate group. **Undo** reopens the exact captured URLs, including query strings and fragments.
 
 ### Empty Pages
 
 Above the duplicate list, an **Empty Pages** row appears if any blank tabs are detected. Empty pages include:
 - `about:blank` tabs
-- `chrome://newtab` pages
 - Tabs with no URL
+
+Chrome's `chrome://newtab` and `chrome://new-tab-page` pages are intentionally preserved and are not offered as duplicate or empty-page cleanup targets.
 
 Click **Close Empty Pages** to remove them all at once. The badge count includes both duplicates and empty pages.
 
@@ -513,9 +516,10 @@ Type natural language instructions like:
 
 ### How It Works
 
-1. Your command and current tab list (titles + URLs) are sent to the AI provider
-2. The AI returns structured actions (close, group, move, etc.)
-3. TabKebab executes the actions and shows results in the command bar
+1. Your command and current tab list (titles + URLs) are sent to the AI provider.
+2. The AI returns structured actions (close, group, move, etc.). Domain filters match only the exact host and true subdomains: `github.com` includes `docs.github.com`, but not `notgithub.com` or `github.com.evil.test`.
+3. A close action shows a confirmation preview. At confirmation, TabKebab queries the live tabs again, reapplies the original filter, and can only narrow the preview-approved IDs; a tab that navigated away is not closed. A title-based close also waits for any pending navigation to settle instead of trusting the previous page's stale title.
+4. TabKebab executes the validated action and shows results in the command bar.
 
 Commands never send page content, cookies, passwords, or browsing history — only tab titles and URLs.
 

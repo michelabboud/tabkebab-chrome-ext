@@ -258,3 +258,91 @@ POST_CLEANUP_XVFB_TCP_LISTENERS=0
 An earlier harness attempt could not bind a Unix X socket because the host's shared `/tmp/.X11-unix` directory mode was not `1777`; it reached no Chrome or application boundary and supplied no evidence. Its uniquely named empty profile and Xvfb process were removed before the successful loopback-TCP Xvfb run. No Task 4 Chrome process, X server, listener, or disposable profile was left running.
 
 This rerun covered repair commit `9dc947050c6b5dca1aac612db22560c65e5eba4b`. The subsequent independent-review repair is limited to injected Chrome-group metadata, rollback, session-cleanup, and local-authority-write failure branches; it does not change the successful delayed-classification path above. Per controller direction, Chrome was not relaunched for those synthetic failure branches; deterministic Chrome-mock tests verify their tab mutation, cache, storage, and aggregate-error outcomes.
+
+---
+
+Slice: Task 5, exact host identity and lossless duplicate Undo
+
+Extension version: `1.2.7`
+
+## Task 5 browser and provider boundary
+
+The Task 5 smoke used the installed official Chrome for Testing build and the actual unpacked extension:
+
+```text
+Google Chrome for Testing 148.0.7778.96
+binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
+Xvfb :[redacted] -screen 0 1280x900x24 -nolisten unix -listen tcp -ac
+DISPLAY=127.0.0.1:[redacted].0
+/home/michel/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome \
+  --user-data-dir=/tmp/tabkebab-task5.[redacted] \
+  --disable-extensions-except=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
+  --load-extension=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
+  --remote-debugging-port=0 --remote-allow-origins=* \
+  --no-proxy-server --ignore-certificate-errors --allow-insecure-localhost \
+  --host-resolver-rules=[five exact synthetic hosts mapped to 127.0.0.1] \
+  --no-first-run --no-default-browser-check about:blank
+```
+
+A disposable Bun HTTPS fixture listened only on `127.0.0.1` with a one-run self-signed certificate. Exact fixture host mappings sent `github.com`, `docs.github.com`, `notgithub.com`, `github.com.evil.test`, and `app.test` to that loopback server without using the public network. The production custom-provider request received an explicitly synthetic OpenAI-compatible parsed close command for `{ domain: "github.com" }`; no credential or external model was used.
+
+The harness opened the production `sidepanel/panel.html` document as an extension tab through CDP; it did not invoke Chrome's side-panel host container. This validates the real Manifest V3 worker, AI client/custom-provider request, natural-language preview, Chrome tab APIs, production duplicate-panel DOM/events, close, toast callback, and reopen boundary. It does not validate side-panel host-container behavior, external-provider availability, authentication, latency, or command quality.
+
+The final recorded run loaded the exact `1.2.7` bytes after the pre-commit repair that makes destructive title predicates fail closed while a destination URL is pending. The worker-level regression directly exercises that stale-title branch; this browser rerun confirms the repaired final tree still passes the bounded production preview/UI/tab boundary.
+
+## Task 5 redacted results
+
+The natural-language close preview contained only the exact host and true subdomain fixture IDs:
+
+```json
+{
+  "exactAccepted": true,
+  "subdomainAccepted": true,
+  "suffixLookalikeRejected": true,
+  "siblingLookalikeRejected": true,
+  "previewCount": 2
+}
+```
+
+The production Duplicates sub-tab in that panel document and an explicit **Scan for Duplicates** click produced three independent groups: one ordinary URL, `#/one`, and `#/two`. Each group began with exactly two tabs and one selected duplicate. Its production **Close All Duplicates** control reduced every exact URL count to one, and the eight-second **Undo** toast restored every count to two:
+
+```json
+{
+  "groupCount": 3,
+  "selectedDuplicateCount": 3,
+  "countsAfterClose": {
+    "ordinary": 1,
+    "routeOne": 1,
+    "routeTwo": 1
+  },
+  "countsAfterUndo": {
+    "ordinary": 2,
+    "routeOne": 2,
+    "routeTwo": 2
+  }
+}
+```
+
+Two inactive `chrome://newtab/` tabs remained live throughout the scan, close, and Undo. Neither ID appeared in the direct duplicate groups, direct empty-page result, or selected UI IDs; the Empty Pages row remained hidden with count zero.
+
+## Task 5 cleanup
+
+The harness itself reported:
+
+```text
+DISPOSABLE_PROFILE_ENTRIES_BEFORE_CLEANUP=247
+CLEANUP_PROFILE_REMOVED=1
+CLEANUP_TLS_REMOVED=1
+CLEANUP_CHROME_PROCESS_EXITED=1
+CLEANUP_XVFB_PROCESS_EXITED=1
+```
+
+A separate post-run host audit checked the disposable `/tmp/tabkebab-task5.*` paths, matching Chrome/Xvfb process command lines, and the claimed Xvfb TCP port with `find`, `ps`, and `ss`. It reported:
+
+```text
+POST_CLEANUP_MATCHING_PROFILE_PATHS=0
+POST_CLEANUP_MATCHING_CHROME_OR_XVFB_PROCESSES=0
+POST_CLEANUP_XVFB_TCP_LISTENERS=0
+```
+
+The one-run TLS key/certificate directory, browser profile, Chrome process, Xvfb process, and transient loopback display listener were removed. No browser, display server, fixture server, credential, or disposable profile remained.

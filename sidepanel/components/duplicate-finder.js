@@ -1,6 +1,7 @@
 // duplicate-finder.js — Scan and close duplicate tabs + empty pages
 
 import { showToast } from './toast.js';
+import { collectUndoUrls } from '../../core/duplicates.js';
 
 export class DuplicateFinder {
   constructor(rootEl) {
@@ -164,14 +165,7 @@ export class DuplicateFinder {
     }
 
     // Capture URLs before closing so undo can reopen them
-    const closedUrls = [];
-    for (const group of this.duplicates) {
-      for (const tab of group.tabs) {
-        if (tabIds.includes(tab.id) && tab.url) {
-          closedUrls.push(tab.url);
-        }
-      }
-    }
+    const closedUrls = Object.freeze(collectUndoUrls(this.duplicates, tabIds));
 
     try {
       await this.send({ action: 'closeTabs', tabIds });

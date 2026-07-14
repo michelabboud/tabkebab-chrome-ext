@@ -34,8 +34,9 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Drag-and-drop** tab reordering within and across groups
 - **Close, pin, discard, or move** individual tabs from the side panel
 - **Tab count badges** per window with color-coded thresholds (green / yellow / red)
-- **Duplicate detection** with badge counter, periodic background scanning (every 60s), and bulk close with undo
-- **Empty pages cleanup** — find and close blank tabs (about:blank, new tab pages) from the Duplicates view
+- **Hash-aware duplicate detection** with badge counter, periodic background scanning (every 60s), and bulk close with lossless undo from each tab's exact original URL
+- **Empty pages cleanup** — find and close blank tabs (`about:blank` or missing URLs) while preserving Chrome's new-tab pages
+- **Safe AI domain commands** — match only an exact host or its true subdomains, reject lookalike hosts, and revalidate live tabs before a confirmed close
 - **Global stats bar** — always-visible bar showing Windows, Tabs, and Active/Kebab percentage
 
 ### Tab Grouping

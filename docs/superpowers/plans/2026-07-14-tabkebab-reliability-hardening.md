@@ -384,18 +384,18 @@ export function hostnameMatches(url, expectedHost) {
 export function collectUndoUrls(duplicateGroups, closingTabIds);
 ```
 
-- [ ] Write NL filter tests first for exact host, subdomain, uppercase input, trailing-dot input, `notgithub.com` rejection, `github.com.evil.test` rejection, malformed URL rejection, and missing domain filter behavior.
-- [ ] Write duplicate tests first. Assert `https://app.test/#/one` and `https://app.test/#/two` normalize to different keys, ordinary fragments also remain distinct, existing query/trailing-slash normalization stays stable, and every duplicate tab record includes its original `url`.
-- [ ] In `tests/integration/hash-route-restore.test.js`, add one session and one stash case with hash route one already open and hash route two saved. Assert route two is restored rather than counted as a duplicate in both coordinators.
-- [ ] Add a pure test for `core/duplicates.js::collectUndoUrls(duplicateGroups, closingTabIds)`, asserting it returns each selected tab's original URL in group/tab order and excludes absent/non-string values.
-- [ ] Run `bun test tests/core/nl-executor.test.js tests/core/duplicates.test.js tests/integration/hash-route-restore.test.js` and preserve failures from `hostname.includes()`, hash stripping, omitted duplicate URLs, and false duplicate restore skips.
-- [ ] Implement `core/url-match.js`. Catch `TypeError` in the caller and treat malformed values as non-matches; do not fall back to substring matching.
-- [ ] Update `filterTabs()` to use `hostnameMatches()` only when a domain filter is present.
-- [ ] Stop deleting URL fragments in `normalizeUrl()`. Keep every tab's original URL in the objects returned by `findDuplicates()`; the normalized URL remains only the grouping key.
-- [ ] Export and use `collectUndoUrls()` from `core/duplicates.js`. Capture the original URLs before sending the close request or triggering a rescan, then store that immutable array for Undo. Do not reconstruct URLs from the normalized group key.
-- [ ] Run `bun test tests/core/nl-executor.test.js tests/core/duplicates.test.js tests/integration/hash-route-restore.test.js`, then the full three-command gate.
-- [ ] In real Chrome, preview an NL close for `github.com` with `notgithub.com` open, then run duplicate cleanup and Undo with two hash routes. Confirm the lookalike and both routes survive/reopen correctly; append evidence.
-- [ ] Update `GUIDE.md`, then close the task using the global chain.
+- [x] Write NL filter tests first for exact host, subdomain, uppercase input, trailing-dot input, `notgithub.com` rejection, `github.com.evil.test` rejection, malformed URL rejection, and missing domain filter behavior.
+- [x] Write duplicate tests first. Assert `https://app.test/#/one` and `https://app.test/#/two` normalize to different keys, ordinary fragments also remain distinct, existing query/trailing-slash normalization stays stable, and every duplicate tab record includes its original `url`.
+- [x] In `tests/integration/hash-route-restore.test.js`, add one session and one stash case with hash route one already open and hash route two saved. Assert route two is restored rather than counted as a duplicate in both coordinators.
+- [x] Add a pure test for `core/duplicates.js::collectUndoUrls(duplicateGroups, closingTabIds)`, asserting it returns each selected tab's original URL in group/tab order and excludes absent/non-string values.
+- [x] Run `bun test tests/core/nl-executor.test.js tests/core/duplicates.test.js tests/integration/hash-route-restore.test.js` and preserve failures from `hostname.includes()`, hash stripping, omitted duplicate URLs, and false duplicate restore skips.
+- [x] Implement `core/url-match.js`. Catch `TypeError` in the caller and treat malformed values as non-matches; do not fall back to substring matching.
+- [x] Update `filterTabs()` to use `hostnameMatches()` only when a domain filter is present.
+- [x] Stop deleting URL fragments in `normalizeUrl()`. Keep every tab's original URL in the objects returned by `findDuplicates()`; the normalized URL remains only the grouping key.
+- [x] Export and use `collectUndoUrls()` from `core/duplicates.js`. Capture the original URLs before sending the close request or triggering a rescan, then store that immutable array for Undo. Do not reconstruct URLs from the normalized group key.
+- [x] Run `bun test tests/core/nl-executor.test.js tests/core/duplicates.test.js tests/integration/hash-route-restore.test.js`, then the full three-command gate.
+- [x] In real Chrome, preview an NL close for `github.com` with `notgithub.com` open, then run duplicate cleanup and Undo with two hash routes. Confirm the lookalike and both routes survive/reopen correctly; append evidence.
+- [x] Update `GUIDE.md`, then close the task using the global chain.
 
 ### Task 6: Restrict Drive retention to dated recoverable copies
 

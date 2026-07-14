@@ -2,11 +2,11 @@
 
 ## Current state
 
-- Repository version: `1.2.6`
+- Repository version: `1.2.7`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–4 complete; restoration safety, unified Focus policy, and run-bound asynchronous Focus lifecycle established
+- Implementation status: Tasks 1–5 complete; restoration safety, run-bound Focus lifecycle, exact host filtering, and hash-safe duplicate Undo established
 
 ## Completed implementation slices
 
@@ -44,6 +44,14 @@
 - Deduplicated history by run ID and durably merged teardown, state-removal, and recovery failures; Pause, Resume, and Extend now return only a final matching durable state after badge work.
 - Added lifecycle, AI, delayed-navigation, ownership-failure, side-panel event, and real Chrome 148 CDP-synthetic delayed-provider evidence for pause, pause→resume, end plus replacement, and navigation-away.
 
+### Task 5 — Exact host identity and lossless duplicate Undo (`1.2.7`)
+
+- Replaced substring domain matching with canonical exact-host/true-subdomain identity, including case and trailing-dot normalization, while malformed and present-invalid filter values fail closed.
+- Re-query and re-filter destructive natural-language close actions after AI parsing and again at confirmation; execution derives IDs only from the sanitized live tab array and never expands beyond the preview.
+- Preserved fragments in duplicate keys and restore duplicate checks, retained each duplicate tab's original URL, and captured an immutable ordered Undo snapshot before close/rescan.
+- Kept opaque-origin Chrome pages distinct and excluded inactive Chrome new-tab pages from both duplicate and empty-page cleanup.
+- Added 30 focused regression tests and real Chrome 148 evidence proving exact/subdomain preview identity, both hostile-lookalike rejections, three distinct duplicate groups, exact close/Undo counts for two hash routes, and new-tab survival.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -72,4 +80,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Task 5 makes natural-language host matching exact and duplicate Undo lossless.
+Task 6 restricts Google Drive retention cleanup to dated recoverable copies and preserves canonical sync/settings files.

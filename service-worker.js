@@ -6,7 +6,7 @@ import { saveSession, restoreSession, listSessions, deleteSession } from './core
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
 import { Prompts } from './core/ai/prompts.js';
-import { filterTabs, executeNLAction } from './core/nl-executor.js';
+import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
@@ -947,6 +947,43 @@ export async function applyStashRestoreDisposition(
   return { deleted: false, markedRestored: false };
 }
 
+function isPlainRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+function filterDestructiveTabs(tabs, filter) {
+  const hasTitlePredicate = isPlainRecord(filter) &&
+    Object.prototype.hasOwnProperty.call(filter, 'titleContains');
+  const navigationSafeTabs = [];
+  for (const tab of tabs) {
+    const pendingUrl = typeof tab?.pendingUrl === 'string' ? tab.pendingUrl.trim() : '';
+    if (!pendingUrl) {
+      navigationSafeTabs.push(tab);
+      continue;
+    }
+    // Chrome exposes the destination URL during navigation but retains the
+    // committed page title. Destructive title predicates therefore have no
+    // authoritative value to evaluate until navigation settles.
+    if (hasTitlePredicate) continue;
+    navigationSafeTabs.push({ ...tab, url: pendingUrl, pendingUrl: '' });
+  }
+  return filterTabs(navigationSafeTabs, filter);
+}
+
+function isValidCloseConfirmation(parsedCommand) {
+  if (!isPlainRecord(parsedCommand) || parsedCommand.action !== 'close') return false;
+  if (!isValidTabFilter(parsedCommand.filter)) return false;
+  if (!Array.isArray(parsedCommand.tabIds) || parsedCommand.tabIds.length === 0) return false;
+  if (!parsedCommand.tabIds.every((tabId) => Number.isInteger(tabId) && tabId >= 0)) return false;
+  return new Set(parsedCommand.tabIds).size === parsedCommand.tabIds.length;
+}
+
 async function handleMessage(msg) {
   switch (msg.action) {
     case 'getTabs':
@@ -1168,8 +1205,8 @@ async function handleMessage(msg) {
     // ── AI Natural Language Commands ──
 
     case 'executeNLCommand': {
-      const allTabs = await getAllTabs({ allWindows: true });
-      const tabContext = Prompts.nlCommand.buildTabContext(allTabs);
+      const promptTabs = await getAllTabs({ allWindows: true });
+      const tabContext = Prompts.nlCommand.buildTabContext(promptTabs);
 
       const response = await AIClient.complete({
         systemPrompt: Prompts.nlCommand.system,
@@ -1187,7 +1224,10 @@ async function handleMessage(msg) {
       if (!parsed.action || typeof parsed.action !== 'string') {
         return { error: 'AI returned an invalid action' };
       }
-      const matchingTabs = filterTabs(allTabs, parsed.filter || {});
+      const liveTabs = await getAllTabs({ allWindows: true });
+      const matchingTabs = parsed.action === 'close'
+        ? filterDestructiveTabs(liveTabs, parsed.filter)
+        : filterTabs(liveTabs, parsed.filter);
 
       if (matchingTabs.length === 0) {
         return { error: 'No tabs matched that description' };
@@ -1207,9 +1247,22 @@ async function handleMessage(msg) {
 
     case 'confirmNLCommand': {
       const { parsedCommand } = msg;
+      if (!isValidCloseConfirmation(parsedCommand)) {
+        return { error: 'Invalid command confirmation' };
+      }
+
+      const approvedIds = new Set(parsedCommand.tabIds);
       const allTabs = await getAllTabs({ allWindows: true });
-      const matchingTabs = allTabs.filter(t => parsedCommand.tabIds.includes(t.id));
-      return executeNLAction(parsedCommand, matchingTabs);
+      const matchingTabs = filterDestructiveTabs(allTabs, parsedCommand.filter)
+        .filter((tab) => approvedIds.has(tab.id));
+      if (matchingTabs.length === 0) {
+        return { error: 'No tabs matched that description' };
+      }
+
+      return executeNLAction({
+        ...parsedCommand,
+        tabIds: matchingTabs.map((tab) => tab.id),
+      }, matchingTabs);
     }
 
     // ── Tab Sleep (Kebab) ──
