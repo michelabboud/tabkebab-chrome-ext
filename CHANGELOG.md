@@ -4,6 +4,18 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.2] — 2026-07-14
+
+### Added
+
+- Detailed 15-task, three-phase TDD implementation plan mapping all thirteen reliability findings to named regression tests, real-Chrome evidence, and release checkpoints.
+- Explicit worker serialization, Drive/input resource bounds, rollback, secret-sanitization, checked-message, AI cancellation, packaging, and exact-commit release gates.
+
+### Changed
+
+- Marked the reliability-hardening written specification approved.
+- Confirmed Bun `1.3.11` as the dependency-free test and CI runtime while keeping the shipped extension build-free.
+
 ## [1.2.1] — 2026-07-14
 
 ### Added

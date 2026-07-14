@@ -258,6 +258,7 @@ TabKebab/
 - [Changelog](CHANGELOG.md)
 - [Architecture decisions](docs/adr/README.md)
 - [Reliability hardening design](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md)
+- [Reliability hardening implementation plan](docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md)
 
 ## Credits
 

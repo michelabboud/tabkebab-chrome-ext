@@ -1,6 +1,6 @@
 # TabKebab Reliability Hardening Design
 
-**Status:** Architecture approved on 2026-07-14; written specification awaiting review.
+**Status:** Approved on 2026-07-14.
 
 ## Goal
 

@@ -47,5 +47,6 @@ Bun `1.3.11` is the pinned test runtime. `bun:test` covers pure policies, data m
 See:
 
 - [Reliability hardening design](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md)
+- [Reliability hardening implementation plan](docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md)
 - [Architecture decision records](docs/adr/README.md)
 - [Current progress](PROGRESS.md)
