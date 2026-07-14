@@ -1,5 +1,7 @@
 # TabKebab — Chrome Extension Plan
 
+> **Historical plan.** This document records the original implementation roadmap and no longer describes every shipped behavior. Current reliability work is specified in [`docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md`](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md) and tracked in [`PROGRESS.md`](PROGRESS.md).
+
 A privacy-first Chrome extension for organizing tabs, built with vanilla JS (no frameworks, no build tools).
 
 ## Features

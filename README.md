@@ -251,11 +251,19 @@ TabKebab/
       toast.js               # Toast notifications
 ```
 
+## Documentation
+
+- [Architecture](ARCHITECTURE.md)
+- [Current progress](PROGRESS.md)
+- [Changelog](CHANGELOG.md)
+- [Architecture decisions](docs/adr/README.md)
+- [Reliability hardening design](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md)
+
 ## Credits
 
 Created by **Michel Abboud**.
 
-This project was built with the assistance of AI (Claude by Anthropic). In the spirit of full transparency: architecture decisions, code implementation, icon/logo design, documentation, and commit messages were produced through human-AI collaboration. Every line of code was reviewed and approved by the author.
+This project was built with the assistance of AI systems including Claude by Anthropic and Codex by OpenAI. In the spirit of full transparency: architecture decisions, code implementation, icon/logo design, documentation, and commit messages were produced through human-AI collaboration. Michel retains final review and approval.
 
 ## License
 

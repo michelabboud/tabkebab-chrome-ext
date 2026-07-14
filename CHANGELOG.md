@@ -4,6 +4,20 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.1] — 2026-07-14
+
+### Added
+
+- Reliability-hardening design covering all thirteen confirmed code-review findings.
+- Architecture decision records for Bun-based tests, document-context Chrome AI, and Drive deletion tombstones.
+- Canonical architecture, progress, and version documents.
+
+### Changed
+
+- Marked the original root plan as historical and linked the active hardening specification.
+
+---
+
 ## [1.2.0] — 2026-02-07
 
 ### Added
