@@ -48,6 +48,98 @@ function runtimeState(overrides = {}) {
   };
 }
 
+function startFocusMessage() {
+  return {
+    action: 'startFocus',
+    profileId: 'coding',
+    duration: 25,
+    tabAction: 'none',
+    allowedDomains: [{ type: 'group', value: 'Deep Work' }],
+    blockedDomains: [],
+    strictMode: true,
+    blockedCategories: [],
+    aiBlocking: false,
+  };
+}
+
+async function exerciseMutationAfterDeferredInitialization({ action, initialFailure }) {
+  const paused = action === 'resumeFocus';
+  const harness = installChromeMock({
+    local: {
+      focusState: runtimeState({
+        status: paused ? 'paused' : 'active',
+        pausedAt: paused ? Date.now() - 1_000 : null,
+        allowedDomains: [{
+          type: 'group',
+          value: 'Deep Work',
+          groupId: 90,
+          groupIds: [91],
+        }],
+      }),
+    },
+    groups: [
+      { id: 3, title: 'Deep Work' },
+      { id: 7, title: 'Other' },
+    ],
+  });
+  const gate = createDeferred();
+  const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
+  let queryCount = 0;
+  chrome.tabGroups.query = async (...args) => {
+    queryCount++;
+    const groups = await queryGroups(...args);
+    if (queryCount === 1) {
+      await gate.promise;
+      if (initialFailure) throw new Error('synthetic deferred initialization failure');
+    }
+    return groups;
+  };
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    await importWorker();
+    await waitFor(
+      () => harness.calls.tabGroups.query.length === 1,
+      `${action} setup did not enter its initial group query`,
+    );
+
+    let settled = false;
+    const responsePromise = chrome.runtime.sendMessage(
+      action === 'startFocus' ? startFocusMessage() : { action: 'resumeFocus' },
+    ).then((response) => {
+      settled = true;
+      return response;
+    });
+    await Bun.sleep(1);
+    const settledBeforeReadiness = settled;
+    const queriesBeforeReadiness = harness.calls.tabGroups.query.length;
+
+    await chrome.tabGroups.update(3, { title: 'Old' });
+    await chrome.tabGroups.update(7, { title: 'Deep Work' });
+    gate.resolve();
+
+    const response = await responsePromise;
+    await waitFor(
+      () => readStorageArea('local').focusState?.allowedDomains?.[0]?.groupIds?.[0] === 7,
+      `${action} did not persist its own current group query after readiness`,
+    );
+
+    return {
+      response,
+      settledBeforeReadiness,
+      queriesBeforeReadiness,
+      finalState: readStorageArea('local').focusState,
+      queryCalls: harness.calls.tabGroups.query.length,
+      warnings,
+    };
+  } finally {
+    gate.resolve();
+    console.warn = originalWarn;
+  }
+}
+
 describe('Focus service-worker integration', () => {
   test('a strict navigation delivered before startup rebinding waits and is enforced', async () => {
     const blockedUrl = 'https://blocked.test/pre-ready';
@@ -217,8 +309,10 @@ describe('Focus service-worker integration', () => {
     expect(harness.calls.tabs.goBack).toEqual([[1]]);
   });
 
-  test('alarm and message reads cannot restore stale group IDs while startup lookup is pending', async () => {
+  test('expired Focus alarm waits for startup while read-only messages stay fail-closed', async () => {
     const staleState = runtimeState({
+      startedAt: Date.now() - 120_000,
+      duration: 1,
       strictMode: true,
       allowedDomains: [{
         type: 'group',
@@ -246,12 +340,12 @@ describe('Focus service-worker integration', () => {
     );
 
     await chrome.alarms.onAlarm.dispatch({ name: 'focusTick' });
-    await waitFor(
-      () => harness.calls.action.setBadgeText.length > 0,
-      'focus alarm did not read the pending startup state',
-    );
+    await Bun.sleep(1);
+    expect(harness.calls.action.setBadgeText).toEqual([]);
+    expect(harness.calls.storage.local.remove).toEqual([]);
     const stateFromMessage = await chrome.runtime.sendMessage({ action: 'getFocusState' });
 
+    expect(stateFromMessage.status).toBe('active');
     expect(stateFromMessage.allowedDomains).toEqual([
       { type: 'group', value: 'Deep Work', groupIds: [] },
     ]);
@@ -259,9 +353,165 @@ describe('Focus service-worker integration', () => {
 
     gate.resolve();
     await waitFor(
-      () => readStorageArea('local').focusState?.allowedDomains?.[0]?.groupIds?.[0] === 7,
-      'worker startup did not finish after the pending-boundary assertion',
+      () => readStorageArea('local').focusState === undefined,
+      'expired Focus alarm did not end the run after startup readiness',
     );
+  });
+
+  test('failed rebound persistence keeps alarm, message, and navigation paths fail-closed', async () => {
+    const staleState = runtimeState({
+      strictMode: true,
+      allowedDomains: [{
+        type: 'group',
+        value: 'Deep Work',
+        groupId: 90,
+        groupIds: [91],
+      }],
+    });
+    const blockedUrl = 'https://blocked.test/recycled-group';
+    const harness = installChromeMock({
+      local: { focusState: staleState },
+      windows: [{ id: 1, focused: true }],
+      groups: [{ id: 7, title: 'Deep Work' }],
+      tabs: [{ id: 1, windowId: 1, url: blockedUrl, groupId: 91 }],
+      failures: { 'storage.local.set': new Error('synthetic rebound persistence failure') },
+    });
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      await importWorker();
+      await waitFor(
+        () => warnings.some(([message]) => String(message).includes('Focus group rebinding failed')),
+        'worker did not report failed rebound persistence',
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    await chrome.alarms.onAlarm.dispatch({ name: 'focusTick' });
+    const stateFromMessage = await chrome.runtime.sendMessage({ action: 'getFocusState' });
+    expect(stateFromMessage.allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+
+    await chrome.tabs.onUpdated.dispatch(1, { url: blockedUrl }, {
+      ...harness.snapshot().tabs[0],
+      url: blockedUrl,
+    });
+    await waitFor(
+      () => harness.calls.tabs.goBack.length === 1,
+      'navigation trusted a recycled group ID after rebound persistence failed',
+    );
+    expect(harness.calls.tabs.goBack).toEqual([[1]]);
+  });
+
+  for (const initialFailure of [false, true]) {
+    const readinessResult = initialFailure ? 'failure' : 'success';
+    test(`start and resume wait for deferred initialization ${readinessResult} before querying current groups`, async () => {
+      for (const action of ['startFocus', 'resumeFocus']) {
+        const result = await exerciseMutationAfterDeferredInitialization({
+          action,
+          initialFailure,
+        });
+
+        expect(result.settledBeforeReadiness).toBe(false);
+        expect(result.queriesBeforeReadiness).toBe(1);
+        expect(result.queryCalls).toBe(2);
+        expect(result.response.status).toBe('active');
+        expect(result.response.allowedDomains).toEqual([
+          { type: 'group', value: 'Deep Work', groupIds: [7] },
+        ]);
+        expect(result.finalState.allowedDomains).toEqual(result.response.allowedDomains);
+        expect(result.warnings.length).toBe(initialFailure ? 1 : 0);
+      }
+    });
+  }
+
+  test('end, pause, and extend messages do not mutate Focus state before startup readiness', async () => {
+    for (const message of [
+      { action: 'endFocus' },
+      { action: 'pauseFocus' },
+      { action: 'extendFocus', minutes: 5 },
+    ]) {
+      const harness = installChromeMock({
+        local: { focusState: runtimeState() },
+      });
+      const gate = createDeferred();
+      const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
+      chrome.tabGroups.query = async (...args) => {
+        const groups = await queryGroups(...args);
+        await gate.promise;
+        return groups;
+      };
+
+      await importWorker();
+      await waitFor(
+        () => harness.calls.tabGroups.query.length === 1,
+        `${message.action} setup did not enter startup readiness`,
+      );
+
+      let settled = false;
+      const responsePromise = chrome.runtime.sendMessage(message).then((response) => {
+        settled = true;
+        return response;
+      });
+      await Bun.sleep(1);
+      const settledBeforeReadiness = settled;
+      const writesBeforeReadiness =
+        harness.calls.storage.local.set.length + harness.calls.storage.local.remove.length;
+
+      gate.resolve();
+      await responsePromise;
+
+      expect(settledBeforeReadiness).toBe(false);
+      expect(writesBeforeReadiness).toBe(0);
+    }
+  });
+
+  test('a queued Focus mutation preserves its error-shaped message response', async () => {
+    const harness = installChromeMock({
+      local: { focusState: runtimeState() },
+    });
+    const gate = createDeferred();
+    const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
+    let queryCount = 0;
+    chrome.tabGroups.query = async (...args) => {
+      queryCount++;
+      const groups = await queryGroups(...args);
+      if (queryCount === 1) {
+        await gate.promise;
+        return groups;
+      }
+      throw new Error('synthetic queued start failure');
+    };
+
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      await importWorker();
+      await waitFor(
+        () => harness.calls.tabGroups.query.length === 1,
+        'queued error setup did not enter startup readiness',
+      );
+
+      let settled = false;
+      const responsePromise = chrome.runtime.sendMessage(startFocusMessage()).then((response) => {
+        settled = true;
+        return response;
+      });
+      await Bun.sleep(1);
+      expect(settled).toBe(false);
+
+      gate.resolve();
+      expect(await responsePromise).toEqual({ error: 'synthetic queued start failure' });
+      expect(harness.calls.tabGroups.query).toHaveLength(2);
+      expect(warnings.some(([message]) => String(message).includes('handler error'))).toBe(true);
+    } finally {
+      gate.resolve();
+      console.warn = originalWarn;
+    }
   });
 
   test('navigation applies exact URL and rebound group policy without prefix matching', async () => {

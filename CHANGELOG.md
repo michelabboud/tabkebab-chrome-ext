@@ -26,6 +26,8 @@ All notable changes to TabKebab are documented in this file.
 - Made strict mode with an empty allowlist block every non-internal URL, including hostless and non-HTTP URLs.
 - Removed stale numeric group authority when worker-startup rebinding fails, while preserving the run and title-based preferences for recovery.
 - Kept synchronous Focus listeners from dropping strict navigations during asynchronous worker startup, and prevented alarm, message, and storage reads from restoring unverified numeric group IDs while rebinding is pending or failed.
+- Made live group bindings authoritative only after their matching storage write succeeds; persistence failure now leaves cache, storage-change, alarm, message, and navigation paths fail-closed.
+- Queued Focus ticks and every state-changing Focus command behind worker-startup rebinding, so a late initialization result cannot overwrite or sanitize a newer start, resume, pause, extend, or end action.
 - Prevented AI fallback from classifying internal or explicitly allowed pages.
 
 ## [1.2.4] — 2026-07-14

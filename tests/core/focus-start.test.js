@@ -409,6 +409,39 @@ describe('Focus runtime group rebinding', () => {
     ]);
   });
 
+  test('successful lookup does not verify group IDs when persistence fails', async () => {
+    const stale = {
+      status: 'active',
+      startedAt: Date.now(),
+      duration: 25,
+      pausedAt: null,
+      pausedElapsed: 0,
+      allowedDomains: [{ type: 'group', value: 'Deep Work', groupId: 90, groupIds: [91] }],
+      distractionsBlocked: 0,
+    };
+    const { focus } = await loadFocus({
+      local: { focusState: stale },
+      groups: [{ id: 7, title: 'Deep Work' }],
+      failures: { 'storage.local.set': new Error('synthetic rebound persistence failure') },
+    });
+
+    await expect(focus.rebindStoredFocusState()).rejects.toThrow(
+      'synthetic rebound persistence failure',
+    );
+
+    expect(focus.getCachedFocusState().allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+    expect((await focus.getFocusState()).allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+
+    await chrome.storage.local.set({ focusState: stale });
+    expect(focus.getCachedFocusState().allowedDomains).toEqual([
+      { type: 'group', value: 'Deep Work', groupIds: [] },
+    ]);
+  });
+
   test('resume replaces paused-state group bindings from one fresh query before persisting active state', async () => {
     const paused = {
       status: 'paused',

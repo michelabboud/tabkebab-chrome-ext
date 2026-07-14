@@ -752,7 +752,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     case ALARM_AUTO_SYNC_DRIVE: autoSyncDrive(); break;
     case ALARM_RETENTION_CLEANUP: runRetentionCleanup(); break;
     case ALARM_AUTO_BOOKMARK:  createBookmarks(); break;
-    case ALARM_FOCUS_TICK:     handleFocusTick(); break;
+    case ALARM_FOCUS_TICK:
+      void focusReadiness
+        .then(() => handleFocusTick())
+        .catch((error) => console.warn('[TabKebab] Focus tick failed:', error));
+      break;
   }
 });
 
@@ -1573,18 +1577,23 @@ async function handleMessage(msg) {
       return getFocusState();
 
     case 'startFocus':
+      await focusReadiness;
       return startFocus(msg);
 
     case 'endFocus':
+      await focusReadiness;
       return endFocus();
 
     case 'pauseFocus':
+      await focusReadiness;
       return pauseFocus();
 
     case 'resumeFocus':
+      await focusReadiness;
       return resumeFocus();
 
     case 'extendFocus':
+      await focusReadiness;
       return extendFocus(msg.minutes || 5);
 
     case 'getFocusHistory':

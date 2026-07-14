@@ -19,13 +19,16 @@ const MAX_HISTORY = 50;
 // Module-level cache for fast sync access
 let _cachedState = null;
 let _runtimeGroupBindingsVerified = false;
+let _runtimeGroupBindingWritesPending = 0;
 
 function isRuntimeFocusState(state) {
   return state?.status === 'active' || state?.status === 'paused';
 }
 
 function cacheFocusState(state) {
-  _cachedState = isRuntimeFocusState(state) && !_runtimeGroupBindingsVerified
+  const canExposeRuntimeGroups =
+    _runtimeGroupBindingsVerified && _runtimeGroupBindingWritesPending === 0;
+  _cachedState = isRuntimeFocusState(state) && !canExposeRuntimeGroups
     ? rebindFocusAllowlist(state, [])
     : state;
   return _cachedState;
@@ -58,13 +61,31 @@ async function saveFocusState(state, {
   groupBindingsVerified = _runtimeGroupBindingsVerified,
 } = {}) {
   await cacheReady;
-  _runtimeGroupBindingsVerified = Boolean(groupBindingsVerified) && isRuntimeFocusState(state);
-  const safeState = cacheFocusState(state);
-  if (safeState) {
-    await Storage.set(FOCUS_STATE_KEY, safeState);
-  } else {
-    await Storage.remove(FOCUS_STATE_KEY);
+  const verifiesRuntimeGroups = Boolean(groupBindingsVerified) && isRuntimeFocusState(state);
+  const stateToPersist = isRuntimeFocusState(state) && !verifiesRuntimeGroups
+    ? rebindFocusAllowlist(state, [])
+    : state;
+
+  // A live lookup is not durable authority until the matching storage write
+  // succeeds. Keep every concurrent read fail-closed while persistence is in flight.
+  _runtimeGroupBindingWritesPending++;
+  cacheFocusState(stateToPersist);
+  try {
+    if (stateToPersist) {
+      await Storage.set(FOCUS_STATE_KEY, stateToPersist);
+    } else {
+      await Storage.remove(FOCUS_STATE_KEY);
+    }
+  } catch (error) {
+    _runtimeGroupBindingsVerified = false;
+    _runtimeGroupBindingWritesPending--;
+    cacheFocusState(stateToPersist);
+    throw error;
   }
+
+  _runtimeGroupBindingsVerified = verifiesRuntimeGroups;
+  _runtimeGroupBindingWritesPending--;
+  cacheFocusState(stateToPersist);
 }
 
 // ── Timer helpers ──
