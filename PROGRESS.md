@@ -2,12 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.8`
+- Repository version: `1.2.9`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–6 implemented; restoration, Focus lifecycle, exact-host/duplicate Undo, and fail-closed Drive retention established
+- Implementation status: Tasks 1–7 implemented; deterministic Drive sync v2, bounded settings/JSON input, and worker-local portable-state serialization established
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
+- Phase 2 status: Task 7 implementation and local/browser verification are complete; independent controller review and the `v1.2.9` task checkpoint/tag-push closeout remain
 
 ## Completed implementation slices
 
@@ -62,6 +63,16 @@
 - Switched Settings cleanup to `sendOrThrow()`, strict `1..365` day validation, checked result-shape formatting, protected-file counts, and failure-only feedback for partial/returned/transport errors.
 - Added focused coverage across all 11 categories plus actual worker and SettingsManager entry points. The live Drive fixture remains honestly blocked: the repository documents development ID `hkhlbjmokednepfjmnlglapgppfdpmck` and development OAuth client `873809052111-tpog62t7mm16qlmc85j63ke91l50c2s7.apps.googleusercontent.com`, but the exact Task 6 manifest uses the production client without a pinning `key`; a clean disposable load instead observed ID `fignfifoniblkonapihmkfakmlgkbkcf`, which matches neither the documented development nor published ID and has no matching documented client. The disposable profile also lacked an authenticated Google test-user session. No token or Drive call was attempted, and no synthetic response is claimed as the live proof.
 
+### Task 7 — Deterministic Drive sync and worker serialization (`1.2.9`)
+
+- Added a closed, resource-bounded Drive sync v2 schema with missing/version-1 migration, retained tombstones, exact timestamp ceilings, deterministic recursive tie resolution, stable session/map ordering, and byte-identical merge output in both operand orders.
+- Added bounded UTF-8 JSON reads for sync, settings, and export downloads plus exact allowlisted settings-envelope/patch validation. Remote malformed data fails before merge or save; local timestamp/tombstone recovery remains defensive.
+- Added one-snapshot/one-call local reconciliation and remote-first retry semantics: remote failure performs zero local writes, successful upload precedes one three-key local commit, and a failed local commit is safe to retry to identical bytes.
+- Added a strict FIFO worker-local mutation lock. Manual/scheduled sync share one outer coordinator, ordinary session/manual-group writers queue behind it, and panel group operations use checked worker messages rather than direct storage. Portable import remains the explicit Task 10 expansion.
+- Added checked UI outcomes that keep worker rejection distinct from post-commit refresh failure, including Drive Sync, settings Undo, group create/delete/add, and drag/drop. Malformed group URLs fail before storage.
+- Added focused schema/settings/lock tests and full-suite coverage. A credential-free real Chrome 148 run loaded the actual panel/worker, held the synthetic canonical v2 upload at CDP, proved the group mutation and `lastSyncedAt` remained pending, then proved sync-first completion and queued-group survival after release. Google requests never reached a network; the run is not live-Drive evidence.
+- Live Drive remains blocked and unpassed: the disposable unpacked ID `igggfmpiljhefkagnphadfadollcimlh` has no matching registered OAuth client and the clean profile had no operator-authenticated Google test-user session. No OAuth token or Drive artifact was created.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -90,4 +101,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Publish and verify the operator-authorized `v1.2.8` refs, exact-commit CI run, and browsable GitHub release, then begin Task 7. The credential-safe real-Drive fixture remains an explicit post-release validation item: run it only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Complete independent Task 7 review, commit, tag, and push `v1.2.9`, then begin Task 8's transactional deletion/Undo tombstone writers. The credential-safe real-Drive fixture remains an explicit post-release validation item: run it only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

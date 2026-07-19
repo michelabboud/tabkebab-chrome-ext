@@ -1,6 +1,6 @@
 // service-worker.js — Background service worker (Manifest V3)
 
-import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows } from './core/grouping.js';
+import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows, getManualGroups, createManualGroup, moveTabToManualGroup, deleteManualGroup } from './core/grouping.js';
 import { findDuplicates, findEmptyPages } from './core/duplicates.js';
 import { saveSession, restoreSession, listSessions, deleteSession } from './core/sessions.js';
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
@@ -10,9 +10,11 @@ import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executo
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
-import { getSettings, saveSettings } from './core/settings.js';
-import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
+import { getSettings, saveSettings, validateSettingsPatch } from './core/settings.js';
+import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
 import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from './core/drive-retention.js';
+import { migrateDriveSyncDocument, reconcileDriveSync } from './core/drive-sync.js';
+import { withStateMutationLock } from './core/state-mutation-lock.js';
 import { FocusStatus, getCachedFocusAuthority, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
 import { createFocusAiChecker } from './core/focus-ai.js';
@@ -38,27 +40,35 @@ async function getKeepAwakeList() {
 
 const AUTO_SAVE_PREFIX = '[Auto] ';
 
-async function autoSaveSession() {
+async function autoSaveSessionUnlocked({
+  getTabs = () => getAllTabs({ allWindows: true }),
+  loadSettings = getSettings,
+  saveSnapshot = (name) => saveSession(name, true),
+  getStorage = () => Storage.get('sessions'),
+  setStorage = (sessions) => Storage.set('sessions', sessions),
+  now = Date.now,
+} = {}) {
   try {
-    const tabs = await getAllTabs({ allWindows: true });
+    const tabs = await getTabs();
     // Skip auto-save if browser has no real tabs open
     if (tabs.length <= 1) return;
 
-    const settings = await getSettings();
-    const date = new Date();
+    const settings = await loadSettings();
+    const nowMs = now();
+    const date = new Date(nowMs);
     const dateStr = date.toLocaleDateString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
     const name = `${AUTO_SAVE_PREFIX}${dateStr}`;
 
-    await saveSession(name, true);
+    await saveSnapshot(name);
 
     // Rolling retention by days
-    const sessions = (await Storage.get('sessions')) || [];
+    const sessions = (await getStorage()) || [];
     const autoSaves = sessions.filter(s => s.name.startsWith(AUTO_SAVE_PREFIX));
     const retentionMs = (settings.autoSaveRetentionDays || 7) * 24 * 60 * 60 * 1000;
-    const cutoff = Date.now() - retentionMs;
+    const cutoff = nowMs - retentionMs;
 
     const idsToDelete = new Set();
     for (const s of autoSaves) {
@@ -73,11 +83,15 @@ async function autoSaveSession() {
 
     if (idsToDelete.size > 0) {
       const filtered = sessions.filter(s => !idsToDelete.has(s.id));
-      await Storage.set('sessions', filtered);
+      await setStorage(filtered);
     }
   } catch (e) { console.warn('[TabKebab] auto-save failed:', e);
     // Auto-save should never crash the service worker
   }
+}
+
+export async function autoSaveSession(options = {}) {
+  return withStateMutationLock(() => autoSaveSessionUnlocked(options));
 }
 
 // ── Alarm names ──
@@ -198,37 +212,117 @@ async function autoStashOldTabs() {
   } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
 }
 
-async function autoSyncDrive() {
+async function exportDriveSubfolders({ scheduled = false } = {}) {
+  const results = { sessions: 0, stashes: 0, bookmarks: 0 };
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const settings = await getSettings();
+
+  const sessions = (await Storage.get('sessions')) || [];
+  if (sessions.length > 0 && (!scheduled || settings.autoExportSessionsToDrive)) {
+    await exportToSubfolder('sessions', `sessions-${dateStr}.json`, {
+      sessions,
+      exportedAt: Date.now(),
+    });
+    results.sessions = sessions.length;
+  }
+
+  const stashes = await listStashesDB();
+  if (stashes.length > 0 && (!scheduled || settings.autoExportStashesToDrive)) {
+    await exportToSubfolder('stashes', `stashes-${dateStr}.json`, {
+      stashes,
+      exportedAt: Date.now(),
+    });
+    results.stashes = stashes.length;
+  }
+
+  const bookmarks = (await Storage.get('tabkebabBookmarks')) || [];
+  if (bookmarks.length > 0 && !scheduled) {
+    const payload = { bookmarks, exportedAt: Date.now() };
+    if (settings.compressedExport) {
+      await exportRawToSubfolder(
+        'bookmarks',
+        `bookmarks-${dateStr}.json`,
+        JSON.stringify(payload),
+        'application/json',
+      );
+    } else {
+      await exportToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, payload);
+    }
+    results.bookmarks = bookmarks.length;
+
+    if (settings.exportHtmlBookmarkToDrive && bookmarks[0]?.formats) {
+      const html = generateBookmarkHtml(bookmarks[0]);
+      await exportRawToSubfolder(
+        'bookmarks',
+        `bookmarks-${dateStr}.html`,
+        html,
+        'text/html',
+      );
+    }
+  }
+
+  return results;
+}
+
+async function setCompletedDriveState({ lastSyncedAt, driveFileId }) {
+  const current = await Storage.get('driveSync');
+  if (current?.connected !== true) throw new Error('Google Drive disconnected during sync');
+  await Storage.set('driveSync', { ...current, lastSyncedAt, driveFileId });
+}
+
+async function syncDriveStateUnlocked({
+  scheduled = false,
+  getDriveState = () => Storage.get('driveSync'),
+  findRemote = findSyncFile,
+  readRemote = readSyncFile,
+  writeRemote = writeSyncFile,
+  exportSubfolders = exportDriveSubfolders,
+  loadSettings = getSettings,
+  writeSettings = writeSettingsFile,
+  setDriveState = setCompletedDriveState,
+  now = Date.now,
+} = {}) {
+  const initialState = await getDriveState();
+  if (initialState?.connected !== true) throw new Error('Google Drive is not connected');
+
+  const remoteFile = await findRemote();
+  const remoteDocument = remoteFile ? await readRemote(remoteFile.id) : null;
+  let driveFileId = remoteFile?.id ?? initialState.driveFileId ?? null;
+  const merged = await reconcileDriveSync(remoteDocument, async (document) => {
+    const writtenId = await writeRemote(document);
+    if (typeof writtenId === 'string' && writtenId.length > 0) driveFileId = writtenId;
+  });
+
+  const exportResult = await exportSubfolders({ scheduled });
+  const settings = await loadSettings();
+  const completedAt = now();
+  if (!Number.isSafeInteger(completedAt) || completedAt < 0) {
+    throw new Error('Drive sync clock returned an invalid timestamp');
+  }
+  await writeSettings({ settings, savedAt: completedAt, version: 1 });
+  await setDriveState({ lastSyncedAt: completedAt, driveFileId });
+
+  return {
+    version: merged.version,
+    sessions: merged.sessions.length,
+    manualGroups: Object.keys(merged.manualGroups).length,
+    stashes: exportResult.stashes,
+    bookmarks: exportResult.bookmarks,
+    lastSyncedAt: completedAt,
+  };
+}
+
+export async function syncDriveState(options = {}) {
+  return withStateMutationLock(() => syncDriveStateUnlocked(options));
+}
+
+export async function autoSyncDrive(sync = syncDriveState) {
   try {
-    const settings = await getSettings();
-    const driveState = await Storage.get('driveSync');
-    if (!driveState?.connected) return;
-
-    // Export sessions to Drive/sessions subfolder
-    if (settings.autoExportSessionsToDrive) {
-      const sessions = (await Storage.get('sessions')) || [];
-      if (sessions.length > 0) {
-        const filename = `sessions-${new Date().toISOString().slice(0, 10)}.json`;
-        await exportToSubfolder('sessions', filename, { sessions, exportedAt: Date.now() });
-      }
-    }
-
-    // Export stashes to Drive/stashes subfolder
-    if (settings.autoExportStashesToDrive) {
-      const stashes = await listStashesDB();
-      if (stashes.length > 0) {
-        const filename = `stashes-${new Date().toISOString().slice(0, 10)}.json`;
-        await exportToSubfolder('stashes', filename, { stashes, exportedAt: Date.now() });
-      }
-    }
-
-    await Storage.set('driveSync', { ...driveState, lastSyncedAt: Date.now() });
-
-    // Write current settings to Drive
-    try {
-      await writeSettingsFile({ settings, savedAt: Date.now(), version: 1 });
-    } catch (e) { console.warn('[TabKebab] settings write to Drive failed:', e); }
-  } catch (e) { console.warn('[TabKebab] auto Drive sync failed:', e); }
+    return await sync({ scheduled: true });
+  } catch {
+    console.warn('[TabKebab] automatic Drive sync failed');
+    return null;
+  }
 }
 
 export async function runDriveFileRetention(
@@ -256,7 +350,7 @@ export async function runDriveFileRetention(
   return coordinateDriveRetention({ cutoffMs, listFiles, deleteFile });
 }
 
-export async function runRetentionCleanup({
+async function runRetentionCleanupUnlocked({
   getSettings: loadSettings = getSettings,
   getStorage = (key) => Storage.get(key),
   setStorage = (key, value) => Storage.set(key, value),
@@ -296,6 +390,10 @@ export async function runRetentionCleanup({
     console.warn('[TabKebab] Drive retention cleanup failed');
     return emptyDriveRetentionResult();
   }
+}
+
+export async function runRetentionCleanup(options = {}) {
+  return withStateMutationLock(() => runRetentionCleanupUnlocked(options));
 }
 
 // ── Bookmark system ──
@@ -771,24 +869,36 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }, 5000);
 });
 
-// Handle alarms
-chrome.alarms.onAlarm.addListener((alarm) => {
+// Handle alarms through one exported seam so scheduled portable-state writers
+// use the same locked coordinators as runtime messages.
+export async function handleAlarm(alarm, {
+  runAutoSave = autoSaveSession,
+  runAutoKebab = autoKebabOldTabs,
+  runAutoStash = autoStashOldTabs,
+  runAutoSync = autoSyncDrive,
+  runRetention = runRetentionCleanup,
+  runAutoBookmark = createBookmarks,
+} = {}) {
   switch (alarm.name) {
-    case ALARM_AUTO_SAVE:      autoSaveSession(); break;
-    case ALARM_AUTO_KEBAB:     autoKebabOldTabs(); break;
-    case ALARM_AUTO_STASH:     autoStashOldTabs(); break;
-    case ALARM_AUTO_SYNC_DRIVE: autoSyncDrive(); break;
-    case ALARM_RETENTION_CLEANUP: runRetentionCleanup(); break;
-    case ALARM_AUTO_BOOKMARK:  createBookmarks(); break;
+    case ALARM_AUTO_SAVE:      return runAutoSave();
+    case ALARM_AUTO_KEBAB:     return runAutoKebab();
+    case ALARM_AUTO_STASH:     return runAutoStash();
+    case ALARM_AUTO_SYNC_DRIVE: return runAutoSync();
+    case ALARM_RETENTION_CLEANUP: return runRetention();
+    case ALARM_AUTO_BOOKMARK:  return runAutoBookmark();
     case ALARM_FOCUS_TICK: {
       const expectedRunId = getCachedFocusState()?.runId ?? null;
       void focusReadiness
         .then((startupState) => handleFocusTick(expectedRunId ?? startupState?.runId ?? null))
         .catch((error) => console.warn('[TabKebab] Focus tick failed:', error));
-      break;
+      return null;
     }
+    default:
+      return null;
   }
-});
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => handleAlarm(alarm));
 
 // Rebind persisted group titles before any Focus listener can trust runtime IDs.
 // Listeners still register synchronously, then await this shared startup barrier.
@@ -989,6 +1099,67 @@ function isPlainRecord(value) {
   }
 }
 
+const MAX_RUNTIME_PORTABLE_STRING = 16_384;
+const MANUAL_GROUP_COLORS = new Set([
+  'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
+]);
+
+function requireRuntimeString(value, label) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_RUNTIME_PORTABLE_STRING ||
+    value !== value.trim()
+  ) {
+    throw new TypeError(`${label} must be a non-empty bounded string`);
+  }
+  if (value === '__proto__' || value === 'constructor' || value === 'prototype') {
+    throw new TypeError(`${label} is invalid`);
+  }
+  return value;
+}
+
+function requireRuntimeUrl(value, label) {
+  const url = requireRuntimeString(value, label);
+  try {
+    new URL(url);
+  } catch {
+    throw new TypeError(`${label} must be a valid URL`);
+  }
+  return url;
+}
+
+function requireManualGroupColor(value) {
+  if (!MANUAL_GROUP_COLORS.has(value)) throw new TypeError('Manual group color is invalid');
+  return value;
+}
+
+async function restoreDeletedSessionSnapshot(snapshot) {
+  const restored = migrateDriveSyncDocument({
+    version: 1,
+    sessions: [snapshot],
+    manualGroups: {},
+  }).sessions[0];
+  const current = (await Storage.get('sessions')) || [];
+  const canonicalCurrent = migrateDriveSyncDocument({
+    version: 1,
+    sessions: current,
+    manualGroups: {},
+  }).sessions;
+  if (canonicalCurrent.some(({ id }) => id === restored.id)) {
+    throw new Error('Session already exists');
+  }
+  canonicalCurrent.push(restored);
+  canonicalCurrent.sort((left, right) => {
+    const leftCreated = Number.isSafeInteger(left.createdAt) && left.createdAt >= 0 ? left.createdAt : 0;
+    const rightCreated = Number.isSafeInteger(right.createdAt) && right.createdAt >= 0 ? right.createdAt : 0;
+    if (rightCreated !== leftCreated) return rightCreated - leftCreated;
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  });
+  await Storage.set('sessions', canonicalCurrent);
+  return { success: true };
+}
+
 function filterDestructiveTabs(tabs, filter) {
   const hasTitlePredicate = isPlainRecord(filter) &&
     Object.prototype.hasOwnProperty.call(filter, 'titleContains');
@@ -1016,13 +1187,20 @@ function isValidCloseConfirmation(parsedCommand) {
   return new Set(parsedCommand.tabIds).size === parsedCommand.tabIds.length;
 }
 
-export async function handleMessage(msg, {
-  getSettings: loadSettings = getSettings,
-  getStorage = (key) => Storage.get(key),
-  now = Date.now,
-  listFiles = listAllDriveFiles,
-  deleteFile = deleteDriveFile,
-} = {}) {
+export async function handleMessage(msg, options = {}) {
+  const {
+    getSettings: loadSettings = getSettings,
+    getStorage = (key) => Storage.get(key),
+    now = Date.now,
+    listFiles = listAllDriveFiles,
+    deleteFile = deleteDriveFile,
+    syncDrive = syncDriveState,
+    saveSession: saveSessionOperation = saveSession,
+    deleteSession: deleteSessionOperation = deleteSession,
+    createManualGroup: createManualGroupOperation = createManualGroup,
+    moveTabToManualGroup: moveTabToManualGroupOperation = moveTabToManualGroup,
+    deleteManualGroup: deleteManualGroupOperation = deleteManualGroup,
+  } = options;
   switch (msg.action) {
     case 'getTabs':
       return getAllTabs({ allWindows: msg.allWindows ?? true });
@@ -1069,7 +1247,8 @@ export async function handleMessage(msg, {
       return { success: true };
 
     case 'saveSession':
-      return saveSession(msg.name);
+      requireRuntimeString(msg.name, 'Session name');
+      return withStateMutationLock(() => saveSessionOperation(msg.name));
 
     case 'restoreSession': {
       const onProgress = ({ created, loaded, total }) => {
@@ -1088,15 +1267,35 @@ export async function handleMessage(msg, {
       return listSessions();
 
     case 'deleteSession':
-      await deleteSession(msg.sessionId);
-      return { success: true };
+      requireRuntimeString(msg.sessionId, 'Session ID');
+      return withStateMutationLock(async () => {
+        await deleteSessionOperation(msg.sessionId);
+        return { success: true };
+      });
 
-    case 'undoDeleteSession': {
-      const sessions = (await Storage.get('sessions')) || [];
-      sessions.push(msg.session);
-      sessions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      await Storage.set('sessions', sessions);
-      return { success: true };
+    case 'undoDeleteSession':
+      return withStateMutationLock(() => restoreDeletedSessionSnapshot(msg.session));
+
+    case 'getManualGroups':
+      return getManualGroups();
+
+    case 'createManualGroup': {
+      const name = requireRuntimeString(msg.name, 'Manual group name');
+      const color = requireManualGroupColor(msg.color);
+      return withStateMutationLock(() => createManualGroupOperation(name, color));
+    }
+
+    case 'moveTabToManualGroup': {
+      const tabUrl = requireRuntimeUrl(msg.tabUrl, 'Manual group tab URL');
+      const targetGroupId = msg.targetGroupId === 'ungrouped'
+        ? 'ungrouped'
+        : requireRuntimeString(msg.targetGroupId, 'Target manual group ID');
+      return withStateMutationLock(() => moveTabToManualGroupOperation(tabUrl, targetGroupId));
+    }
+
+    case 'deleteManualGroup': {
+      const groupId = requireRuntimeString(msg.groupId, 'Manual group ID');
+      return withStateMutationLock(() => deleteManualGroupOperation(groupId));
     }
 
     case 'createTabGroup': {
@@ -1158,6 +1357,26 @@ export async function handleMessage(msg, {
       const saved = await saveSettings(msg.settings);
       await reconfigureAlarms(saved);
       return saved;
+    }
+
+    case 'importDriveSettings': {
+      const current = await getSettings();
+      const replacement = validateSettingsPatch(msg.settings, current);
+      await Storage.setMany({
+        tabkebabSettings: replacement,
+        tabkebabSettingsPrevious: current,
+      });
+      await reconfigureAlarms(replacement);
+      return replacement;
+    }
+
+    case 'undoDriveSettings': {
+      const previous = await Storage.get('tabkebabSettingsPrevious');
+      if (!previous) throw new Error('No previous settings to restore');
+      const restored = await saveSettings(previous);
+      await Storage.remove('tabkebabSettingsPrevious');
+      await reconfigureAlarms(restored);
+      return restored;
     }
 
     // ── AI Settings ──
@@ -1621,47 +1840,9 @@ export async function handleMessage(msg, {
       return { synced: stashes.length };
     }
 
-    case 'syncAllToDrive': {
-      const results = { sessions: 0, stashes: 0, bookmarks: 0 };
-      const dateStr = new Date().toISOString().slice(0, 10);
-
-      // Sessions → Drive/sessions/
-      const sessions = (await Storage.get('sessions')) || [];
-      if (sessions.length > 0) {
-        await exportToSubfolder('sessions', `sessions-${dateStr}.json`, { sessions, exportedAt: Date.now() });
-        results.sessions = sessions.length;
-      }
-
-      // Stashes → Drive/stashes/
-      const stashes = await listStashesDB();
-      if (stashes.length > 0) {
-        await exportToSubfolder('stashes', `stashes-${dateStr}.json`, { stashes, exportedAt: Date.now() });
-        results.stashes = stashes.length;
-      }
-
-      // Bookmarks → Drive/bookmarks/
-      const syncSettings = await getSettings();
-      const bookmarks = (await Storage.get('tabkebabBookmarks')) || [];
-      if (bookmarks.length > 0) {
-        const bmPayload = { bookmarks, exportedAt: Date.now() };
-        if (syncSettings.compressedExport) {
-          await exportRawToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, JSON.stringify(bmPayload), 'application/json');
-        } else {
-          await exportToSubfolder('bookmarks', `bookmarks-${dateStr}.json`, bmPayload);
-        }
-        results.bookmarks = bookmarks.length;
-
-        // Also upload HTML from the most recent bookmark snapshot
-        if (syncSettings.exportHtmlBookmarkToDrive && bookmarks[0]?.formats) {
-          try {
-            const html = generateBookmarkHtml(bookmarks[0]);
-            await exportRawToSubfolder('bookmarks', `bookmarks-${dateStr}.html`, html, 'text/html');
-          } catch (e) { console.warn('[TabKebab] HTML bookmark export in sync failed:', e); }
-        }
-      }
-
-      return results;
-    }
+    case 'syncDriveState':
+    case 'syncAllToDrive':
+      return syncDrive();
 
     case 'cleanDriveFiles': {
       const settings = await loadSettings();

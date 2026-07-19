@@ -2,12 +2,16 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
-import { authenticate, disconnect, findSyncFile, readSyncFile, writeSyncFile, findSettingsFile, readSettingsFile, writeSettingsFile, listDriveProfiles, readSettingsFromProfile } from '../../core/drive-client.js';
+import { authenticate, disconnect, findSettingsFile, readSettingsFile, listDriveProfiles, readSettingsFromProfile } from '../../core/drive-client.js';
 import { Storage } from '../../core/storage.js';
+import { sendOrThrow } from '../message-client.js';
 
 export class DriveSync {
-  constructor(rootEl) {
+  constructor(rootEl, { send = sendOrThrow, notify = showToast, confirm = showConfirm } = {}) {
     this.root = rootEl;
+    this.sendMessage = send;
+    this.notify = notify;
+    this.confirm = confirm;
     this.statusEl = rootEl.querySelector('#drive-status');
     this.connectBtn = rootEl.querySelector('#btn-connect-drive');
     this.syncBtn = rootEl.querySelector('#btn-sync-now');
@@ -66,109 +70,71 @@ export class DriveSync {
       if (!profileName) {
         profileName = prompt('Enter a name for this Chrome profile (e.g., "Work", "Personal"):');
         if (!profileName || !profileName.trim()) {
-          showToast('Profile name is required for Drive sync', 'error');
+          this.notify('Profile name is required for Drive sync', 'error');
           return;
         }
         profileName = profileName.trim().replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 50);
         if (!profileName) {
-          showToast('Profile name must contain letters or numbers', 'error');
+          this.notify('Profile name must contain letters or numbers', 'error');
           return;
         }
         await Storage.set('driveProfileName', profileName);
       }
 
       await Storage.set('driveSync', { connected: true, lastSyncedAt: null, driveFileId: null });
-      showToast(`Connected to Google Drive (profile: ${profileName})`, 'success');
+      this.notify(`Connected to Google Drive (profile: ${profileName})`, 'success');
       this.refresh();
       await this.promptLoadSettings();
     } catch (err) {
-      showToast('Failed to connect: ' + err.message, 'error');
+      this.notify('Failed to connect: ' + err.message, 'error');
     }
   }
 
   async syncNow() {
     this.syncBtn.disabled = true;
     this.syncBtn.textContent = 'Syncing...';
+    let syncSucceeded = false;
+    let successMessage = '';
 
     try {
-      // Read local data
-      const localSessions = (await Storage.get('sessions')) || [];
-      const localGroups = (await Storage.get('manualGroups')) || {};
-
-      // Read remote data
-      let remoteSessions = [];
-      let remoteGroups = {};
-      const syncFile = await findSyncFile();
-
-      if (syncFile) {
-        const remoteData = await readSyncFile(syncFile.id);
-        remoteSessions = remoteData.sessions || [];
-        remoteGroups = remoteData.manualGroups || {};
-      }
-
-      // Merge sessions: deduplicate by ID, newer modifiedAt wins
-      const mergedSessionsMap = new Map();
-      for (const s of [...remoteSessions, ...localSessions]) {
-        const existing = mergedSessionsMap.get(s.id);
-        if (!existing || (s.modifiedAt || s.createdAt) > (existing.modifiedAt || existing.createdAt)) {
-          mergedSessionsMap.set(s.id, s);
-        }
-      }
-      const mergedSessions = Array.from(mergedSessionsMap.values())
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-      // Merge groups: newer modifiedAt wins
-      const mergedGroups = { ...remoteGroups };
-      for (const [id, group] of Object.entries(localGroups)) {
-        const remote = mergedGroups[id];
-        if (!remote || (group.modifiedAt || 0) > (remote.modifiedAt || 0)) {
-          mergedGroups[id] = group;
-        }
-      }
-
-      // Write merged data to both local and remote
-      await Storage.set('sessions', mergedSessions);
-      await Storage.set('manualGroups', mergedGroups);
-      await writeSyncFile({ sessions: mergedSessions, manualGroups: mergedGroups });
-
-      // Sync everything to Drive subfolders (sessions, stashes, bookmarks)
-      const syncResult = await chrome.runtime.sendMessage({ action: 'syncAllToDrive' });
-
-      // Update sync state
-      await Storage.set('driveSync', {
-        connected: true,
-        lastSyncedAt: Date.now(),
-        driveFileId: syncFile?.id || null
-      });
-
-      // Write current settings to Drive
-      try {
-        const currentSettings = await chrome.runtime.sendMessage({ action: 'getSettings' });
-        await writeSettingsFile({ settings: currentSettings, savedAt: Date.now(), version: 1 });
-      } catch (e) { console.warn('[TabKebab] cross-profile settings import failed:', e); }
-
+      const syncResult = await this.sendMessage({ action: 'syncDriveState' });
       const parts = [];
       if (syncResult.sessions > 0) parts.push(`${syncResult.sessions} sessions`);
       if (syncResult.stashes > 0) parts.push(`${syncResult.stashes} stashes`);
       if (syncResult.bookmarks > 0) parts.push(`${syncResult.bookmarks} bookmarks`);
       const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-      showToast(`Synced with Google Drive${detail}`, 'success');
+      successMessage = `Synced with Google Drive${detail}`;
+      syncSucceeded = true;
     } catch (err) {
-      showToast('Sync failed: ' + err.message, 'error');
+      this.notify('Sync failed: ' + err.message, 'error');
+    } finally {
+      this.syncBtn.textContent = 'Sync Now';
+      this.syncBtn.disabled = false;
     }
 
-    this.syncBtn.textContent = 'Sync Now';
-    this.refresh();
+    try {
+      await this.refresh();
+    } catch {
+      if (syncSucceeded) {
+        this.notify(`${successMessage}, but the view could not refresh`, 'error');
+      } else {
+        this.notify('Drive status could not refresh after the failed sync', 'error');
+      }
+      return syncSucceeded;
+    }
+
+    if (syncSucceeded) this.notify(successMessage, 'success');
+    return syncSucceeded;
   }
 
   async disconnectDrive() {
     try {
       await disconnect();
       await Storage.set('driveSync', { connected: false, lastSyncedAt: null, driveFileId: null });
-      showToast('Disconnected from Google Drive', 'success');
+      this.notify('Disconnected from Google Drive', 'success');
       this.refresh();
     } catch (err) {
-      showToast('Failed to disconnect: ' + err.message, 'error');
+      this.notify('Failed to disconnect: ' + err.message, 'error');
     }
   }
 
@@ -183,15 +149,15 @@ export class DriveSync {
             ? new Date(remoteData.savedAt).toLocaleString()
             : 'unknown date';
 
-          const ok = await showConfirm({
+          const ok = await this.confirm({
             title: 'Load Drive Settings',
             message: `Settings found on Google Drive (saved ${savedDate}). Load these settings?`,
             confirmLabel: 'Load Settings',
             cancelLabel: 'Keep Current',
           });
           if (ok) {
-            await this.#applyRemoteSettings(remoteData.settings);
-            showToast('Settings loaded from Drive. Use "Undo Last Settings Import" to revert.', 'success');
+            await this.applyRemoteSettings(remoteData.settings);
+            this.notify('Settings loaded from Drive. Use "Undo Last Settings Import" to revert.', 'success');
             this.refresh();
           }
           return;
@@ -210,15 +176,15 @@ export class DriveSync {
             ? new Date(data.savedAt).toLocaleString()
             : 'unknown date';
 
-          const ok = await showConfirm({
+          const ok = await this.confirm({
             title: 'Import from Another Profile',
             message: `Settings found in profile "${profile.name}" (saved ${savedDate}). Import these settings?`,
             confirmLabel: 'Import',
             cancelLabel: 'Skip',
           });
           if (ok) {
-            await this.#applyRemoteSettings(data.settings);
-            showToast(`Settings imported from "${profile.name}". Use "Undo Last Settings Import" to revert.`, 'success');
+            await this.applyRemoteSettings(data.settings);
+            this.notify(`Settings imported from "${profile.name}". Use "Undo Last Settings Import" to revert.`, 'success');
             this.refresh();
           }
           return;
@@ -229,30 +195,39 @@ export class DriveSync {
     }
   }
 
-  async #applyRemoteSettings(settings) {
-    const currentSettings = await chrome.runtime.sendMessage({ action: 'getSettings' });
-    await Storage.set('tabkebabSettingsPrevious', currentSettings);
-    await chrome.runtime.sendMessage({ action: 'saveSettings', settings });
+  async applyRemoteSettings(settings) {
+    return this.sendMessage({ action: 'importDriveSettings', settings });
   }
 
   async undoSettingsLoad() {
     const prev = await Storage.get('tabkebabSettingsPrevious');
     if (!prev) {
-      showToast('No previous settings to restore', 'error');
-      return;
+      this.notify('No previous settings to restore', 'error');
+      return false;
     }
 
-    const ok = await showConfirm({
+    const ok = await this.confirm({
       title: 'Undo Settings Import',
       message: 'Restore your previous settings?',
       confirmLabel: 'Restore',
       cancelLabel: 'Cancel',
     });
-    if (!ok) return;
+    if (!ok) return false;
 
-    await chrome.runtime.sendMessage({ action: 'saveSettings', settings: prev });
-    await Storage.remove('tabkebabSettingsPrevious');
-    showToast('Previous settings restored', 'success');
-    this.refresh();
+    try {
+      await this.sendMessage({ action: 'undoDriveSettings' });
+    } catch (error) {
+      this.notify(`Settings restore failed: ${error.message}`, 'error');
+      return false;
+    }
+
+    try {
+      await this.refresh();
+    } catch {
+      this.notify('Previous settings restored, but the view could not refresh', 'error');
+      return true;
+    }
+    this.notify('Previous settings restored', 'success');
+    return true;
   }
 }

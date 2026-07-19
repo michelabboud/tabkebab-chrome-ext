@@ -2,17 +2,21 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { sendOrThrow } from '../message-client.js';
 
 export class GroupEditor {
   constructor(rootEl) {
     this.root = rootEl;
+    this.notify = showToast;
     this.chromeGroupsContainer = rootEl.querySelector('#chrome-groups-container');
     this.groupsContainer = rootEl.querySelector('#manual-groups-container');
     this.ungroupedEl = rootEl.querySelector('#ungrouped-tabs');
 
-    rootEl.querySelector('#btn-create-group').addEventListener('click', () => this.createGroup());
-    rootEl.querySelector('#new-group-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this.createGroup();
+    rootEl.querySelector('#btn-create-group').addEventListener('click', async () => {
+      await this.createGroup();
+    });
+    rootEl.querySelector('#new-group-name').addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') await this.createGroup();
     });
 
     this.setupDragAndDrop();
@@ -289,8 +293,7 @@ export class GroupEditor {
   // ── Manual Groups ──
 
   async getManualGroups() {
-    const data = await chrome.storage.local.get('manualGroups');
-    return data.manualGroups || {};
+    return (await this.send({ action: 'getManualGroups' })) || {};
   }
 
   renderGroups(groups, tabs) {
@@ -379,7 +382,7 @@ export class GroupEditor {
           confirmLabel: 'Delete',
           danger: true,
         });
-        if (ok) this.deleteGroup(groupId, group.name);
+        if (ok) await this.deleteGroup(groupId, group.name);
       });
 
       actions.appendChild(applyBtn);
@@ -536,9 +539,7 @@ export class GroupEditor {
     addBtn.title = 'Add this URL to group';
     addBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await this.moveTabToGroup(url, groupId);
-      showToast('URL added to group', 'success');
-      this.refresh();
+      await this.addTabToGroup(url, groupId, 'URL added to group');
     });
 
     item.appendChild(badge);
@@ -572,9 +573,7 @@ export class GroupEditor {
     addBtn.title = 'Add to group';
     addBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await this.moveTabToGroup(tab.url, groupId);
-      showToast('Tab added to group', 'success');
-      this.refresh();
+      await this.addTabToGroup(tab.url, groupId, 'Tab added to group');
     });
 
     item.appendChild(favicon);
@@ -633,34 +632,45 @@ export class GroupEditor {
 
       if (!tabUrl) return;
 
-      try {
-        await this.moveTabToGroup(tabUrl, targetGroupId);
-        this.refresh();
-      } catch (err) {
-        showToast('Failed to move tab', 'error');
-      }
+      await this.moveDroppedTab(tabUrl, targetGroupId);
     });
   }
 
   async moveTabToGroup(tabUrl, targetGroupId) {
-    const groups = await this.getManualGroups();
+    return this.send({ action: 'moveTabToManualGroup', tabUrl, targetGroupId });
+  }
 
-    // Remove from all groups first
-    for (const group of Object.values(groups)) {
-      const before = group.tabUrls.length;
-      group.tabUrls = group.tabUrls.filter(u => u !== tabUrl);
-      if (group.tabUrls.length !== before) {
-        group.modifiedAt = Date.now();
-      }
+  async refreshCommittedState(committedMessage) {
+    try {
+      await this.refresh();
+      return true;
+    } catch {
+      this.notify(`${committedMessage}, but the view could not refresh`, 'error');
+      return false;
     }
+  }
 
-    // Add to target group (unless it's "ungrouped")
-    if (targetGroupId !== 'ungrouped' && groups[targetGroupId]) {
-      groups[targetGroupId].tabUrls.push(tabUrl);
-      groups[targetGroupId].modifiedAt = Date.now();
+  async moveDroppedTab(tabUrl, targetGroupId) {
+    try {
+      await this.moveTabToGroup(tabUrl, targetGroupId);
+    } catch {
+      this.notify('Failed to move tab', 'error');
+      return false;
     }
+    await this.refreshCommittedState('Tab moved');
+    return true;
+  }
 
-    await chrome.storage.local.set({ manualGroups: groups });
+  async addTabToGroup(tabUrl, targetGroupId, successMessage) {
+    try {
+      await this.moveTabToGroup(tabUrl, targetGroupId);
+    } catch {
+      this.notify('Failed to add tab to group', 'error');
+      return false;
+    }
+    const refreshed = await this.refreshCommittedState(successMessage);
+    if (refreshed) this.notify(successMessage, 'success');
+    return true;
   }
 
   async createGroup() {
@@ -669,34 +679,35 @@ export class GroupEditor {
     const name = nameInput.value.trim();
 
     if (!name) {
-      showToast('Enter a group name', 'error');
+      this.notify('Enter a group name', 'error');
       nameInput.focus();
-      return;
+      return false;
     }
 
-    const groupId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const groups = await this.getManualGroups();
-
-    groups[groupId] = {
-      name,
-      color: colorSelect.value,
-      tabUrls: [],
-      createdAt: Date.now(),
-      modifiedAt: Date.now()
-    };
-
-    await chrome.storage.local.set({ manualGroups: groups });
+    try {
+      await this.send({ action: 'createManualGroup', name, color: colorSelect.value });
+    } catch {
+      this.notify('Failed to create group', 'error');
+      return false;
+    }
     nameInput.value = '';
-    showToast(`Group "${name}" created`, 'success');
-    this.refresh();
+    const successMessage = `Group "${name}" created`;
+    const refreshed = await this.refreshCommittedState(successMessage);
+    if (refreshed) this.notify(successMessage, 'success');
+    return true;
   }
 
   async deleteGroup(groupId, name) {
-    const groups = await this.getManualGroups();
-    delete groups[groupId];
-    await chrome.storage.local.set({ manualGroups: groups });
-    showToast(`Group "${name}" deleted`, 'success');
-    this.refresh();
+    try {
+      await this.send({ action: 'deleteManualGroup', groupId });
+    } catch {
+      this.notify('Failed to delete group', 'error');
+      return false;
+    }
+    const successMessage = `Group "${name}" deleted`;
+    const refreshed = await this.refreshCommittedState(successMessage);
+    if (refreshed) this.notify(successMessage, 'success');
+    return true;
   }
 
   async applyToChrome(groupId) {
@@ -739,7 +750,7 @@ export class GroupEditor {
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 
   escapeHtml(str) {

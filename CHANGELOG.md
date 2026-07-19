@@ -4,6 +4,33 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.9] — 2026-07-19
+
+### Added
+
+- Drive sync schema version 2 with bounded version-1 migration, retained session/manual-group tombstone maps, deterministic entity/tombstone ordering, and order-independent equal-timestamp conflict resolution.
+- A worker-local FIFO mutation lock plus thin multi-key storage helpers for one-snapshot reads and one-call local commits.
+- Regression coverage for schema/resource limits, bounded downloaded JSON, settings constraints, deterministic merge/retry, strict FIFO/rejection release, worker ownership, checked panel feedback, and post-commit refresh failures.
+
+### Changed
+
+- Manual and scheduled Drive sync now share one worker-owned coordinator. It writes the merged canonical document remotely before one three-key local commit, completes exports/settings, and advances `lastSyncedAt` only after the full path succeeds.
+- Ordinary session and manual-group mutations now enter checked worker actions and serialize behind sync; the side panel no longer writes `manualGroups` directly. Portable import remains scheduled for the broader Task 10 lock boundary.
+- Canonical/cross-profile Drive settings are allowlisted and constraint-checked before storage, and sync/settings/export downloads use bounded UTF-8 JSON reads instead of unbounded `Response.json()` buffering.
+- Drive Sync and manual-group controls distinguish worker rejection from a committed mutation whose subsequent view refresh failed, avoiding misleading success/failure or retry feedback.
+
+### Fixed
+
+- Prevented a local-first sync or later panel mutation from overwriting newer session/manual-group state in the same extension worker.
+- Made remote rejection leave local portable-state bytes unchanged and kept remote-success/local-failure retryable to identical canonical output.
+- Rejected malformed runtime group URLs and invalid settings/session/group payloads before any storage write.
+
+### Verification note
+
+- The focused Task 7 suite, full Bun suite, coverage run, syntax/version gate, and whitespace check pass under pinned Bun `1.3.11`; no package or runtime dependency was added.
+- Real Chrome for Testing `148.0.7778.96` loaded the unpacked extension and exercised the production side-panel message, service-worker sync, Chrome storage, and FIFO lock. A CDP-held synthetic canonical upload proved the group mutation stayed queued and `lastSyncedAt` stayed unchanged until release, after which sync completed first and the queued group survived. All Google requests were fulfilled synthetically at CDP and never reached a network.
+- Live Drive remains **unpassed**, not replaced by that browser proof. The disposable unpacked identity `igggfmpiljhefkagnphadfadollcimlh` is not the registered development or published identity, and the disposable profile had no operator-authenticated Google test-user session. No OAuth token was requested, printed, or persisted, and no Drive artifact was created.
+
 ## [1.2.8] — 2026-07-19
 
 ### Added

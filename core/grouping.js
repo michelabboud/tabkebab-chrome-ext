@@ -547,48 +547,62 @@ export async function getManualGroups() {
   return (await Storage.get('manualGroups')) || {};
 }
 
-export async function saveManualGroup(groupId, groupData) {
+function generateManualGroupId(groups) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    if (!Object.hasOwn(groups, id)) return id;
+  }
+  throw new Error('Unable to generate a unique manual group ID');
+}
+
+export async function createManualGroup(name, color) {
   const groups = await getManualGroups();
-  groups[groupId] = { ...groupData, modifiedAt: Date.now() };
-  return Storage.set('manualGroups', groups);
+  const groupId = generateManualGroupId(groups);
+  const timestamp = Date.now();
+  const group = {
+    name,
+    color,
+    tabUrls: [],
+    createdAt: timestamp,
+    modifiedAt: timestamp,
+  };
+  groups[groupId] = group;
+  await Storage.set('manualGroups', groups);
+  return { groupId, group };
 }
 
 export async function deleteManualGroup(groupId) {
   const groups = await getManualGroups();
+  if (!Object.hasOwn(groups, groupId)) throw new Error('Manual group not found');
   delete groups[groupId];
-  return Storage.set('manualGroups', groups);
+  await Storage.set('manualGroups', groups);
+  return { deleted: true };
 }
 
-export async function addTabToManualGroup(groupId, tabUrl) {
+export async function moveTabToManualGroup(tabUrl, targetGroupId) {
   const groups = await getManualGroups();
-  const group = groups[groupId];
-  if (!group) return;
-  if (!group.tabUrls.includes(tabUrl)) {
-    group.tabUrls.push(tabUrl);
-    group.modifiedAt = Date.now();
+  if (targetGroupId !== 'ungrouped' && !Object.hasOwn(groups, targetGroupId)) {
+    throw new Error('Target manual group not found');
   }
-  return Storage.set('manualGroups', groups);
-}
 
-export async function removeTabFromManualGroup(groupId, tabUrl) {
-  const groups = await getManualGroups();
-  const group = groups[groupId];
-  if (!group) return;
-  group.tabUrls = group.tabUrls.filter(u => u !== tabUrl);
-  group.modifiedAt = Date.now();
-  return Storage.set('manualGroups', groups);
-}
-
-export async function removeTabFromAllGroups(tabUrl) {
-  const groups = await getManualGroups();
+  const timestamp = Date.now();
   for (const group of Object.values(groups)) {
-    const before = group.tabUrls.length;
-    group.tabUrls = group.tabUrls.filter(u => u !== tabUrl);
-    if (group.tabUrls.length !== before) {
-      group.modifiedAt = Date.now();
+    const urls = Array.isArray(group.tabUrls) ? group.tabUrls : [];
+    const filtered = urls.filter((url) => url !== tabUrl);
+    if (filtered.length !== urls.length) {
+      group.tabUrls = filtered;
+      group.modifiedAt = timestamp;
     }
   }
-  return Storage.set('manualGroups', groups);
+
+  if (targetGroupId !== 'ungrouped') {
+    const target = groups[targetGroupId];
+    if (!target.tabUrls.includes(tabUrl)) target.tabUrls.push(tabUrl);
+    target.modifiedAt = timestamp;
+  }
+
+  await Storage.set('manualGroups', groups);
+  return { tabUrl, targetGroupId };
 }
 
 export async function applyManualGroupToChrome(groupId) {

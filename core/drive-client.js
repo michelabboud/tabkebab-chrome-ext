@@ -1,6 +1,8 @@
 // core/drive-client.js — Google Drive REST v3 client (visible TabKebab folder)
 
 import { isValidDriveFileId } from './drive-retention.js';
+import { MAX_DRIVE_JSON_BYTES } from './drive-sync.js';
+import { parseDriveSettingsDocument } from './settings.js';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -303,10 +305,99 @@ async function archiveFile(fileId, originalName) {
   return copyFile(fileId, archiveName, archiveId);
 }
 
+function parseContentLength(response) {
+  const raw = response.headers?.get?.('Content-Length');
+  if (raw === null || raw === undefined) return null;
+  if (!/^(0|[1-9]\d*)$/.test(raw)) throw new Error('Drive JSON returned an invalid Content-Length');
+  const length = Number(raw);
+  if (!Number.isSafeInteger(length)) throw new Error('Drive JSON returned an invalid Content-Length');
+  if (length > MAX_DRIVE_JSON_BYTES) throw new Error('Drive JSON exceeds the 25 MiB limit');
+  return length;
+}
+
+function decodeUtf8(bytes) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error('Drive JSON is not valid UTF-8');
+  }
+}
+
+function parseJsonText(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('Drive JSON is invalid');
+  }
+}
+
+async function cancelReader(reader) {
+  if (typeof reader?.cancel !== 'function') return;
+  try {
+    await reader.cancel();
+  } catch {
+    // Best-effort cancellation must not mask the resource-limit failure.
+  }
+}
+
+/**
+ * Read one Drive JSON response without ever allowing response.json() to buffer
+ * an unbounded body. Both the declared and actual UTF-8 byte lengths are capped.
+ */
+export async function readBoundedJsonResponse(response) {
+  parseContentLength(response);
+
+  const reader = response.body && typeof response.body.getReader === 'function'
+    ? response.body.getReader()
+    : null;
+  if (reader) {
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        await cancelReader(reader);
+        throw new Error('Drive JSON stream returned an invalid byte chunk');
+      }
+      total += value.byteLength;
+      if (total > MAX_DRIVE_JSON_BYTES) {
+        await cancelReader(reader);
+        throw new Error('Drive JSON exceeds the 25 MiB limit');
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return parseJsonText(decodeUtf8(bytes));
+  }
+
+  if (typeof response.arrayBuffer === 'function') {
+    const buffer = await response.arrayBuffer();
+    if (!(buffer instanceof ArrayBuffer)) throw new Error('Drive JSON returned invalid bytes');
+    if (buffer.byteLength > MAX_DRIVE_JSON_BYTES) throw new Error('Drive JSON exceeds the 25 MiB limit');
+    return parseJsonText(decodeUtf8(new Uint8Array(buffer)));
+  }
+
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (typeof text !== 'string') throw new Error('Drive JSON returned invalid text');
+    const bytes = new TextEncoder().encode(text);
+    if (bytes.byteLength > MAX_DRIVE_JSON_BYTES) throw new Error('Drive JSON exceeds the 25 MiB limit');
+    return parseJsonText(text);
+  }
+
+  throw new Error('Drive JSON response body is unavailable');
+}
+
 async function readFileById(fileId) {
   const encodedId = encodedDriveFileId(fileId, 'Drive read target');
   const resp = await driveRequest(`${DRIVE_API}/files/${encodedId}?alt=media`);
-  return resp.json();
+  return readBoundedJsonResponse(resp);
 }
 
 async function deleteFileById(fileId) {
@@ -376,7 +467,7 @@ export async function listDriveProfiles() {
 export async function readSettingsFromProfile(profileFolderId) {
   const file = await findFileInFolder(profileFolderId, SETTINGS_FILENAME);
   if (!file) return null;
-  return readFileById(file.id);
+  return parseDriveSettingsDocument(await readFileById(file.id));
 }
 
 // ── Public API: Sync ──────────────────────────────────
@@ -409,7 +500,7 @@ export async function findSettingsFile() {
 }
 
 export async function readSettingsFile(fileId) {
-  return readFileById(fileId);
+  return parseDriveSettingsDocument(await readFileById(fileId));
 }
 
 export async function writeSettingsFile(content) {
