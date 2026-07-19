@@ -2,13 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.9`
+- Repository version: `1.2.10`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–7 implemented; deterministic Drive sync v2, bounded settings/JSON input, and worker-local portable-state serialization established
+- Implementation status: Tasks 1–8 implemented; deterministic Drive sync v2 now records transactional session/manual-group deletion and strictly newer session Undo state
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
-- Phase 2 status: Task 7 implementation and local/browser verification are complete; independent controller review and the `v1.2.9` task checkpoint/tag-push closeout remain
+- Phase 2 status: `v1.2.9` is published; Task 8 implementation, independent review, deterministic gates, and the final functional-tree Chrome boundary are complete, while the `v1.2.10` commit/tag/push and exact-commit CI checkpoint remain
 
 ## Completed implementation slices
 
@@ -73,6 +73,15 @@
 - Added focused schema/settings/lock tests and full-suite coverage. A credential-free real Chrome 148 run loaded the actual panel/worker, held the synthetic canonical v2 upload at CDP, proved the group mutation and `lastSyncedAt` remained pending, then proved sync-first completion and queued-group survival after release. Google requests never reached a network; the run is not live-Drive evidence.
 - Live Drive remains blocked and unpassed: the disposable unpacked ID `igggfmpiljhefkagnphadfadollcimlh` has no matching registered OAuth client and the clean profile had no operator-authenticated Google test-user session. No OAuth token or Drive artifact was created.
 
+### Task 8 — Transactional deletion convergence (`1.2.10`)
+
+- Added fresh, bounded deletion-tombstone helpers and one-snapshot transactions for session batches, session Undo, and manual-group deletion. Each successful mutation commits only its entity collection and `driveSyncTombstones` together in one storage call; preflight or storage failure leaves both unchanged.
+- Read all three portable-state keys before validating a mutation. This adjacent clarification preserves the one-snapshot/two-affected-key-write contract while enforcing Drive v2's aggregate 25 MiB and 100,000-tab/URL limits across untouched sections.
+- Routed explicit, rolling auto-save, and alarm-retention deletions plus Undo and group deletion through the existing FIFO worker lock. Checked worker summaries and panel handling distinguish a committed mutation from a missing entity, rejection, or post-commit refresh failure.
+- Session Undo retains the tombstone and writes exactly one canonical same-ID record with `modifiedAt` strictly greater than it. Two-profile tests prove stale/equal entities remain deleted, newer and Undo records survive, tombstones remain, and both merge operand orders produce identical bytes.
+- Final evidence reports `36 pass / 0 fail / 340 assertions` focused, `407 pass / 0 fail / 2100 assertions` in both full and coverage runs, `27 pass / 0 fail / 149 assertions` for the mutation lock, and `2 pass / 0 fail / 90 assertions` for syntax. Whitespace, version parity, and the no-dependency-change audit pass under Bun `1.3.11`; coverage is recorded without a repository-wide threshold (`45.75%` functions, `47.33%` lines).
+- Chrome 148 exercised completed functional tree `7e1ab1c081a1bc3f4128903b1e924e803c5427a8` and proved one checked session Delete, exactly one newer Undo with the tombstone unchanged, and one checked manual-group Delete through the production panel/worker/storage boundary. It made zero HTTP(S) requests and cleaned every disposable resource. The controller reruns after this evidence-only prose delta without further tracked edits. Live Drive remains blocked and unpassed for the registered-client/authenticated-profile reasons above.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -101,4 +110,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Complete independent Task 7 review, commit, tag, and push `v1.2.9`, then begin Task 8's transactional deletion/Undo tombstone writers. The credential-safe real-Drive fixture remains an explicit post-release validation item: run it only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Commit, annotate `v1.2.10`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 9 starts. Task 8 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

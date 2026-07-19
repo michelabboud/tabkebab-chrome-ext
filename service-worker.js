@@ -2,7 +2,7 @@
 
 import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows, getManualGroups, createManualGroup, moveTabToManualGroup, deleteManualGroup } from './core/grouping.js';
 import { findDuplicates, findEmptyPages } from './core/duplicates.js';
-import { saveSession, restoreSession, listSessions, deleteSession } from './core/sessions.js';
+import { saveSession, restoreSession, listSessions, deleteSession, deleteSessions, restoreDeletedSession } from './core/sessions.js';
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
 import { Prompts } from './core/ai/prompts.js';
@@ -13,7 +13,7 @@ import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings, validateSettingsPatch } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
 import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from './core/drive-retention.js';
-import { migrateDriveSyncDocument, reconcileDriveSync } from './core/drive-sync.js';
+import { reconcileDriveSync } from './core/drive-sync.js';
 import { withStateMutationLock } from './core/state-mutation-lock.js';
 import { FocusStatus, getCachedFocusAuthority, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
@@ -45,7 +45,7 @@ async function autoSaveSessionUnlocked({
   loadSettings = getSettings,
   saveSnapshot = (name) => saveSession(name, true),
   getStorage = () => Storage.get('sessions'),
-  setStorage = (sessions) => Storage.set('sessions', sessions),
+  deleteSessions: deleteSessionsOperation = deleteSessions,
   now = Date.now,
 } = {}) {
   try {
@@ -82,8 +82,7 @@ async function autoSaveSessionUnlocked({
     for (const id of recentIds) idsToDelete.delete(id);
 
     if (idsToDelete.size > 0) {
-      const filtered = sessions.filter(s => !idsToDelete.has(s.id));
-      await setStorage(filtered);
+      await deleteSessionsOperation([...idsToDelete], nowMs);
     }
   } catch (e) { console.warn('[TabKebab] auto-save failed:', e);
     // Auto-save should never crash the service worker
@@ -353,7 +352,7 @@ export async function runDriveFileRetention(
 async function runRetentionCleanupUnlocked({
   getSettings: loadSettings = getSettings,
   getStorage = (key) => Storage.get(key),
-  setStorage = (key, value) => Storage.set(key, value),
+  deleteSessions: deleteSessionsOperation = deleteSessions,
   now = Date.now,
   listFiles = listAllDriveFiles,
   deleteFile = deleteDriveFile,
@@ -363,7 +362,8 @@ async function runRetentionCleanupUnlocked({
 
     // Clean old auto-saves locally
     const retentionMs = (settings.autoSaveRetentionDays || 7) * 24 * 60 * 60 * 1000;
-    const cutoff = Date.now() - retentionMs;
+    const nowMs = now();
+    const cutoff = nowMs - retentionMs;
     const sessions = (await getStorage('sessions')) || [];
     const autoSaves = sessions.filter(s => s.name.startsWith(AUTO_SAVE_PREFIX));
     const recentIds = new Set(autoSaves.slice(0, 2).map(s => s.id));
@@ -376,7 +376,7 @@ async function runRetentionCleanupUnlocked({
     }
 
     if (idsToDelete.size > 0) {
-      await setStorage('sessions', sessions.filter(s => !idsToDelete.has(s.id)));
+      await deleteSessionsOperation([...idsToDelete], nowMs);
     }
 
     const driveState = await getStorage('driveSync');
@@ -385,7 +385,7 @@ async function runRetentionCleanupUnlocked({
       days: settings.driveRetentionDays,
       neverDeleteFromDrive: settings.neverDeleteFromDrive,
       connected: driveState?.connected,
-    }, { now, listFiles, deleteFile });
+    }, { now: () => nowMs, listFiles, deleteFile });
   } catch {
     console.warn('[TabKebab] Drive retention cleanup failed');
     return emptyDriveRetentionResult();
@@ -1134,32 +1134,6 @@ function requireManualGroupColor(value) {
   return value;
 }
 
-async function restoreDeletedSessionSnapshot(snapshot) {
-  const restored = migrateDriveSyncDocument({
-    version: 1,
-    sessions: [snapshot],
-    manualGroups: {},
-  }).sessions[0];
-  const current = (await Storage.get('sessions')) || [];
-  const canonicalCurrent = migrateDriveSyncDocument({
-    version: 1,
-    sessions: current,
-    manualGroups: {},
-  }).sessions;
-  if (canonicalCurrent.some(({ id }) => id === restored.id)) {
-    throw new Error('Session already exists');
-  }
-  canonicalCurrent.push(restored);
-  canonicalCurrent.sort((left, right) => {
-    const leftCreated = Number.isSafeInteger(left.createdAt) && left.createdAt >= 0 ? left.createdAt : 0;
-    const rightCreated = Number.isSafeInteger(right.createdAt) && right.createdAt >= 0 ? right.createdAt : 0;
-    if (rightCreated !== leftCreated) return rightCreated - leftCreated;
-    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
-  });
-  await Storage.set('sessions', canonicalCurrent);
-  return { success: true };
-}
-
 function filterDestructiveTabs(tabs, filter) {
   const hasTitlePredicate = isPlainRecord(filter) &&
     Object.prototype.hasOwnProperty.call(filter, 'titleContains');
@@ -1197,6 +1171,7 @@ export async function handleMessage(msg, options = {}) {
     syncDrive = syncDriveState,
     saveSession: saveSessionOperation = saveSession,
     deleteSession: deleteSessionOperation = deleteSession,
+    restoreDeletedSession: restoreDeletedSessionOperation = restoreDeletedSession,
     createManualGroup: createManualGroupOperation = createManualGroup,
     moveTabToManualGroup: moveTabToManualGroupOperation = moveTabToManualGroup,
     deleteManualGroup: deleteManualGroupOperation = deleteManualGroup,
@@ -1268,13 +1243,13 @@ export async function handleMessage(msg, options = {}) {
 
     case 'deleteSession':
       requireRuntimeString(msg.sessionId, 'Session ID');
-      return withStateMutationLock(async () => {
-        await deleteSessionOperation(msg.sessionId);
-        return { success: true };
-      });
+      return withStateMutationLock(() => deleteSessionOperation(msg.sessionId, now()));
 
     case 'undoDeleteSession':
-      return withStateMutationLock(() => restoreDeletedSessionSnapshot(msg.session));
+      return withStateMutationLock(async () => {
+        const restored = await restoreDeletedSessionOperation(msg.session, now());
+        return { restored: true, modifiedAt: restored.modifiedAt };
+      });
 
     case 'getManualGroups':
       return getManualGroups();
@@ -1295,7 +1270,7 @@ export async function handleMessage(msg, options = {}) {
 
     case 'deleteManualGroup': {
       const groupId = requireRuntimeString(msg.groupId, 'Manual group ID');
-      return withStateMutationLock(() => deleteManualGroupOperation(groupId));
+      return withStateMutationLock(() => deleteManualGroupOperation(groupId, now()));
     }
 
     case 'createTabGroup': {

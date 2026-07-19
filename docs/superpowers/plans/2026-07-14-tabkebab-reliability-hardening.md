@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved plan in progress. Tasks 1–6 are implemented and independently reviewed; the repository owner explicitly authorized the `v1.2.8` release on 2026-07-19 with the real Chrome/Drive fixture still unpassed and retained as post-release validation.
+**Status:** Approved plan in progress. Tasks 1–7 are implemented, independently reviewed, and published as task checkpoints through `v1.2.9`. Task 8 implementation, independent review, deterministic gates, documentation, and the completed functional-tree Chrome boundary are complete at version `1.2.10`; commit, tag, push, and exact-commit CI remain. The real Chrome/Drive fixture is still unpassed and retained as an explicit validation item rather than being replaced by synthetic evidence.
 
 **Goal:** Fix all thirteen confirmed review findings with regression-first tests, preserve existing local and Drive data, and release verified source checkpoints without introducing a production dependency or build step.
 
@@ -627,19 +627,21 @@ export async function deleteManualGroup(groupId, deletedAt = Date.now());
 // { deleted, tombstoneAt }
 ```
 
-- [ ] Write tests first proving session/group removal and the matching tombstone are supplied in the same `Storage.setMany()` call. Inject a storage rejection and assert neither the entity collection nor tombstones change in the mock.
-- [ ] Cover maximum-timestamp behavior per ID using Task 7's timestamp helpers. Reject a supplied `deletedAt` unless it is a non-negative safe integer no greater than `MAX_DRIVE_TOMBSTONE`. Compute `Math.max(deletedAt, getDriveEntityTimestamp(entity), normalizeDriveTombstone(previousTombstone))`; if the entity timestamp exceeds `MAX_DRIVE_TOMBSTONE`, fail closed because no representable tombstone could dominate it. Add `NaN`, `Infinity`, negative, numeric-string, ceiling, and future-timestamp cases so malformed values cannot poison the tombstone map and a clock-skewed/future entity cannot immediately resurrect.
-- [ ] Cover batch auto-save/retention deletion so every removed session ID receives the same or later timestamp. Assert no retention path writes the filtered `sessions` array directly.
-- [ ] Cover Undo with the same finite timestamp policy. Reject `restoredAt` unless it is a non-negative safe integer no greater than `MAX_DRIVE_TIMESTAMP`; given tombstone `T`, `restoreDeletedSession()` retains `T` and sets `modifiedAt` to `Math.max(restoredAt, getDriveEntityTimestamp(session), T + 1)`. `MAX_DRIVE_TOMBSTONE` guarantees `T + 1` remains exact and schema-valid. Add malformed prior session timestamps plus invalid `restoredAt` cases and prove Undo survives the next merge.
-- [ ] Add a two-profile test: delete on profile A, update older on profile B, merge both ways, and assert deletion converges; repeat with a genuinely newer update and assert the entity survives while its tombstone remains.
-- [ ] Run `bun test tests/core/deletion-tombstones.test.js` and preserve failures from direct storage deletion paths.
-- [ ] Add pure tombstone-update helpers to `core/drive-sync.js`; never mutate the object returned by storage.
-- [ ] Implement `deleteSessions()` and make `deleteSession()` delegate to it. Return the exact per-ID tombstone map because batch members may have different prior/entity timestamps. Route explicit session deletion, rolling auto-save cleanup, and alarm retention through the same locked worker function.
-- [ ] Route `undoDeleteSession` through `restoreDeletedSession()` rather than pushing the old record directly.
-- [ ] Make `core/grouping.js::deleteManualGroup()` write `manualGroups` and `driveSyncTombstones` together under the Task 7 lock. The existing centralized `deleteManualGroup` action uses it; all other group mutations remain worker-owned as established in Task 7.
-- [ ] Run `bun test tests/core/deletion-tombstones.test.js`, then the full three-command gate.
-- [ ] In real Chrome, delete and Undo one session and delete one manual group. Inspect local storage by key name only to confirm tombstone timestamps exist and Undo has a newer `modifiedAt`; append evidence without copying private tab URLs.
-- [ ] Update user docs, then close the task using the global chain.
+**Adjacent snapshot clarification (2026-07-19):** deletion and Undo read `sessions`, `manualGroups`, and `driveSyncTombstones` in one three-key `Storage.getMany()` snapshot before mutation. The earlier two-key read could not validate Drive v2's full-document 25 MiB and 100,000-tab/URL aggregate limits when the untouched section supplied the excess. The commit remains one `Storage.setMany()` call containing only the affected entity collection plus `driveSyncTombstones`.
+
+- [x] Write tests first proving session/group removal and the matching tombstone are supplied in the same `Storage.setMany()` call. Inject a storage rejection and assert neither the entity collection nor tombstones change in the mock.
+- [x] Cover maximum-timestamp behavior per ID using Task 7's timestamp helpers. Reject a supplied `deletedAt` unless it is a non-negative safe integer no greater than `MAX_DRIVE_TOMBSTONE`. Compute `Math.max(deletedAt, getDriveEntityTimestamp(entity), normalizeDriveTombstone(previousTombstone))`; if the entity timestamp exceeds `MAX_DRIVE_TOMBSTONE`, fail closed because no representable tombstone could dominate it. Add `NaN`, `Infinity`, negative, numeric-string, ceiling, and future-timestamp cases so malformed values cannot poison the tombstone map and a clock-skewed/future entity cannot immediately resurrect.
+- [x] Cover batch auto-save/retention deletion so every removed session ID receives the same or later timestamp. Assert no retention path writes the filtered `sessions` array directly.
+- [x] Cover Undo with the same finite timestamp policy. Reject `restoredAt` unless it is a non-negative safe integer no greater than `MAX_DRIVE_TIMESTAMP`; given tombstone `T`, `restoreDeletedSession()` retains `T` and sets `modifiedAt` to `Math.max(restoredAt, getDriveEntityTimestamp(session), T + 1)`. `MAX_DRIVE_TOMBSTONE` guarantees `T + 1` remains exact and schema-valid. Add malformed prior session timestamps plus invalid `restoredAt` cases and prove Undo survives the next merge.
+- [x] Add a two-profile test: delete on profile A, update older on profile B, merge both ways, and assert deletion converges; repeat with a genuinely newer update and assert the entity survives while its tombstone remains.
+- [x] Run `bun test tests/core/deletion-tombstones.test.js` and preserve failures from direct storage deletion paths.
+- [x] Add pure tombstone-update helpers to `core/drive-sync.js`; never mutate the object returned by storage.
+- [x] Implement `deleteSessions()` and make `deleteSession()` delegate to it. Return the exact per-ID tombstone map because batch members may have different prior/entity timestamps. Route explicit session deletion, rolling auto-save cleanup, and alarm retention through the same locked worker function.
+- [x] Route `undoDeleteSession` through `restoreDeletedSession()` rather than pushing the old record directly.
+- [x] Make `core/grouping.js::deleteManualGroup()` write `manualGroups` and `driveSyncTombstones` together under the Task 7 lock. The existing centralized `deleteManualGroup` action uses it; all other group mutations remain worker-owned as established in Task 7.
+- [x] Run `bun test tests/core/deletion-tombstones.test.js`, then the full three-command gate. **Final evidence:** focused `36/0/340`; full and coverage `407/0/2100`; mutation lock `27/0/149`; syntax `2/0/90`; whitespace and version parity pass under Bun `1.3.11`. Coverage is recorded honestly without a repository-wide threshold.
+- [x] In real Chrome, delete and Undo one session and delete one manual group. Inspect local storage by key name only to confirm tombstone timestamps exist and Undo has a newer `modifiedAt`; append evidence without copying private tab URLs. **Completed functional tree `7e1ab1c081a1bc3f4128903b1e924e803c5427a8` passed with zero HTTP(S) attempts and complete cleanup; the controller reruns after the evidence-only prose delta. Live Drive is blocked and unpassed.**
+- [x] Update user docs, then close the task using the global chain. **User docs, version, evidence, and independent review are complete. The controller now commits, tags, pushes, and verifies exact-commit CI. Task 8 does not create a GitHub release; Phase 2 releases after Task 11.**
 
 ### Task 9: Define portable export v2 and secret-free section merges
 

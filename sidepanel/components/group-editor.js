@@ -699,7 +699,11 @@ export class GroupEditor {
 
   async deleteGroup(groupId, name) {
     try {
-      await this.send({ action: 'deleteManualGroup', groupId });
+      const result = await this.send({ action: 'deleteManualGroup', groupId });
+      if (result?.deleted !== true) {
+        this.notify('Group was not deleted because it no longer exists', 'error');
+        return false;
+      }
     } catch {
       this.notify('Failed to delete group', 'error');
       return false;

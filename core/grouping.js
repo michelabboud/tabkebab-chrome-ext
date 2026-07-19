@@ -8,6 +8,15 @@ import { solve } from './engine/solver.js';
 import { solveWithAI } from './engine/solver-ai.js';
 import { plan } from './engine/planner.js';
 import { execute, moveTabsInBatches } from './engine/executor.js';
+import {
+  DRIVE_TOMBSTONES_KEY,
+  MAX_DRIVE_TIMESTAMP,
+  assertBoundedDriveJsonValue,
+  canonicalizeLocalDriveSyncDocument,
+  emptyDriveTombstones,
+  migrateDriveSyncDocument,
+  recordDeletionTombstones,
+} from './drive-sync.js';
 
 const MAX_VERIFY_PASSES = 3;
 const MIN_WINDOW_TABS = 3;
@@ -571,12 +580,69 @@ export async function createManualGroup(name, color) {
   return { groupId, group };
 }
 
-export async function deleteManualGroup(groupId) {
-  const groups = await getManualGroups();
-  if (!Object.hasOwn(groups, groupId)) throw new Error('Manual group not found');
-  delete groups[groupId];
-  await Storage.set('manualGroups', groups);
-  return { deleted: true };
+function isValidPortableTimestamp(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_DRIVE_TIMESTAMP;
+}
+
+function sanitizeLegacyGroupTimestamps(value) {
+  assertBoundedDriveJsonValue(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Manual group must be a plain object');
+  }
+  const output = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if ((key === 'createdAt' || key === 'modifiedAt') && !isValidPortableTimestamp(entry)) continue;
+    output[key] = entry;
+  }
+  return output;
+}
+
+function canonicalizeLocalManualGroups(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Stored manual groups must be a map');
+  }
+  const sanitized = Object.create(null);
+  for (const [id, entry] of Object.entries(value)) {
+    sanitized[id] = sanitizeLegacyGroupTimestamps(entry);
+  }
+  return migrateDriveSyncDocument({
+    version: 1,
+    sessions: [],
+    manualGroups: sanitized,
+  }).manualGroups;
+}
+
+export async function deleteManualGroup(groupId, deletedAt = Date.now()) {
+  recordDeletionTombstones(
+    emptyDriveTombstones(),
+    'manualGroups',
+    [{ id: groupId, entity: null }],
+    deletedAt,
+  );
+  const snapshot = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
+  const groups = canonicalizeLocalManualGroups(snapshot.manualGroups ?? {});
+  if (!Object.hasOwn(groups, groupId)) return { deleted: false, tombstoneAt: null };
+
+  const { nextTombstones, recordedTombstones } = recordDeletionTombstones(
+    snapshot[DRIVE_TOMBSTONES_KEY] ?? emptyDriveTombstones(),
+    'manualGroups',
+    [{ id: groupId, entity: groups[groupId] }],
+    deletedAt,
+  );
+  const nextGroups = Object.create(null);
+  for (const [id, entry] of Object.entries(groups)) {
+    if (id !== groupId) nextGroups[id] = entry;
+  }
+  const canonical = canonicalizeLocalDriveSyncDocument({
+    sessions: snapshot.sessions,
+    manualGroups: nextGroups,
+    tombstones: nextTombstones,
+  });
+  await Storage.setMany({
+    manualGroups: canonical.manualGroups,
+    [DRIVE_TOMBSTONES_KEY]: canonical.tombstones,
+  });
+  return { deleted: true, tombstoneAt: recordedTombstones[groupId] };
 }
 
 export async function moveTabToManualGroup(tabUrl, targetGroupId) {

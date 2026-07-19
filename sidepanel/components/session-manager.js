@@ -8,6 +8,7 @@ import { formatRestoreFeedback } from '../restore-feedback.js';
 export class SessionManager {
   constructor(rootEl) {
     this.root = rootEl;
+    this.notify = showToast;
     this.savedListEl = rootEl.querySelector('#session-list-saved');
     this.autoListEl = rootEl.querySelector('#session-list-auto');
     this.activeRestoreId = null;
@@ -97,12 +98,14 @@ export class SessionManager {
     }
   }
 
-  async refresh() {
+  async refresh({ notifyFailure = true } = {}) {
     try {
       const sessions = await this.send({ action: 'listSessions' });
       this.render(sessions);
+      return true;
     } catch {
-      showToast('Failed to load sessions', 'error');
+      if (notifyFailure) this.notify('Failed to load sessions', 'error');
+      return false;
     }
   }
 
@@ -236,20 +239,7 @@ export class SessionManager {
     });
 
     const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
-      await this.send({ action: 'deleteSession', sessionId: session.id });
-      this.refresh();
-      showToast(`Deleted "${session.name}"`, 'success', 8000, {
-        label: 'Undo',
-        callback: async () => {
-          try {
-            await this.send({ action: 'undoDeleteSession', session });
-            showToast(`Restored "${session.name}"`, 'success');
-            this.refresh();
-          } catch {
-            showToast('Undo failed', 'error');
-          }
-        },
-      });
+      await this.deleteSessionRecord(session);
     });
 
     actions.appendChild(restoreBtn);
@@ -258,6 +248,50 @@ export class SessionManager {
     actions.appendChild(deleteBtn);
 
     return card;
+  }
+
+  async deleteSessionRecord(session) {
+    let deletion;
+    try {
+      deletion = await this.send({ action: 'deleteSession', sessionId: session.id });
+    } catch (error) {
+      this.notify(`Delete failed: ${error.message}`, 'error');
+      return false;
+    }
+    if (deletion?.deleted !== true) {
+      this.notify('Session was not deleted because it no longer exists', 'error');
+      await this.refresh();
+      return false;
+    }
+
+    const undoOptions = {
+      label: 'Undo',
+      callback: async () => {
+        let result;
+        try {
+          result = await this.send({ action: 'undoDeleteSession', session });
+          if (result?.restored !== true) throw new Error('Worker did not confirm the restore');
+        } catch (error) {
+          this.notify(`Undo failed: ${error.message}`, 'error');
+          return;
+        }
+        try {
+          const refreshed = await this.refresh({ notifyFailure: false });
+          if (refreshed === false) throw new Error('Session view refresh failed');
+          this.notify(`Restored "${session.name}"`, 'success');
+        } catch {
+          this.notify(`Restored "${session.name}", but the view could not refresh`, 'error');
+        }
+      },
+    };
+    try {
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (refreshed === false) throw new Error('Session view refresh failed');
+      this.notify(`Deleted "${session.name}"`, 'success', 8000, undoOptions);
+    } catch {
+      this.notify(`Deleted "${session.name}", but the view could not refresh`, 'error', 8000, undoOptions);
+    }
+    return true;
   }
 
   buildMetaText(session, dateStr) {

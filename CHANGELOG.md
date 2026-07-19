@@ -4,6 +4,32 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.10] — 2026-07-19
+
+### Added
+
+- Retained Drive v2 deletion tombstones for explicit, rolling auto-save, and alarm-retention session deletion, plus manual-group deletion.
+- Regression coverage for bounded timestamp/capacity policy, inherited-key rejection, full-document 25 MiB and 100,000-tab/URL limits, transactional storage failures, worker-lock ordering, checked panel outcomes, and two-profile merge convergence.
+
+### Changed
+
+- Session and manual-group deletion now read one complete three-key portable-state snapshot, validate it against the existing Drive v2 aggregate limits, and commit only the two affected keys together in one `Storage.setMany()` call.
+- Session Undo replaces any same-ID copy with exactly one canonical record whose `modifiedAt` is strictly newer than the retained tombstone. The next ordinary sync propagates both deletion and Undo convergence state.
+- Rolling auto-save and alarm retention share one captured operation clock and route every removed session through the same worker-serialized batch transaction as explicit deletion.
+- Session and group controls show success only after an explicit checked worker confirmation; a missing entity, worker rejection, or post-commit refresh failure is reported without presenting an uncommitted operation as successful.
+
+### Fixed
+
+- Prevented stale session or manual-group copies on another profile from resurrecting after local deletion.
+- Prevented Undo from restoring a timestamp that the retained deletion tombstone would immediately suppress at the next merge.
+- Prevented a rejected storage write or an invalid/unrepresentable clock, ID, resource count, or canonical byte size from partially deleting local state.
+
+### Verification note
+
+- Regression-first work began with a genuine `2 pass / 17 fail / 30 assertions` run against the Task 7 production tree. Reviewer-driven RED/GREEN additions expanded the focused file to `36 pass / 0 fail / 340 assertions`. The final full and coverage runs each report `407 pass / 0 fail / 2100 assertions`; syntax reports `2 pass / 0 fail / 90 assertions`; whitespace, version `1.2.10`, and the no-dependency-change audit pass under Bun `1.3.11`.
+- Real Chrome for Testing `148.0.7778.96` exercised the completed functional tree `7e1ab1c081a1bc3f4128903b1e924e803c5427a8` through the production panel and worker. Session Delete changed `sessions` and `driveSyncTombstones` once, Undo restored exactly one session with `modifiedAt` greater than the unchanged tombstone, and group Delete changed `manualGroups` and `driveSyncTombstones` once. The only later tracked delta records this evidence/status; the controller reruns the same harness after that prose-only delta and records the terminal tree in the local closeout report.
+- The browser run made zero HTTP(S) requests and is not live-Drive evidence. Live Drive remains **unpassed** because the disposable unpacked identity has no matching registered OAuth client and the disposable profile was not operator-authenticated; no token or Drive artifact was created.
+
 ## [1.2.9] — 2026-07-19
 
 ### Added

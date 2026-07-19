@@ -3,6 +3,79 @@
 import { getAllTabs } from './tabs-api.js';
 import { Storage } from './storage.js';
 import { restoreTabWindows } from './tab-restore.js';
+import {
+  DRIVE_TOMBSTONES_KEY,
+  MAX_DRIVE_STRING_LENGTH,
+  MAX_DRIVE_TIMESTAMP,
+  assertBoundedDriveJsonValue,
+  canonicalizeLocalDriveSyncDocument,
+  computeDeletionTombstone,
+  emptyDriveTombstones,
+  getDriveEntityTimestamp,
+  migrateDriveSyncDocument,
+  normalizeDriveTombstone,
+  recordDeletionTombstones,
+} from './drive-sync.js';
+
+const DANGEROUS_PORTABLE_IDS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isPlainRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateSessionId(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_DRIVE_STRING_LENGTH ||
+    DANGEROUS_PORTABLE_IDS.has(value)
+  ) {
+    throw new TypeError('Session ID must be a non-empty bounded safe string');
+  }
+  return value;
+}
+
+function isValidEntityTimestamp(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_DRIVE_TIMESTAMP;
+}
+
+function sanitizeLegacySessionTimestamps(value) {
+  assertBoundedDriveJsonValue(value);
+  if (!isPlainRecord(value)) throw new TypeError('Session must be a plain object');
+  const output = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if ((key === 'createdAt' || key === 'modifiedAt') && !isValidEntityTimestamp(entry)) continue;
+    output[key] = entry;
+  }
+  return output;
+}
+
+function canonicalizeLocalSessions(value) {
+  if (!Array.isArray(value)) throw new TypeError('Stored sessions must be an array');
+  return migrateDriveSyncDocument({
+    version: 1,
+    sessions: value.map(sanitizeLegacySessionTimestamps),
+    manualGroups: {},
+  }).sessions;
+}
+
+function sortCanonicalSessions(sessions) {
+  return [...sessions].sort((left, right) => {
+    const leftCreated = isValidEntityTimestamp(left.createdAt) ? left.createdAt : 0;
+    const rightCreated = isValidEntityTimestamp(right.createdAt) ? right.createdAt : 0;
+    if (rightCreated !== leftCreated) return rightCreated - leftCreated;
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  });
+}
+
+function validateRestoreTimestamp(value) {
+  if (!isValidEntityTimestamp(value)) {
+    throw new TypeError('Restore timestamp must be a non-negative safe integer');
+  }
+  return value;
+}
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -141,8 +214,86 @@ export async function listSessions() {
   return sessions.map(migrateV1toV2);
 }
 
-export async function deleteSession(sessionId) {
-  const sessions = (await Storage.get('sessions')) || [];
-  const filtered = sessions.filter(s => s.id !== sessionId);
-  await Storage.set('sessions', filtered);
+export async function deleteSessions(sessionIds, deletedAt = Date.now()) {
+  if (!Array.isArray(sessionIds)) throw new TypeError('Session IDs must be an array');
+  computeDeletionTombstone(null, 0, deletedAt);
+
+  const requestedIds = [];
+  const seen = new Set();
+  for (const value of sessionIds) {
+    const id = validateSessionId(value);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    requestedIds.push(id);
+  }
+
+  const snapshot = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
+  const sessions = canonicalizeLocalSessions(snapshot.sessions ?? []);
+  const byId = new Map(sessions.map((entry) => [entry.id, entry]));
+  const deletedIds = requestedIds.filter((id) => byId.has(id));
+  if (deletedIds.length === 0) {
+    return { deletedIds: [], tombstones: Object.create(null) };
+  }
+
+  const { nextTombstones, recordedTombstones } = recordDeletionTombstones(
+    snapshot[DRIVE_TOMBSTONES_KEY] ?? emptyDriveTombstones(),
+    'sessions',
+    deletedIds.map((id) => ({ id, entity: byId.get(id) })),
+    deletedAt,
+  );
+  const deletedSet = new Set(deletedIds);
+  const remaining = sessions.filter(({ id }) => !deletedSet.has(id));
+  const canonical = canonicalizeLocalDriveSyncDocument({
+    sessions: remaining,
+    manualGroups: snapshot.manualGroups,
+    tombstones: nextTombstones,
+  });
+  await Storage.setMany({
+    sessions: canonical.sessions,
+    [DRIVE_TOMBSTONES_KEY]: canonical.tombstones,
+  });
+  return { deletedIds, tombstones: recordedTombstones };
+}
+
+export async function deleteSession(sessionId, deletedAt = Date.now()) {
+  const result = await deleteSessions([sessionId], deletedAt);
+  if (result.deletedIds.length === 0) return { deleted: false, tombstoneAt: null };
+  return { deleted: true, tombstoneAt: result.tombstones[sessionId] };
+}
+
+export async function restoreDeletedSession(session, restoredAt = Date.now()) {
+  const restoreTimestamp = validateRestoreTimestamp(restoredAt);
+  const [candidate] = canonicalizeLocalSessions([session]);
+  validateSessionId(candidate.id);
+
+  const snapshot = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
+  const currentSessions = canonicalizeLocalSessions(snapshot.sessions ?? []);
+  const { nextTombstones } = recordDeletionTombstones(
+    snapshot[DRIVE_TOMBSTONES_KEY] ?? emptyDriveTombstones(),
+    'sessions',
+    [],
+    0,
+  );
+  const retainedTombstone = normalizeDriveTombstone(nextTombstones.sessions[candidate.id]);
+  const modifiedAt = Math.max(
+    restoreTimestamp,
+    getDriveEntityTimestamp(candidate),
+    retainedTombstone + 1,
+  );
+  const [restored] = canonicalizeLocalSessions([{ ...candidate, modifiedAt }]);
+  const nextSessions = sortCanonicalSessions(canonicalizeLocalSessions([
+    ...currentSessions.filter(({ id }) => id !== restored.id),
+    restored,
+  ]));
+  const canonical = canonicalizeLocalDriveSyncDocument({
+    sessions: nextSessions,
+    manualGroups: snapshot.manualGroups,
+    tombstones: nextTombstones,
+  });
+
+  await Storage.setMany({
+    sessions: canonical.sessions,
+    [DRIVE_TOMBSTONES_KEY]: canonical.tombstones,
+  });
+  return canonical.sessions.find(({ id }) => id === restored.id);
 }

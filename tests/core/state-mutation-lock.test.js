@@ -357,19 +357,20 @@ describe('service-worker portable-state ownership', () => {
     expect(harness.calls.storage.local.set).toHaveLength(writes);
   });
 
-  test('validates Undo sessions and rejects duplicate IDs before the single write', async () => {
+  test('validates Undo sessions and replaces duplicate IDs in the single transaction', async () => {
     const harness = installChromeMock({ local: { sessions: [session('existing')] } });
     const worker = await freshWorker('undo-validation');
     await expect(worker.handleMessage({
       action: 'undoDeleteSession', session: session('restored', 2),
-    })).resolves.toEqual({ success: true });
+    })).resolves.toEqual({ restored: true, modifiedAt: expect.any(Number) });
     expect(harness.snapshot().local.sessions.map(({ id }) => id)).toEqual(['restored', 'existing']);
     const writes = harness.calls.storage.local.set.length;
     await expect(worker.handleMessage({
       action: 'undoDeleteSession', session: session('existing', 3),
-    })).rejects.toThrow(/exist|duplicate/i);
+    })).resolves.toEqual({ restored: true, modifiedAt: expect.any(Number) });
+    expect(harness.snapshot().local.sessions.filter(({ id }) => id === 'existing')).toHaveLength(1);
     await expect(worker.handleMessage({ action: 'undoDeleteSession', session: { id: '' } })).rejects.toThrow();
-    expect(harness.calls.storage.local.set).toHaveLength(writes);
+    expect(harness.calls.storage.local.set).toHaveLength(writes + 1);
   });
 
   test('explicit delete and Undo wait behind an existing mutation and settle FIFO', async () => {
@@ -416,7 +417,7 @@ describe('service-worker portable-state ownership', () => {
         { id: 'keep', name: '[Auto] keep', createdAt: 19 },
         { id: 'old', name: '[Auto] old', createdAt: 1 },
       ],
-      setStorage: async () => { order.push('auto:retention'); },
+      deleteSessions: async () => { order.push('auto:retention'); },
       now: () => 10 * 24 * 60 * 60 * 1000,
     });
     await saveEntered.promise;
@@ -449,7 +450,7 @@ describe('service-worker portable-state ownership', () => {
             { id: 'old', name: '[Auto] Old', createdAt: 1 },
           ]
         : { connected: true },
-      setStorage: async () => {
+      deleteSessions: async () => {
         order.push('retention:write');
         retentionEntered.resolve();
         await retentionGate.promise;
@@ -500,7 +501,7 @@ describe('service-worker portable-state ownership', () => {
 
     await expect(worker.handleMessage({
       action: 'deleteManualGroup', groupId: created.groupId,
-    })).resolves.toEqual({ deleted: true });
+    })).resolves.toEqual({ deleted: true, tombstoneAt: expect.any(Number) });
     expect(Object.hasOwn(harness.snapshot().local.manualGroups, created.groupId)).toBeFalse();
   });
 
@@ -783,7 +784,9 @@ describe('panel mutation and checked-message boundaries', () => {
           return selector === '#new-group-name' ? nameInput : colorSelect;
         },
       };
-      manager.send = async () => ({ success: true });
+      manager.send = async ({ action }) => action === 'deleteManualGroup'
+        ? { deleted: true, tombstoneAt: 1 }
+        : { success: true };
       manager.notify = (message, type) => notices.push({ message, type });
       manager.refresh = async () => { throw new Error('projection failed'); };
 

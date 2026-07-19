@@ -415,3 +415,122 @@ The identity-only preflight launched a clean disposable Chrome/Xvfb profile, obs
 ## Task 6 release disposition
 
 On 2026-07-19, the repository owner explicitly directed the controller to commit, tag, push, and publish `v1.2.8` without waiting for the blocked real Chrome/Drive fixture. The live gate remains unpassed and is not replaced by the deterministic adapter tests. The release proceeds on the independently reviewed focused, full, coverage, syntax, and diff evidence above; the credential-safe live fixture remains tracked as post-release validation.
+
+---
+
+Slice: Task 8, transactional session/manual-group deletion convergence
+
+Extension version: `1.2.10`
+
+## Task 8 preliminary real-Chrome local boundary
+
+**PRELIMINARY AND SUPERSEDED — final-tree rerun pending.** This run exercised working tree `0ceb06691bf3968e738bd3e8b3eec3966e64ed59`. Reviewer-driven deterministic additions after that run expanded the resource-boundary and checked-panel coverage, so this evidence must not be represented as the exact final Task 8 tree.
+
+The harness used the installed official Chrome for Testing build and the actual unpacked extension:
+
+```text
+Google Chrome for Testing 148.0.7778.96
+binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
+extension ID: igggfmpiljhefkagnphadfadollcimlh
+tested tree: 0ceb06691bf3968e738bd3e8b3eec3966e64ed59 (superseded)
+final commit/tree: PENDING FINAL-TREE RERUN
+```
+
+The disposable profile opened the production side-panel document and exercised its checked controls, the real Manifest V3 worker, the FIFO mutation boundary, and `chrome.storage.local`. Fixture records contained only synthetic private-free values. Storage evidence recorded key names, change counts, and timestamp comparisons; it did not copy session payloads, private URLs, tombstone maps, or browsing history.
+
+## Task 8 preliminary redacted results
+
+```text
+session Delete:
+  sessions changes: 1
+  driveSyncTombstones changes: 1
+  deleted session copies after action: 0
+
+session Undo:
+  sessions changes: 1
+  driveSyncTombstones changes: 0
+  restored session copies after action: 1
+  restored modifiedAt > retained tombstone: true
+  retained tombstone unchanged: true
+
+manual-group Delete:
+  manualGroups changes: 1
+  driveSyncTombstones changes: 1
+  deleted group copies after action: 0
+
+HTTP(S) requests observed: 0
+liveDrivePassed: false
+```
+
+The local results prove that the preliminary tree supplied each deletion and its matching tombstone through the production panel/worker/storage boundary, while Undo restored exactly one strictly newer session and retained the existing convergence marker. Because no HTTP(S) request occurred, this run proves no remote synchronization or two-profile Drive convergence.
+
+## Task 8 live Drive boundary
+
+**BLOCKED — no live Drive claim was made.** The disposable unpacked extension ID `igggfmpiljhefkagnphadfadollcimlh` has no matching registered OAuth client, and the clean disposable profile had no operator-authenticated Google test-user session. The run therefore did not request or expose an OAuth token, issue a Drive request, create a throwaway Drive folder/file, or inspect a remote document. Deterministic two-profile merge tests establish the local merge truth table but are not substituted for the blocked live-Drive fixture.
+
+Credential-safe follow-up still requires an approved registered identity/client environment and an operator-authenticated disposable Google test-user session. Both disposable browser profiles must use the same uniquely named throwaway Drive scope; distinct local profiles with distinct remote folders would not prove convergence.
+
+## Task 8 preliminary cleanup
+
+The harness shut down the disposable browser/display processes and removed its profile and temporary paths. Its cleanup counters and the post-run audit were all zero for remaining Task 8 resources:
+
+```text
+remaining disposable profile paths: 0
+remaining matching Chrome processes: 0
+remaining matching Xvfb processes: 0
+remaining CDP listeners: 0
+remaining temporary fixture paths: 0
+remaining throwaway Drive artifacts: 0 (none were created)
+```
+
+No browser, display server, listener, fixture server, credential, temporary profile, or remote artifact was left running or stored.
+
+## Task 8 completed functional-tree local evidence
+
+After every production, test, user-documentation, and version change was present,
+the controller reran the same fail-closed harness against exact tree
+`7e1ab1c081a1bc3f4128903b1e924e803c5427a8`. The installed browser and unpacked
+identity again matched the approved fixture:
+
+```text
+Google Chrome for Testing 148.0.7778.96
+binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
+extension ID: igggfmpiljhefkagnphadfadollcimlh
+tested tree: 7e1ab1c081a1bc3f4128903b1e924e803c5427a8
+```
+
+Every bounded assertion passed:
+
+```text
+session deletion absent after action: true
+session tombstone safe integer: true
+session collection+tombstone in one change event: true
+session success rendered after commit: true
+Undo restored exactly one session: true
+Undo modifiedAt strictly newer than tombstone: true
+Undo retained tombstone unchanged: true
+Undo success rendered after commit: true
+manual group absent after action: true
+manual-group tombstone safe integer: true
+manual-group collection+tombstone in one change event: true
+manual-group success rendered after commit: true
+extension HTTP(S) attempts intercepted before network: 0
+external requests reaching network: 0
+liveDrivePassed: false
+```
+
+The disposable profile contained 249 entries before removal. Harness cleanup
+reported the profile removed and both Chrome and Xvfb exited. A separate host
+audit then found zero matching profile/index paths, Chrome/Xvfb processes, or
+TCP listeners on the disposable display port.
+
+This result matches the earlier preliminary local evidence. An exact-tree review
+then found that the session panel's existing `refresh()` catch swallowed a failed
+post-commit projection, making the new deletion/Undo refresh-failure outcome
+unreachable. The repair makes refresh return an explicit checked status and the
+regression now exercises that production method instead of replacing it with a
+rejecting stub. Because that is a runtime/test delta after tree `7e1ab1c...`, the
+controller reruns the same bounded harness after the repair and records the exact
+terminal tree and cleanup in the local Task 8 closeout report. Live Drive remains
+blocked and unpassed; nothing in this row substitutes for two authenticated
+profiles converging through one shared throwaway Drive scope.

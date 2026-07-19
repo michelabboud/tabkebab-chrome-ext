@@ -136,6 +136,7 @@ A unified editor for managing tab groups. Three collapsible sections:
    - **Smart search input** — type to filter open tabs by title or URL; matching tabs appear with a **+** button to add them to the group
    - **URL paste** — if the input looks like a URL, an "Add URL" option appears to add it directly
    - **Apply to Chrome** — creates a native Chrome tab group from the custom group
+   - **Delete** — removes the custom group locally; its deletion propagates to other connected profiles at the next sync
 2. **Chrome Tab Groups** — lists all native Chrome tab groups with their color and title. Click to expand and see member tabs. Groups with no title display as "Untitled Group".
 3. **Ungrouped Tabs** — tabs not belonging to any group.
 
@@ -311,7 +312,9 @@ The default discard pipeline temporarily mutes only background tabs that are abo
 ### Session Actions
 
 - **Export** — download as JSON (arrow icon)
-- **Delete** — remove permanently with 8-second undo via toast
+- **Delete** — remove locally with an 8-second Undo action. The deletion propagates to other connected profiles at the next sync.
+
+Session Undo restores exactly one newer copy while retaining the deletion's convergence metadata. That retained metadata prevents an older copy from another profile from replacing the restored session during the next sync. Manual-group deletion also propagates at the next sync, but it does not offer Undo.
 
 ---
 

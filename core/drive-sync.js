@@ -195,6 +195,7 @@ function normalizeSessions(value) {
   for (let index = 0; index < value.length; index += 1) {
     const entity = value[index];
     if (!isPlainRecord(entity)) fail(`sessions[${index}] must be an object`);
+    if (!Object.hasOwn(entity, 'id')) fail(`sessions[${index}].id must be an own property`);
     const id = validateId(entity.id, `sessions[${index}].id`);
     if (seen.has(id)) fail(`sessions contains duplicate ID ${id}`);
     seen.add(id);
@@ -266,6 +267,100 @@ export function getDriveEntityTimestamp(entity) {
 
 export function normalizeDriveTombstone(value) {
   return isTombstone(value) ? value : 0;
+}
+
+function assertDeletionTimestamp(value) {
+  if (!isTombstone(value)) {
+    throw new TypeError('Deletion timestamp must be a non-negative safe integer within the tombstone range');
+  }
+  return value;
+}
+
+/**
+ * Compute a deletion timestamp that is at least as new as the entity and any
+ * prior tombstone. An entity at MAX_DRIVE_TIMESTAMP cannot be represented by
+ * the stricter tombstone schema and therefore fails closed.
+ */
+export function computeDeletionTombstone(entity, previousTombstone, deletedAt) {
+  const deletionTimestamp = assertDeletionTimestamp(deletedAt);
+  const entityTimestamp = getDriveEntityTimestamp(entity);
+  if (entityTimestamp > MAX_DRIVE_TOMBSTONE) {
+    throw new TypeError('Entity timestamp cannot be represented by a deletion tombstone');
+  }
+  return Math.max(
+    deletionTimestamp,
+    entityTimestamp,
+    normalizeDriveTombstone(previousTombstone),
+  );
+}
+
+function normalizeDeletionTombstoneState(currentTombstones) {
+  const root = isPlainRecord(currentTombstones) ? currentTombstones : {};
+  const output = emptyDriveTombstones();
+  for (const kind of TOMBSTONE_KINDS) {
+    const source = Object.hasOwn(root, kind) && isPlainRecord(root[kind]) ? root[kind] : {};
+    const keys = Object.keys(source);
+    if (keys.length > MAX_DRIVE_TOMBSTONES_PER_KIND) {
+      fail(`tombstones.${kind} exceeds the 10,000 tombstone limit`);
+    }
+    output[kind] = sortedNullMap(keys.map((id) => {
+      validateId(id, `tombstones.${kind} key`);
+      return [id, normalizeDriveTombstone(source[id])];
+    }));
+  }
+  return output;
+}
+
+/**
+ * Purely record one same-kind deletion batch into a fresh canonical tombstone
+ * state. Every entry and capacity change is preflighted before a result exists.
+ */
+export function recordDeletionTombstones(currentTombstones, kind, entries, deletedAt) {
+  assertDeletionTimestamp(deletedAt);
+  if (!TOMBSTONE_KINDS.has(kind)) {
+    throw new TypeError('Deletion tombstone kind must be sessions or manualGroups');
+  }
+  if (!Array.isArray(entries)) throw new TypeError('Deletion tombstone entries must be an array');
+
+  const nextTombstones = normalizeDeletionTombstoneState(currentTombstones);
+  const seen = new Set();
+  const prepared = [];
+  let added = 0;
+  for (const entry of entries) {
+    if (!isPlainRecord(entry)) throw new TypeError('Deletion tombstone entry must be an object');
+    if (!Object.hasOwn(entry, 'id')) throw new TypeError('Deletion tombstone entry must have an own ID');
+    const id = validateId(entry.id, 'deletion tombstone ID');
+    if (seen.has(id)) throw new TypeError(`Duplicate deletion tombstone ID: ${id}`);
+    seen.add(id);
+    if (!Object.hasOwn(nextTombstones[kind], id)) added += 1;
+    prepared.push({
+      id,
+      timestamp: computeDeletionTombstone(
+        entry.entity,
+        nextTombstones[kind][id],
+        deletedAt,
+      ),
+    });
+  }
+
+  if (Object.keys(nextTombstones[kind]).length + added > MAX_DRIVE_TOMBSTONES_PER_KIND) {
+    throw new TypeError(`Deletion would exceed the ${MAX_DRIVE_TOMBSTONES_PER_KIND.toLocaleString('en-US')} tombstone limit`);
+  }
+
+  const updatedEntries = Object.entries(nextTombstones[kind]);
+  const updated = new Map(updatedEntries);
+  for (const { id, timestamp } of prepared) updated.set(id, timestamp);
+  nextTombstones[kind] = sortedNullMap(updated.entries());
+  const canonicalTombstones = migrateDriveSyncDocument({
+    version: DRIVE_SYNC_VERSION,
+    sessions: [],
+    manualGroups: {},
+    tombstones: nextTombstones,
+  }).tombstones;
+  const recordedTombstones = sortedNullMap(
+    prepared.map(({ id, timestamp }) => [id, timestamp]),
+  );
+  return { nextTombstones: canonicalTombstones, recordedTombstones };
 }
 
 export function migrateDriveSyncDocument(input) {
@@ -410,7 +505,7 @@ function normalizeLocalTombstones(value) {
   const output = emptyDriveTombstones();
   const root = isPlainRecord(value) ? value : {};
   for (const kind of TOMBSTONE_KINDS) {
-    const source = isPlainRecord(root[kind]) ? root[kind] : {};
+    const source = Object.hasOwn(root, kind) && isPlainRecord(root[kind]) ? root[kind] : {};
     output[kind] = sortedNullMap(
       Object.keys(source).map((id) => [id, normalizeDriveTombstone(source[id])]),
     );
@@ -418,19 +513,37 @@ function normalizeLocalTombstones(value) {
   return output;
 }
 
-export async function readLocalDriveSyncDocument() {
-  const values = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
-  const sessions = Array.isArray(values.sessions)
-    ? values.sessions.map(normalizeLocalEntity)
-    : values.sessions ?? [];
-  const manualGroups = isPlainRecord(values.manualGroups)
-    ? sortedNullMap(Object.entries(values.manualGroups).map(([id, entity]) => [id, normalizeLocalEntity(entity)]))
-    : values.manualGroups ?? {};
+/**
+ * Canonicalize one complete local portable-state snapshot with Task 7's
+ * defensive timestamp/tombstone recovery and full-document resource limits.
+ */
+export function canonicalizeLocalDriveSyncDocument(input) {
+  if (!isPlainRecord(input)) fail('local state must be an object');
+  const rawSessions = Object.hasOwn(input, 'sessions') ? input.sessions : undefined;
+  const rawManualGroups = Object.hasOwn(input, 'manualGroups') ? input.manualGroups : undefined;
+  const rawTombstones = Object.hasOwn(input, 'tombstones') ? input.tombstones : undefined;
+  const sessions = Array.isArray(rawSessions)
+    ? rawSessions.map(normalizeLocalEntity)
+    : rawSessions ?? [];
+  const manualGroups = isPlainRecord(rawManualGroups)
+    ? sortedNullMap(Object.entries(rawManualGroups).map(
+      ([id, entity]) => [id, normalizeLocalEntity(entity)],
+    ))
+    : rawManualGroups ?? {};
   return migrateDriveSyncDocument({
     version: DRIVE_SYNC_VERSION,
     sessions,
     manualGroups,
-    tombstones: normalizeLocalTombstones(values[DRIVE_TOMBSTONES_KEY]),
+    tombstones: normalizeLocalTombstones(rawTombstones),
+  });
+}
+
+export async function readLocalDriveSyncDocument() {
+  const values = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
+  return canonicalizeLocalDriveSyncDocument({
+    sessions: values.sessions,
+    manualGroups: values.manualGroups,
+    tombstones: values[DRIVE_TOMBSTONES_KEY],
   });
 }
 
