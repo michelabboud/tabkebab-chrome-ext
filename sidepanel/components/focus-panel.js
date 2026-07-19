@@ -236,7 +236,11 @@ export class FocusPanel {
       tabAction: this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none',
     };
     this._profilePrefs[profileId] = prefs;
-    await chrome.storage.local.set({ [PROFILE_PREFS_KEY]: this._profilePrefs });
+    await this.send({
+      action: 'saveFocusProfilePrefs',
+      profileId,
+      preferences: prefs,
+    });
   }
 
   _renderAllowlistTags() {

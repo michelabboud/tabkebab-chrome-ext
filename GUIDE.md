@@ -695,21 +695,33 @@ The keep-awake domain list is managed in this section. Add, remove, or reset dom
 
 ### Full Export
 
-In Settings, use the **Export All** button to download a JSON file containing:
+In **Sessions**, use **Export JSON** to download a portable version-2 backup containing:
+
 - All sessions
 - All stashes
 - All custom groups
-- All settings
 - Keep-awake domain list
+- Local bookmark snapshots
+- Effective general settings, including defaults not yet written to storage
+- Focus profile preferences and history
+- AI provider/model choices and custom base URL, but no API key or passphrase metadata
+
+The export intentionally excludes Drive/OAuth state, install identifiers, active Focus state, caches, and decrypted or encrypted API-key material.
 
 ### Full Import
 
-Use **Import** to load a previously exported JSON file. This merges with existing data (doesn't overwrite unless there are conflicts).
+Use **Import JSON** in **Sessions** to load a supported full or sessions file. TabKebab rejects files above 25 MiB, malformed data, secrets, and the wrong export kind before changing storage.
+
+Imports merge under one service-worker lock. Existing same-ID sessions, stashes, groups, bookmarks, Focus preferences, and history remain authoritative; keep-awake domains are combined; imported general settings update the local settings; and safe AI choices update without replacing an existing encrypted local key. The eight local-storage sections commit together, and IndexedDB stashes are replaced atomically. If either commit fails, TabKebab restores the affected snapshots and reports failure instead of claiming success.
+
+After a settings or full import, TabKebab also refreshes its automation schedules. A red committed-warning message means the data was imported but one or more schedules could not be refreshed; restart TabKebab before relying on automatic actions.
 
 ### Individual Exports
 
-- **Session export**: click the export icon on any session card → downloads `session-{name}.json`
-- **Stash export**: click the export icon on any stash card → downloads `stash-{name}.json`
+- **Session export**: click the export icon on any session card → downloads a one-session v2 file
+- **Stash export**: click the export icon on any stash card → downloads a one-stash v2 file
+- **All stashes**: use **Export Stashes** in Stash; **Import Stashes** accepts only stash files
+- **Settings**: use **Export Settings** or **Import Settings** in Settings; the importer accepts only settings files
 
 ---
 

@@ -534,3 +534,75 @@ controller reruns the same bounded harness after the repair and records the exac
 terminal tree and cleanup in the local Task 8 closeout report. Live Drive remains
 blocked and unpassed; nothing in this row substitutes for two authenticated
 profiles converging through one shared throwaway Drive scope.
+
+---
+
+Slice: Task 10, transactional portable export/import ownership
+
+Extension version: `1.2.12`
+
+## Task 10 real-Chrome portable-data boundary
+
+The fail-closed harness uses the installed official Chrome for Testing build and
+the actual unpacked extension:
+
+```text
+Google Chrome for Testing 148.0.7778.96
+binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
+extension ID: igggfmpiljhefkagnphadfadollcimlh
+```
+
+In a disposable profile, it seeds synthetic records into the eight full-export
+local-storage sections and the real `TabKebabStash` IndexedDB store. It clicks
+the production Sessions **Export JSON** control, waits for Chrome's physical
+download, parses that downloaded file outside the extension, recursively scans
+every key, removes all affected destination data, and sets the file on the real
+hidden import input through CDP. It then waits for the checked panel summary and
+reads Chrome storage plus IndexedDB to verify restoration.
+
+The harness blocks every extension HTTP(S) request at the CDP request stage and
+also maps non-loopback hosts to `NOTFOUND`. Fixture values are synthetic. Its
+report exposes only key counts, booleans, browser/build identity, the generated
+extension ID, and tree identity; it never prints the downloaded document,
+browsing payload, API-key material, OAuth data, or private URLs.
+
+## Task 10 redacted results
+
+```text
+canonical full-v2 envelope: true
+recursive forbidden export keys: 0
+affected local sections exported: 8
+IndexedDB stash records exported: 1
+panel summary: Data import complete — 5 new records, 0 duplicates skipped
+all eight affected local keys restored: true
+session restored: true
+manual group restored: true
+keep-awake domains restored: true
+bookmark snapshot restored: true
+effective settings restored: true
+Focus preferences restored: true
+Focus history restored: true
+safe AI provider/model configuration restored: true
+AI key and passphrase metadata absent: true
+IndexedDB stash restored: true
+unrelated and excluded local state preserved: true
+external requests reaching network: 0
+```
+
+An earlier successful functional-tree run produced these same assertions before
+the final reviewer-requested semantic preflight additions and is therefore not
+the terminal evidence. After all tracked code, tests, documentation, and version
+content is frozen, the controller reruns this exact harness with a tree-hash
+guard. The exact terminal tree, result, and cleanup counters are recorded in the
+gitdir-local Task 10 closeout report so recording the hash cannot itself change
+the tracked tree under test.
+
+## Task 10 cleanup and scope
+
+The harness terminates Chrome and Xvfb, removes both disposable profile and
+download directories, and verifies those paths no longer exist. The terminal
+run must report all four cleanup counters true before the tag is created.
+
+This is a local portable-data proof, not a live Google Drive/OAuth proof. It
+requests no token, creates no Drive artifact, and does not replace the separately
+tracked authenticated Drive fixture.

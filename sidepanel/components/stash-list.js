@@ -3,8 +3,13 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
+import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
 import { formatRestoreFeedback } from '../restore-feedback.js';
+import {
+  formatPortableImportSummary,
+  portableImportToastType,
+} from '../portable-import-summary.js';
 
 export class StashList {
   constructor(rootEl) {
@@ -294,21 +299,12 @@ export class StashList {
 
   async exportSingleStash(stash) {
     try {
-      const payload = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        stashes: [stash],
-      };
-
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tabkebab-stash-${stash.name.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const payload = await this.send({
+        action: 'buildPortableStashExport',
+        stashId: stash.id,
+      });
+      const safeName = (stash.name || 'stash').replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
+      downloadJson(payload, `tabkebab-stash-${safeName}-${Date.now()}.json`);
 
       showToast('Stash exported', 'success');
     } catch (err) {
@@ -318,27 +314,12 @@ export class StashList {
 
   async exportStashes() {
     try {
-      const stashes = await this.send({ action: 'listStashes' });
-      if (!stashes || stashes.length === 0) {
+      const payload = await this.send({ action: 'buildPortableExport', kind: 'stashes' });
+      if (payload.stashes.length === 0) {
         showToast('No stashes to export', 'info');
         return;
       }
-
-      const payload = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        stashes,
-      };
-
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tabkebab-stashes-${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadJson(payload, `tabkebab-stashes-${Date.now()}.json`);
 
       showToast('Stashes exported', 'success');
     } catch (err) {
@@ -351,21 +332,18 @@ export class StashList {
     if (!file) return;
 
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-
-      if (!data.stashes || !Array.isArray(data.stashes)) {
-        throw new Error('No stashes found in file');
-      }
-
-      const result = await this.send({ action: 'importStashes', stashes: data.stashes });
-      showToast(`Imported ${result.imported} stash(es), ${result.skipped} skipped`, 'success');
-      this.refresh();
+      const document = await readPortableImportFile(file, ['stashes']);
+      const result = await this.send({ action: 'importPortableData', document });
+      showToast(
+        formatPortableImportSummary(result, 'Stash import'),
+        portableImportToastType(result),
+      );
+      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
+    } finally {
+      e.target.value = '';
     }
-
-    e.target.value = '';
   }
 
   createBtn(text, className, onClick) {

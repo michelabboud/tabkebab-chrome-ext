@@ -4,6 +4,32 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.12] — 2026-07-19
+
+### Added
+
+- One worker-owned portable-data pipeline for full, session, stash, and settings version-2 exports plus prevalidated imports. Full backups include sessions, IndexedDB stashes, manual groups, keep-awake domains, bookmarks, effective general settings, Focus preferences/history, and sanitized AI configuration.
+- Transactional import orchestration with exact affected-repository snapshots, one local multi-key commit, one atomic IndexedDB stash replacement, deterministic imported/skipped counts, exact rollback, and structured `ImportRollbackError` reporting when rollback itself is incomplete.
+- Regression coverage for exact repository reads/writes, kind-scoped UI inputs, 25 MiB file preflight, worker reparsing, rollback and queued-writer ordering, coherent full snapshots, alarm reconciliation, effective defaults, legacy IDs, and UI-consumed record shapes.
+
+### Changed
+
+- Every panel export now asks the service worker for a canonical snapshot under the shared FIFO state lock; every import uses the same bounded file helper and worker trust boundary. Legacy per-component JSON construction and mutation paths were removed.
+- Settings exports now materialize the complete effective settings profile, and absent keep-awake storage exports the effective protected-domain defaults. Focus preference writes, all stash writers, bookmark creation, settings/AI/keep-awake writers, sessions/groups, and Focus lifecycle/history now serialize with import/export.
+- Successful settings/full imports refresh all managed automation alarms before reporting ordinary success. If data committed but an alarm clear/create fails, the panel reports an explicit committed warning and tells the user to restart before relying on automation.
+
+### Fixed
+
+- Prevented partial local/IndexedDB imports, rollback from erasing a queued mutation, exports mixing state from opposite sides of a concurrent write, and settings imports leaving stale auto-save, kebab, stash, Drive-sync, retention, or bookmark schedules.
+- Rejected worker-bypassing secret-bearing, over-budget, over-depth, polluted, malformed, or UI-breaking documents before repository access, including invalid session/stash names, manual-group records, and Focus preference fields.
+- Kept API keys, passphrase metadata, Drive/OAuth state, install identifiers, active Focus state, and caches out of downloaded files while preserving existing encrypted local AI credentials during merge.
+
+### Verification note
+
+- Final focused verification reports `79 pass / 0 fail / 576 assertions`; full and coverage runs each report `478 pass / 0 fail / 2663 assertions`; coverage is `53.40%` functions and `53.94%` lines with no repository-wide threshold. Syntax, whitespace, version parity, and the no-dependency-change audit pass under Bun `1.3.11`.
+- Independent adversarial review and a separate worker/lock audit found no remaining Critical, Important, or Minor production issue after every reported finding received a RED/GREEN regression and repair.
+- Real Chrome for Testing `148.0.7778.96` exercises the production panel download, physical JSON file, file-input import, service worker, all eight local-storage sections, and IndexedDB with outbound HTTP(S) blocked. The terminal tracked tree and cleanup counters are recorded in the gitdir-local Task 10 closeout report after this tracked documentation is frozen; no OAuth token, private browsing payload, or Drive response is exposed.
+
 ## [1.2.11] — 2026-07-19
 
 ### Added

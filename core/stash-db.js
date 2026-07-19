@@ -1,6 +1,7 @@
 // core/stash-db.js — IndexedDB storage for stashed tabs
 
 import { restoreTabWindows } from './tab-restore.js';
+import { validateStashSection } from './export-schema.js';
 
 const DB_NAME = 'TabKebabStash';
 const DB_VERSION = 1;
@@ -116,6 +117,42 @@ export async function importStashes(stashes) {
   });
 
   return { imported, skipped };
+}
+
+export async function replaceAllStashes(stashes) {
+  const validated = validateStashSection(stashes);
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    let transaction;
+    let firstError = null;
+    try {
+      transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const requests = [store.clear(), ...validated.map((stash) => store.put(stash))];
+      for (const request of requests) {
+        request.onerror = () => {
+          firstError ||= request.error || new Error('IndexedDB stash replacement request failed');
+        };
+      }
+    } catch (error) {
+      try {
+        transaction?.abort();
+      } catch {
+        // The original synchronous IndexedDB failure remains authoritative.
+      }
+      reject(error);
+      return;
+    }
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      firstError ||= transaction.error || new Error('IndexedDB stash replacement failed');
+    };
+    transaction.onabort = () => {
+      reject(firstError || transaction.error || new Error('IndexedDB stash replacement aborted'));
+    };
+  });
 }
 
 export async function clearAllStashes() {

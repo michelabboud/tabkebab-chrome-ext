@@ -3,8 +3,13 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { Storage } from '../../core/storage.js';
+import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
 import { formatDriveCleanupResult } from '../drive-cleanup-result.js';
+import {
+  formatPortableImportSummary,
+  portableImportToastType,
+} from '../portable-import-summary.js';
 
 export class SettingsManager {
   constructor(rootEl, {
@@ -202,21 +207,8 @@ export class SettingsManager {
 
   async exportSettings() {
     try {
-      const settings = await this.send({ action: 'getSettings' });
-      const payload = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        settings,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tabkebab-settings-${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const payload = await this.send({ action: 'buildPortableExport', kind: 'settings' });
+      downloadJson(payload, `tabkebab-settings-${Date.now()}.json`);
       showToast('Settings exported', 'success');
     } catch (err) {
       showToast('Export failed: ' + err.message, 'error');
@@ -228,21 +220,18 @@ export class SettingsManager {
     if (!file) return;
 
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-
-      if (!data.settings || typeof data.settings !== 'object') {
-        throw new Error('No valid settings found in file');
-      }
-
-      await this.send({ action: 'saveSettings', settings: data.settings });
-      showToast('Settings imported', 'success');
-      this.refresh();
+      const document = await readPortableImportFile(file, ['settings']);
+      const result = await this.send({ action: 'importPortableData', document });
+      showToast(
+        formatPortableImportSummary(result, 'Settings import'),
+        portableImportToastType(result),
+      );
+      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
+    } finally {
+      e.target.value = '';
     }
-
-    e.target.value = '';
   }
 
   send(msg) {

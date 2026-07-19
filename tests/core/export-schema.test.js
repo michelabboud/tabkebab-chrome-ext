@@ -291,7 +291,11 @@ describe('portable export v2 envelope and sanitization', () => {
         alpha: { modifiedAt: 1, createdAt: 1, tabUrls: [], color: 'red', name: 'Alpha' },
       },
       focusProfilePrefs: {
-        zed: { strictMode: false, nested: { z: 1, a: 2 } },
+        zed: {
+          strictMode: false,
+          duration: 25,
+          allowlist: [{ value: 'example.test', type: 'domain' }],
+        },
         alpha: { strictMode: true },
       },
     });
@@ -302,7 +306,11 @@ describe('portable export v2 envelope and sanitization', () => {
       },
       focusProfilePrefs: {
         alpha: { strictMode: true },
-        zed: { nested: { a: 2, z: 1 }, strictMode: false },
+        zed: {
+          allowlist: [{ type: 'domain', value: 'example.test' }],
+          duration: 25,
+          strictMode: false,
+        },
       },
     });
 

@@ -2,13 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.11`
+- Repository version: `1.2.12`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–9 implemented; the complete, bounded portable-export v2 schema now provides secret-free construction, version-1 normalization, deterministic section merges, and explicit import recovery above retained tombstones
+- Implementation status: Tasks 1–10 implemented; every portable export/import UI path now uses the bounded version-2 schema through one worker-owned FIFO lock, with transactional local/IndexedDB apply, exact rollback, effective defaults, and secret-free files
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
-- Phase 2 status: `v1.2.10` is published with exact-commit CI green; Task 9 implementation, independent review, documentation, and deterministic gates are complete at `1.2.11`, while the commit/tag/push and exact-commit CI checkpoint remain
+- Phase 2 status: `v1.2.11` is tagged with exact-commit CI green; Task 10 implementation, independent review, real-Chrome proof, documentation, and local deterministic gates are complete at `1.2.12`, while this task's commit/tag/push and exact-commit CI checkpoint remain
 
 ## Completed implementation slices
 
@@ -92,6 +92,16 @@
 - Current Focus history merges by `runId`; published pre-`runId` history remains compatible through a separate legacy `id` namespace. Stash transaction validation requires the IndexedDB `createdAt` index key and always revalidates mutable caller data rather than trusting a persistent brand.
 - Initial RED evidence was `0 pass / 2 fail / 1 error / 2 assertions`; subsequent controller/reviewer RED/GREEN cycles closed every production-shape, compatibility, resource, and revalidation gap. Final evidence is `33 pass / 0 fail / 186 assertions` focused, `440 pass / 0 fail / 2289 assertions` full and coverage, and `2 pass / 0 fail / 93 assertions` syntax. Coverage is `49.18%` functions and `50.09%` lines; whitespace/version/no-dependency gates pass under Bun `1.3.11`. Independent review reports no remaining findings.
 
+### Task 10 — Transactional portable export/import ownership (`1.2.12`)
+
+- Routed full, sessions, stashes, and settings exports through exact worker actions under the shared FIFO mutation lock. Full export reads exactly eight local keys plus IndexedDB, materializes effective keep-awake/settings defaults, sanitizes AI configuration, and cannot mix reads around a queued writer.
+- Routed every JSON input through a 25 MiB pre-text file gate, accepted-kind check, panel parse, and mandatory worker reparse before repository access. Schema validation now also protects the actual Sessions, Stash, Groups, and Focus UI field assumptions.
+- Implemented kind-scoped in-memory merge, one local `setMany()` commit, one clear-plus-put IndexedDB transaction, deterministic imported/skipped counts, exact present/absent-key rollback, and structured rollback-failure reporting. Unaffected repositories are never read, written, or restored.
+- Expanded the worker lock to every affected writer, including settings, alarms, keep-awake, bookmarks, AI, Focus preferences/history/lifecycle, sessions/groups, and stash mutations. Lifecycle alarm reconciliation uses the same lock; all managed clears/creates are awaited and aggregated.
+- Settings/full imports refresh automation schedules after commit. An alarm failure returns an explicit committed warning instead of falsely claiming rollback or ordinary success; the panel renders that warning as an error and recommends restart.
+- Focused verification is `79 pass / 0 fail / 576 assertions`; full and coverage runs are `478 pass / 0 fail / 2663 assertions`; syntax, whitespace, version, and dependency gates pass under Bun `1.3.11`. Coverage is `53.40%` functions and `53.94%` lines without a repository-wide threshold. Independent adversarial and worker/lock reviews report no remaining production findings.
+- Chrome 148 exercised the production panel download and physical-file import against synthetic data, restored all eight local sections plus IndexedDB, found zero forbidden export keys, preserved unrelated state, reached no external network, and removed all disposable resources. The exact terminal tracked tree is recorded in the gitdir-local Task 10 report after tracked documentation/version files are frozen.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -120,4 +130,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Complete Task 9's independent review and deterministic closeout gates, then commit, annotate `v1.2.11`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 10 starts. Task 9 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Commit Task 10, annotate `v1.2.12`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 11 starts. Task 10 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

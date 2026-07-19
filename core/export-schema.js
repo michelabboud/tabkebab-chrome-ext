@@ -52,6 +52,19 @@ const FORBIDDEN_PORTABLE_KEYS = new Set([
 ]);
 const PROVIDER_IDS = Object.freeze(['chrome-ai', 'claude', 'custom', 'gemini', 'openai']);
 const PROVIDER_ID_SET = new Set(PROVIDER_IDS);
+const MANUAL_GROUP_COLORS = new Set([
+  'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
+]);
+const FOCUS_PREF_KEYS = new Set([
+  'blockedCategories',
+  'allowlist',
+  'blockedDomains',
+  'strictMode',
+  'aiBlocking',
+  'duration',
+  'tabAction',
+]);
+const FOCUS_TAB_ACTIONS = new Set(['kebab', 'stash', 'group', 'none']);
 const textEncoder = new TextEncoder();
 let activeCanonicalStashValidation = null;
 
@@ -271,6 +284,13 @@ function validateId(value, path) {
   return value;
 }
 
+function validateRecordName(record, path) {
+  if (!Object.hasOwn(record, 'name') || typeof record.name !== 'string' ||
+      record.name.length === 0 || record.name.length > MAX_PORTABLE_STRING_LENGTH) {
+    fail(`${path}.name must be a non-empty bounded string`);
+  }
+}
+
 function validateTimestamp(value, path) {
   if (!Number.isSafeInteger(value) || value < 0 || value > MAX_DRIVE_TIMESTAMP) {
     fail(`${path} must be a non-negative safe-integer timestamp`);
@@ -336,6 +356,7 @@ function validateSessionsCanonical(value) {
     const id = validateId(record.id, `sessions[${index}].id`);
     if (seen.has(id)) fail(`sessions contain duplicate ID ${id}`);
     seen.add(id);
+    validateRecordName(record, `sessions[${index}]`);
     validateOptionalTimestamps(record, `sessions[${index}]`);
     if (Object.hasOwn(record, 'version') &&
         (!Number.isSafeInteger(record.version) || record.version < 1)) {
@@ -363,6 +384,7 @@ function validateStashesCanonical(value) {
     const id = validateId(record.id, `stashes[${index}].id`);
     if (seen.has(id)) fail(`stashes contain duplicate ID ${id}`);
     seen.add(id);
+    validateRecordName(record, `stashes[${index}]`);
     if (!Object.hasOwn(record, 'createdAt')) {
       fail(`stashes[${index}] requires an own createdAt for IndexedDB ordering`);
     }
@@ -403,17 +425,21 @@ function validateManualGroupsCanonical(value) {
     validateId(id, 'manualGroups key');
     const record = value[id];
     if (!isPlainRecord(record)) fail(`manualGroups.${id} must be an object`);
-    validateOptionalTimestamps(record, `manualGroups.${id}`);
-    if (Object.hasOwn(record, 'tabUrls')) {
-      if (!Array.isArray(record.tabUrls)) fail(`manualGroups.${id}.tabUrls must be an array`);
-      if (record.tabUrls.length > MAX_PORTABLE_TABS_PER_RECORD) {
-        fail(`manualGroups.${id} exceeds the ${MAX_PORTABLE_TABS_PER_RECORD.toLocaleString('en-US')} URL limit`);
-      }
-      for (const url of record.tabUrls) {
-        if (typeof url !== 'string') fail(`manualGroups.${id}.tabUrls must contain strings`);
-      }
-      totalTabs += record.tabUrls.length;
+    validateRecordName(record, `manualGroups.${id}`);
+    if (!Object.hasOwn(record, 'color') || !MANUAL_GROUP_COLORS.has(record.color)) {
+      fail(`manualGroups.${id}.color is invalid`);
     }
+    validateOptionalTimestamps(record, `manualGroups.${id}`);
+    if (!Object.hasOwn(record, 'tabUrls') || !Array.isArray(record.tabUrls)) {
+      fail(`manualGroups.${id}.tabUrls must be an array`);
+    }
+    if (record.tabUrls.length > MAX_PORTABLE_TABS_PER_RECORD) {
+      fail(`manualGroups.${id} exceeds the ${MAX_PORTABLE_TABS_PER_RECORD.toLocaleString('en-US')} URL limit`);
+    }
+    for (const url of record.tabUrls) {
+      if (typeof url !== 'string') fail(`manualGroups.${id}.tabUrls must contain strings`);
+    }
+    totalTabs += record.tabUrls.length;
     entries.push([id, record]);
   }
   return { value: sortedNullMap(entries), totalTabs };
@@ -528,6 +554,50 @@ function assertSettingsRelationship(value) {
   if (recommended > maxTabs) fail('recommendedTabsPerWindow cannot exceed maxTabsPerWindow');
 }
 
+function validateFocusStringArray(value, path) {
+  if (!Array.isArray(value)) fail(`${path} must be an array`);
+  if (value.length > MAX_PORTABLE_SECTION_RECORDS) {
+    fail(`${path} exceeds the ${MAX_PORTABLE_SECTION_RECORDS.toLocaleString('en-US')} item limit`);
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.length === 0) {
+      fail(`${path} must contain non-empty strings`);
+    }
+  }
+  return [...value];
+}
+
+function validateFocusAllowlist(value, path) {
+  if (!Array.isArray(value)) fail(`${path} must be an array`);
+  if (value.length > MAX_PORTABLE_SECTION_RECORDS) {
+    fail(`${path} exceeds the ${MAX_PORTABLE_SECTION_RECORDS.toLocaleString('en-US')} item limit`);
+  }
+  return value.map((entry, index) => {
+    const entryPath = `${path}[${index}]`;
+    if (typeof entry === 'string') {
+      if (entry.length === 0) fail(`${entryPath} must be a non-empty string`);
+      return entry;
+    }
+    if (!isPlainRecord(entry)) fail(`${entryPath} must be a string or object`);
+    assertOnlyKeys(entry, new Set(['type', 'value', 'groupId', 'groupIds']), entryPath);
+    if (!['domain', 'url', 'group'].includes(entry.type) ||
+        typeof entry.value !== 'string' || entry.value.length === 0) {
+      fail(`${entryPath} requires a valid type and non-empty string value`);
+    }
+    if (Object.hasOwn(entry, 'groupId') &&
+        (entry.type !== 'group' || !Number.isInteger(entry.groupId) || entry.groupId < 0)) {
+      fail(`${entryPath}.groupId is invalid`);
+    }
+    if (Object.hasOwn(entry, 'groupIds')) {
+      if (entry.type !== 'group' || !Array.isArray(entry.groupIds) ||
+          entry.groupIds.some((id) => !Number.isInteger(id) || id < 0)) {
+        fail(`${entryPath}.groupIds is invalid`);
+      }
+    }
+    return sortedNullMap([['type', entry.type], ['value', entry.value]]);
+  });
+}
+
 function validateFocusPrefsCanonical(value) {
   if (!isPlainRecord(value)) fail('focusProfilePrefs must be a map');
   const keys = Object.keys(value);
@@ -537,8 +607,38 @@ function validateFocusPrefsCanonical(value) {
   const entries = [];
   for (const id of keys) {
     validateId(id, 'focusProfilePrefs key');
-    if (!isPlainRecord(value[id])) fail(`focusProfilePrefs.${id} must be an object`);
-    entries.push([id, value[id]]);
+    const prefs = value[id];
+    const path = `focusProfilePrefs.${id}`;
+    if (!isPlainRecord(prefs)) fail(`${path} must be an object`);
+    assertOnlyKeys(prefs, FOCUS_PREF_KEYS, path);
+    const normalized = [];
+    for (const key of Object.keys(prefs)) {
+      switch (key) {
+        case 'blockedCategories':
+        case 'blockedDomains':
+          normalized.push([key, validateFocusStringArray(prefs[key], `${path}.${key}`)]);
+          break;
+        case 'allowlist':
+          normalized.push([key, validateFocusAllowlist(prefs.allowlist, `${path}.allowlist`)]);
+          break;
+        case 'strictMode':
+        case 'aiBlocking':
+          if (typeof prefs[key] !== 'boolean') fail(`${path}.${key} must be a boolean`);
+          normalized.push([key, prefs[key]]);
+          break;
+        case 'duration':
+          if (!Number.isInteger(prefs.duration) || prefs.duration < 1 || prefs.duration > 480) {
+            fail(`${path}.duration must be an integer from 1 to 480`);
+          }
+          normalized.push([key, prefs.duration]);
+          break;
+        case 'tabAction':
+          if (!FOCUS_TAB_ACTIONS.has(prefs.tabAction)) fail(`${path}.tabAction is invalid`);
+          normalized.push([key, prefs.tabAction]);
+          break;
+      }
+    }
+    entries.push([id, sortedNullMap(normalized)]);
   }
   return sortedNullMap(entries);
 }

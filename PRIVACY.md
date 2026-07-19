@@ -74,7 +74,11 @@ Chrome may collect its own telemetry, sync data, or diagnostics depending on you
 
 ### Export files
 
-When you export sessions or stashes, a JSON file is downloaded to your computer. Where that file goes after that is up to you.
+When you export data, a JSON file is downloaded to your computer. A full backup can contain tab URLs and titles from sessions and stashes, custom groups, keep-awake domains, local bookmark snapshots, general settings, Focus preferences/history, and non-secret AI provider/model configuration. Individual session, stash, and settings exports contain only their named section.
+
+Portable files never include API keys (encrypted or plaintext), passphrase metadata, decrypted-key session caches, OAuth tokens/state, Drive connection/profile state, install identifiers, active Focus state, or AI response caches. Import files are still untrusted input: TabKebab enforces a 25 MiB file limit, validates the complete document in both the panel and service worker, and changes only the repositories named by the file kind.
+
+Exporting does not upload the file anywhere. Where the downloaded file goes after that is up to you, so treat a full backup as sensitive because it can contain browsing URLs, titles, and Focus history.
 
 ---
 

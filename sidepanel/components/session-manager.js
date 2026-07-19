@@ -1,9 +1,13 @@
 // session-manager.js — Save/restore/delete sessions + export/import
 
 import { showToast } from './toast.js';
-import { exportData, exportSession, importData } from '../../core/export-import.js';
+import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
 import { formatRestoreFeedback } from '../restore-feedback.js';
+import {
+  formatPortableImportSummary,
+  portableImportToastType,
+} from '../portable-import-summary.js';
 
 export class SessionManager {
   constructor(rootEl) {
@@ -231,7 +235,12 @@ export class SessionManager {
     exportBtn.innerHTML = '\u2913'; // downwards arrow to bar
     exportBtn.addEventListener('click', async () => {
       try {
-        await exportSession(session.id);
+        const payload = await this.send({
+          action: 'buildPortableSessionExport',
+          sessionId: session.id,
+        });
+        const safeName = (session.name || 'session').replace(/[^a-z0-9_-]/gi, '_').slice(0, 40);
+        downloadJson(payload, `tabkebab-session-${safeName}-${Date.now()}.json`);
         showToast(`Exported "${session.name}"`, 'success');
       } catch (err) {
         showToast('Export failed: ' + err.message, 'error');
@@ -337,7 +346,8 @@ export class SessionManager {
 
   async export() {
     try {
-      await exportData();
+      const payload = await this.send({ action: 'buildPortableExport', kind: 'full' });
+      downloadJson(payload, `tabkebab-export-${Date.now()}.json`);
       showToast('Data exported', 'success');
     } catch (err) {
       showToast('Export failed: ' + err.message, 'error');
@@ -349,15 +359,19 @@ export class SessionManager {
     if (!file) return;
 
     try {
-      await importData(file);
-      showToast('Data imported successfully', 'success');
-      this.refresh();
+      const document = await readPortableImportFile(file, ['full', 'sessions']);
+      const result = await this.send({ action: 'importPortableData', document });
+      showToast(
+        formatPortableImportSummary(result, 'Data import'),
+        portableImportToastType(result),
+      );
+      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
+    } finally {
+      // Reset file input so the same file can be imported again.
+      e.target.value = '';
     }
-
-    // Reset file input so the same file can be imported again
-    e.target.value = '';
   }
 
   createBtn(text, className, onClick) {

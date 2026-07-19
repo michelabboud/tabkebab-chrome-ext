@@ -84,6 +84,11 @@ async function importWorkerWithDeferredAi(overrides = {}) {
       () => harness.calls.tabGroups.query.length === 1,
       'worker startup did not complete Focus group lookup',
     );
+    await waitFor(
+      () => harness.calls.action.setBadgeText.length > 0 &&
+        harness.calls.action.setBadgeBackgroundColor.length > 0,
+      'worker startup did not complete the initial Focus badge paint',
+    );
   } catch (error) {
     AIClient.complete = originalComplete;
     AIClient.isAvailable = originalAvailable;
@@ -121,7 +126,22 @@ function focusSideEffectCounts(harness) {
 
 async function assertNoNewFocusEffects(harness, before) {
   await Bun.sleep(5);
-  expect(focusSideEffectCounts(harness)).toEqual(before);
+  const after = focusSideEffectCounts(harness);
+  expect({
+    goBack: after.goBack,
+    remove: after.remove,
+    sidePanel: after.sidePanel,
+    notifications: after.notifications,
+  }).toEqual({
+    goBack: before.goBack,
+    remove: before.remove,
+    sidePanel: before.sidePanel,
+    notifications: before.notifications,
+  });
+  const newBadgeTexts = harness.calls.action.setBadgeText.slice(before.badgeText);
+  const newBadgeColors = harness.calls.action.setBadgeBackgroundColor.slice(before.badgeColor);
+  expect(newBadgeTexts.some(([details]) => details?.text === '!')).toBeFalse();
+  expect(newBadgeColors.some(([details]) => details?.color === '#ef4444')).toBeFalse();
 }
 
 describe('deferred Focus classification authority', () => {

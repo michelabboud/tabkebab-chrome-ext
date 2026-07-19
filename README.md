@@ -143,8 +143,11 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 
 ### Export & Import
 
-- **Full export/import** of all data: sessions, stashes, groups, settings
-- **Individual exports** for sessions and stashes
+- **Portable v2 full backup** of sessions, IndexedDB stashes, custom groups, keep-awake domains, bookmarks, effective settings, Focus preferences/history, and non-secret AI configuration
+- **Transactional import** — validates before storage access, merges under one worker lock, and rolls back affected local/IndexedDB state on failure
+- **Individual v2 exports** for sessions, stashes, and settings
+- **Secret-free files** — API keys, passphrase metadata, Drive/OAuth state, install IDs, active Focus state, and caches are excluded
+- **Bounded input** — files over 25 MiB and malformed or wrong-kind documents reject before import
 - **Google Drive backup** with subfolder organization
 - **JSON format** throughout — human-readable, version-controllable
 

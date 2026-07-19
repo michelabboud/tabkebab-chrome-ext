@@ -15,25 +15,25 @@ import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDrive
 import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from './core/drive-retention.js';
 import { reconcileDriveSync } from './core/drive-sync.js';
 import { withStateMutationLock } from './core/state-mutation-lock.js';
+import {
+  PORTABLE_KIND_SECTIONS,
+  applyPortableImport,
+  buildPortableExportPayload,
+} from './core/export-import.js';
+import {
+  createPortableExportDocument,
+  parsePortableExportDocument,
+} from './core/export-schema.js';
 import { FocusStatus, getCachedFocusAuthority, getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
 import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
 import { createFocusAiChecker } from './core/focus-ai.js';
+import { createDefaultKeepAwakeDomains } from './core/keep-awake-defaults.js';
 
 // ── Keep Awake Defaults ──
 
-const DEFAULT_KEEP_AWAKE_DOMAINS = [
-  'gmail.com', 'outlook.com', 'outlook.live.com', 'mail.yahoo.com', 'proton.me',
-  'calendar.google.com', 'outlook.office.com',
-  'claude.ai', 'chat.openai.com', 'aistudio.google.com', 'gemini.google.com', 'codex.openai.com',
-];
-
 async function getKeepAwakeList() {
-  let list = await Storage.get('keepAwakeDomains');
-  if (list === null) {
-    list = [...DEFAULT_KEEP_AWAKE_DOMAINS];
-    await Storage.set('keepAwakeDomains', list);
-  }
-  return list;
+  const list = await Storage.get('keepAwakeDomains');
+  return list === null ? createDefaultKeepAwakeDomains() : list;
 }
 
 // ── Auto-save Sessions ──
@@ -107,39 +107,75 @@ const ALARM_FOCUS_TICK = 'focusTick';
 
 async function reconfigureAlarms(settings) {
   if (!settings) settings = await getSettings();
+  const failures = [];
+
+  const runAlarmOperation = async (operation, name, callback) => {
+    try {
+      await callback();
+    } catch (error) {
+      console.warn(`[TabKebab] alarm ${operation} failed:`, name, error);
+      failures.push(error instanceof Error ? error : new Error(`Alarm ${operation} failed: ${name}`));
+    }
+  };
 
   // Clear all managed alarms
   const alarmNames = [ALARM_AUTO_SAVE, ALARM_AUTO_KEBAB, ALARM_AUTO_STASH, ALARM_AUTO_SYNC_DRIVE, ALARM_RETENTION_CLEANUP, ALARM_AUTO_BOOKMARK];
   for (const name of alarmNames) {
-    try { await chrome.alarms.clear(name); } catch (e) { console.warn('[TabKebab] alarm clear failed:', name, e); }
+    await runAlarmOperation('clear', name, () => chrome.alarms.clear(name));
   }
 
   // Auto-save session
   const saveInterval = (settings.autoSaveIntervalHours || 24) * 60;
-  chrome.alarms.create(ALARM_AUTO_SAVE, { periodInMinutes: saveInterval });
+  await runAlarmOperation('create', ALARM_AUTO_SAVE, () => chrome.alarms.create(
+    ALARM_AUTO_SAVE,
+    { periodInMinutes: saveInterval },
+  ));
 
   // Auto-kebab (hourly check)
   if (settings.autoKebabAfterHours > 0) {
-    chrome.alarms.create(ALARM_AUTO_KEBAB, { periodInMinutes: 60 });
+    await runAlarmOperation('create', ALARM_AUTO_KEBAB, () => chrome.alarms.create(
+      ALARM_AUTO_KEBAB,
+      { periodInMinutes: 60 },
+    ));
   }
 
   // Auto-stash (6h check)
   if (settings.autoStashAfterDays > 0) {
-    chrome.alarms.create(ALARM_AUTO_STASH, { periodInMinutes: 360 });
+    await runAlarmOperation('create', ALARM_AUTO_STASH, () => chrome.alarms.create(
+      ALARM_AUTO_STASH,
+      { periodInMinutes: 360 },
+    ));
   }
 
   // Auto-sync Drive
   if (settings.autoSyncToDriveIntervalHours > 0) {
-    chrome.alarms.create(ALARM_AUTO_SYNC_DRIVE, { periodInMinutes: settings.autoSyncToDriveIntervalHours * 60 });
+    await runAlarmOperation('create', ALARM_AUTO_SYNC_DRIVE, () => chrome.alarms.create(
+      ALARM_AUTO_SYNC_DRIVE,
+      { periodInMinutes: settings.autoSyncToDriveIntervalHours * 60 },
+    ));
   }
 
   // Retention cleanup (12h)
-  chrome.alarms.create(ALARM_RETENTION_CLEANUP, { periodInMinutes: 720 });
+  await runAlarmOperation('create', ALARM_RETENTION_CLEANUP, () => chrome.alarms.create(
+    ALARM_RETENTION_CLEANUP,
+    { periodInMinutes: 720 },
+  ));
 
   // Auto-bookmark (daily check if any bookmark format enabled + auto on stash)
   if (settings.autoBookmarkOnStash && (settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains)) {
-    chrome.alarms.create(ALARM_AUTO_BOOKMARK, { periodInMinutes: 720 });
+    await runAlarmOperation('create', ALARM_AUTO_BOOKMARK, () => chrome.alarms.create(
+      ALARM_AUTO_BOOKMARK,
+      { periodInMinutes: 720 },
+    ));
   }
+
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'One or more managed alarms could not be reconfigured');
+  }
+}
+
+export async function reconfigureManagedAlarms({ reconfigure = reconfigureAlarms } = {}) {
+  return withStateMutationLock(() => reconfigure());
 }
 
 // ── Automation handlers ──
@@ -165,7 +201,7 @@ async function autoKebabOldTabs() {
   } catch (e) { console.warn('[TabKebab] auto-kebab failed:', e); }
 }
 
-async function autoStashOldTabs() {
+async function autoStashOldTabsUnlocked() {
   try {
     const settings = await getSettings();
     if (settings.autoStashAfterDays <= 0) return;
@@ -209,6 +245,10 @@ async function autoStashOldTabs() {
       await closeTabs(oldTabs.map(t => t.id));
     }
   } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
+}
+
+export async function autoStashOldTabs() {
+  return withStateMutationLock(() => autoStashOldTabsUnlocked());
 }
 
 async function exportDriveSubfolders({ scheduled = false } = {}) {
@@ -653,7 +693,7 @@ function chromeColorHex(color) {
   return map[color] || map.blue;
 }
 
-async function createBookmarks(options = {}) {
+async function createBookmarksUnlocked(options = {}) {
   const settings = await getSettings();
   const byWindows = options.byWindows ?? settings.bookmarkByWindows;
   const byGroups = options.byGroups ?? settings.bookmarkByGroups;
@@ -790,6 +830,10 @@ async function createBookmarks(options = {}) {
   return results;
 }
 
+export async function createBookmarks(options = {}) {
+  return withStateMutationLock(() => createBookmarksUnlocked(options));
+}
+
 async function saveToChromeBoomarks(bookmarkData, dateStr) {
   // Find or create TabKebab root folder
   const tree = await chrome.bookmarks.getTree();
@@ -845,8 +889,12 @@ async function saveToChromeBoomarks(bookmarkData, dateStr) {
 // Auto-save on browser startup
 chrome.runtime.onStartup.addListener(() => {
   setTimeout(async () => {
-    await autoSaveSession();
-    await reconfigureAlarms();
+    try {
+      await autoSaveSession();
+      await reconfigureManagedAlarms();
+    } catch (error) {
+      console.warn('[TabKebab] Startup alarm reconciliation failed:', error);
+    }
   }, 5000);
 });
 
@@ -865,8 +913,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 
   setTimeout(async () => {
-    await autoSaveSession();
-    await reconfigureAlarms();
+    try {
+      await autoSaveSession();
+      await reconfigureManagedAlarms();
+    } catch (error) {
+      console.warn('[TabKebab] Install/update alarm reconciliation failed:', error);
+    }
   }, 5000);
 });
 
@@ -890,7 +942,8 @@ export async function handleAlarm(alarm, {
     case ALARM_FOCUS_TICK: {
       const expectedRunId = getCachedFocusState()?.runId ?? null;
       void focusReadiness
-        .then((startupState) => handleFocusTick(expectedRunId ?? startupState?.runId ?? null))
+        .then((startupState) => withStateMutationLock(() =>
+          handleFocusTick(expectedRunId ?? startupState?.runId ?? null)))
         .catch((error) => console.warn('[TabKebab] Focus tick failed:', error));
       return null;
     }
@@ -906,7 +959,7 @@ chrome.alarms.onAlarm.addListener((alarm) => handleAlarm(alarm));
 const focusReadiness = (async () => {
   let state = await rebindStoredFocusState();
   if (state?.status === FocusStatus.ENDING && state.runId) {
-    await endFocus({ expectedRunId: state.runId });
+    await withStateMutationLock(() => endFocus({ expectedRunId: state.runId }));
     state = await getFocusState();
   }
   return state;
@@ -916,11 +969,11 @@ const focusReadiness = (async () => {
 });
 
 // Ensure alarms exist (service worker can restart)
-(async () => {
+void (async () => {
   const focusState = await focusReadiness;
 
   const alarm = await chrome.alarms.get(ALARM_AUTO_SAVE);
-  if (!alarm) await reconfigureAlarms();
+  if (!alarm) await reconfigureManagedAlarms();
 
   // Restore focus alarm + badge if a session was active before SW restart
   if (focusState?.status === FocusStatus.ACTIVE) {
@@ -928,7 +981,9 @@ const focusReadiness = (async () => {
     if (!existing) await chrome.alarms.create(ALARM_FOCUS_TICK, { periodInMinutes: 1 });
     await updateBadge(focusState);
   }
-})();
+})().catch((error) => {
+  console.warn('[TabKebab] Service-worker alarm reconciliation failed:', error);
+});
 
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -1120,6 +1175,17 @@ function requireRuntimeString(value, label) {
   return value;
 }
 
+function requirePortableRecordId(value, label) {
+  if (typeof value !== 'string' || value.length === 0 ||
+      value.length > MAX_RUNTIME_PORTABLE_STRING) {
+    throw new TypeError(`${label} must be a non-empty bounded string`);
+  }
+  if (value === '__proto__' || value === 'constructor' || value === 'prototype') {
+    throw new TypeError(`${label} is invalid`);
+  }
+  return value;
+}
+
 function requireRuntimeUrl(value, label) {
   const url = requireRuntimeString(value, label);
   try {
@@ -1133,6 +1199,51 @@ function requireRuntimeUrl(value, label) {
 function requireManualGroupColor(value) {
   if (!MANUAL_GROUP_COLORS.has(value)) throw new TypeError('Manual group color is invalid');
   return value;
+}
+
+function requireExactRuntimeFields(message, expectedFields, label) {
+  if (!isPlainRecord(message)) throw new TypeError(`${label} must be an object`);
+  const expected = new Set(expectedFields);
+  const keys = Object.keys(message);
+  const unexpected = keys.filter((key) => !expected.has(key));
+  if (unexpected.length > 0) {
+    throw new TypeError(`${label} has unexpected fields: ${unexpected.join(', ')}`);
+  }
+  const missing = expectedFields.filter((key) => !Object.hasOwn(message, key));
+  if (missing.length > 0) {
+    throw new TypeError(`${label} is missing fields: ${missing.join(', ')}`);
+  }
+}
+
+function requirePortableKind(kind) {
+  if (typeof kind !== 'string' || !Object.hasOwn(PORTABLE_KIND_SECTIONS, kind)) {
+    throw new TypeError('Portable export kind must be full, sessions, stashes, or settings');
+  }
+  return kind;
+}
+
+function normalizeFocusProfilePrefs(profilePrefs) {
+  return createPortableExportDocument('full', {
+    sessions: [],
+    stashes: [],
+    manualGroups: {},
+    keepAwakeDomains: [],
+    bookmarks: [],
+    settings: {},
+    focusProfilePrefs: profilePrefs,
+    focusHistory: [],
+    aiSettings: { enabled: false, providerId: 'chrome', providerConfigs: {} },
+  }, '1970-01-01T00:00:00.000Z').focusProfilePrefs;
+}
+
+async function saveFocusProfilePrefsUnlocked(profileId, preferences) {
+  const current = (await Storage.get('focusProfilePrefs')) || {};
+  const normalized = normalizeFocusProfilePrefs({
+    ...current,
+    [profileId]: preferences,
+  });
+  await Storage.set('focusProfilePrefs', normalized);
+  return { saved: true };
 }
 
 function filterDestructiveTabs(tabs, filter) {
@@ -1176,6 +1287,12 @@ export async function handleMessage(msg, options = {}) {
     createManualGroup: createManualGroupOperation = createManualGroup,
     moveTabToManualGroup: moveTabToManualGroupOperation = moveTabToManualGroup,
     deleteManualGroup: deleteManualGroupOperation = deleteManualGroup,
+    saveSettings: saveSettingsOperation = saveSettings,
+    saveFocusProfilePrefs: saveFocusProfilePrefsOperation = saveFocusProfilePrefsUnlocked,
+    parsePortableDocument: parsePortableDocumentOperation = parsePortableExportDocument,
+    applyPortableImport: applyPortableImportOperation = applyPortableImport,
+    buildPortableExportPayload: buildPortableExportOperation = buildPortableExportPayload,
+    reconfigureAlarms: reconfigureAlarmsOperation = reconfigureAlarms,
   } = options;
   switch (msg.action) {
     case 'getTabs':
@@ -1326,33 +1443,120 @@ export async function handleMessage(msg, options = {}) {
 
     // ── Settings ──
 
+    case 'buildPortableExport': {
+      requireExactRuntimeFields(msg, ['action', 'kind'], 'Portable export request');
+      const kind = requirePortableKind(msg.kind);
+      return withStateMutationLock(() => buildPortableExportOperation(kind));
+    }
+
+    case 'buildPortableSessionExport': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'sessionId'],
+        'Portable session export request',
+      );
+      const sessionId = requirePortableRecordId(msg.sessionId, 'Session ID');
+      return withStateMutationLock(async () => {
+        const document = await buildPortableExportOperation('sessions');
+        const session = document.sessions.find((record) => record.id === sessionId);
+        if (!session) throw new Error('Session not found');
+        return createPortableExportDocument(
+          'sessions',
+          { sessions: [session] },
+          document.exportedAt,
+        );
+      });
+    }
+
+    case 'buildPortableStashExport': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'stashId'],
+        'Portable stash export request',
+      );
+      const stashId = requirePortableRecordId(msg.stashId, 'Stash ID');
+      return withStateMutationLock(async () => {
+        const document = await buildPortableExportOperation('stashes');
+        const stash = document.stashes.find((record) => record.id === stashId);
+        if (!stash) throw new Error('Stash not found');
+        return createPortableExportDocument(
+          'stashes',
+          { stashes: [stash] },
+          document.exportedAt,
+        );
+      });
+    }
+
+    case 'importPortableData': {
+      requireExactRuntimeFields(msg, ['action', 'document'], 'Portable import request');
+      return withStateMutationLock(async () => {
+        const parsedDocument = parsePortableDocumentOperation(msg.document);
+        const result = await applyPortableImportOperation(parsedDocument);
+        if (!PORTABLE_KIND_SECTIONS[parsedDocument.kind].includes('settings')) return result;
+        try {
+          const persistedSettings = await loadSettings();
+          await reconfigureAlarmsOperation(persistedSettings);
+          return result;
+        } catch (error) {
+          console.error(
+            '[TabKebab] Portable import committed, but alarm reconfiguration failed:',
+            error,
+          );
+          return {
+            ...result,
+            committed: true,
+            warning: 'Data was imported, but automation schedules could not be refreshed. Restart TabKebab before relying on automatic actions.',
+          };
+        }
+      });
+    }
+
     case 'getSettings':
       return getSettings();
 
     case 'saveSettings': {
-      const saved = await saveSettings(msg.settings);
-      await reconfigureAlarms(saved);
-      return saved;
+      return withStateMutationLock(async () => {
+        const saved = await saveSettingsOperation(msg.settings);
+        await reconfigureAlarms(saved);
+        return saved;
+      });
+    }
+
+    case 'saveFocusProfilePrefs': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'profileId', 'preferences'],
+        'Focus preferences request',
+      );
+      const profileId = requireRuntimeString(msg.profileId, 'Focus profile ID');
+      return withStateMutationLock(() => {
+        const normalized = normalizeFocusProfilePrefs({ [profileId]: msg.preferences });
+        return saveFocusProfilePrefsOperation(profileId, normalized[profileId]);
+      });
     }
 
     case 'importDriveSettings': {
-      const current = await getSettings();
-      const replacement = validateSettingsPatch(msg.settings, current);
-      await Storage.setMany({
-        tabkebabSettings: replacement,
-        tabkebabSettingsPrevious: current,
+      return withStateMutationLock(async () => {
+        const current = await getSettings();
+        const replacement = validateSettingsPatch(msg.settings, current);
+        await Storage.setMany({
+          tabkebabSettings: replacement,
+          tabkebabSettingsPrevious: current,
+        });
+        await reconfigureAlarms(replacement);
+        return replacement;
       });
-      await reconfigureAlarms(replacement);
-      return replacement;
     }
 
     case 'undoDriveSettings': {
-      const previous = await Storage.get('tabkebabSettingsPrevious');
-      if (!previous) throw new Error('No previous settings to restore');
-      const restored = await saveSettings(previous);
-      await Storage.remove('tabkebabSettingsPrevious');
-      await reconfigureAlarms(restored);
-      return restored;
+      return withStateMutationLock(async () => {
+        const previous = await Storage.get('tabkebabSettingsPrevious');
+        if (!previous) throw new Error('No previous settings to restore');
+        const restored = await saveSettings(previous);
+        await Storage.remove('tabkebabSettingsPrevious');
+        await reconfigureAlarms(restored);
+        return restored;
+      });
     }
 
     // ── AI Settings ──
@@ -1361,12 +1565,16 @@ export async function handleMessage(msg, options = {}) {
       return AIClient.getSettings();
 
     case 'saveAISettings':
-      await AIClient.saveSettings(msg.settings);
-      return { success: true };
+      return withStateMutationLock(async () => {
+        await AIClient.saveSettings(msg.settings);
+        return { success: true };
+      });
 
     case 'setAIApiKey':
-      await AIClient.setApiKey(msg.providerId, msg.plainKey, msg.passphrase || undefined);
-      return { success: true };
+      return withStateMutationLock(async () => {
+        await AIClient.setApiKey(msg.providerId, msg.plainKey, msg.passphrase || undefined);
+        return { success: true };
+      });
 
     case 'isAIAvailable':
       return { available: await AIClient.isAvailable() };
@@ -1504,25 +1712,28 @@ export async function handleMessage(msg, options = {}) {
       return getKeepAwakeList();
 
     case 'saveKeepAwakeList':
-      if (msg.domains === null) {
-        await Storage.remove('keepAwakeDomains');
-      } else {
-        await Storage.set('keepAwakeDomains', msg.domains);
-      }
-      return { success: true };
+      return withStateMutationLock(async () => {
+        if (msg.domains === null) {
+          await Storage.remove('keepAwakeDomains');
+        } else {
+          await Storage.set('keepAwakeDomains', msg.domains);
+        }
+        return { success: true };
+      });
 
     case 'toggleKeepAwakeDomain': {
-      const list = await getKeepAwakeList();
-      const idx = list.indexOf(msg.domain);
-      if (idx >= 0) {
-        list.splice(idx, 1);
-        await Storage.set('keepAwakeDomains', list);
-        return { isKeepAwake: false };
-      } else {
+      return withStateMutationLock(async () => {
+        const list = await getKeepAwakeList();
+        const idx = list.indexOf(msg.domain);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          await Storage.set('keepAwakeDomains', list);
+          return { isKeepAwake: false };
+        }
         list.push(msg.domain);
         await Storage.set('keepAwakeDomains', list);
         return { isKeepAwake: true };
-      }
+      });
     }
 
     case 'discardTabs': {
@@ -1562,35 +1773,37 @@ export async function handleMessage(msg, options = {}) {
     }
 
     case 'setKeepAwake': {
-      let tabs = await getAllTabs({ allWindows: true });
+      return withStateMutationLock(async () => {
+        let tabs = await getAllTabs({ allWindows: true });
 
-      if (msg.scope === 'domain') {
-        tabs = tabs.filter(t => extractDomain(t.url) === msg.domain);
-      } else if (msg.scope === 'group') {
-        tabs = tabs.filter(t => t.groupId === msg.groupId);
-      }
-
-      const value = !msg.keepAwake; // autoDiscardable is the inverse of keep-awake
-      for (const tab of tabs) {
-        try {
-          await chrome.tabs.update(tab.id, { autoDiscardable: value });
-        } catch { /* ignore */ }
-      }
-
-      // For domain scope, also persist to keep-awake list
-      if (msg.scope === 'domain' && msg.domain) {
-        const list = await getKeepAwakeList();
-        const idx = list.indexOf(msg.domain);
-        if (msg.keepAwake && idx < 0) {
-          list.push(msg.domain);
-          await Storage.set('keepAwakeDomains', list);
-        } else if (!msg.keepAwake && idx >= 0) {
-          list.splice(idx, 1);
-          await Storage.set('keepAwakeDomains', list);
+        if (msg.scope === 'domain') {
+          tabs = tabs.filter(t => extractDomain(t.url) === msg.domain);
+        } else if (msg.scope === 'group') {
+          tabs = tabs.filter(t => t.groupId === msg.groupId);
         }
-      }
 
-      return { success: true };
+        const value = !msg.keepAwake; // autoDiscardable is the inverse of keep-awake
+        for (const tab of tabs) {
+          try {
+            await chrome.tabs.update(tab.id, { autoDiscardable: value });
+          } catch { /* ignore */ }
+        }
+
+        // For domain scope, also persist to keep-awake list
+        if (msg.scope === 'domain' && msg.domain) {
+          const list = await getKeepAwakeList();
+          const idx = list.indexOf(msg.domain);
+          if (msg.keepAwake && idx < 0) {
+            list.push(msg.domain);
+            await Storage.set('keepAwakeDomains', list);
+          } else if (!msg.keepAwake && idx >= 0) {
+            list.splice(idx, 1);
+            await Storage.set('keepAwakeDomains', list);
+          }
+        }
+
+        return { success: true };
+      });
     }
 
     case 'classifyKeepAwake': {
@@ -1627,6 +1840,7 @@ export async function handleMessage(msg, options = {}) {
     // ── Stash ──
 
     case 'stashWindow': {
+      return withStateMutationLock(async () => {
       const tabs = await getAllTabs({ allWindows: true });
       const windowTabs = tabs.filter(t => t.windowId === msg.windowId);
       if (windowTabs.length === 0) return { error: 'No tabs in window' };
@@ -1674,13 +1888,15 @@ export async function handleMessage(msg, options = {}) {
       // Auto-bookmark on stash if enabled
       const settings = await getSettings();
       if (settings.autoBookmarkOnStash && (settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains)) {
-        try { await createBookmarks(); } catch (e) { console.warn('[TabKebab] auto-bookmark on stash failed:', e); }
+        try { await createBookmarksUnlocked(); } catch (e) { console.warn('[TabKebab] auto-bookmark on stash failed:', e); }
       }
 
       return { success: true, stash };
+      });
     }
 
     case 'stashGroup': {
+      return withStateMutationLock(async () => {
       const groupTabs = await chrome.tabs.query({ groupId: msg.groupId });
       if (groupTabs.length === 0) return { error: 'No tabs in group' };
 
@@ -1715,9 +1931,11 @@ export async function handleMessage(msg, options = {}) {
       if (closableIds.length > 0) await closeTabs(closableIds);
 
       return { success: true, stash };
+      });
     }
 
     case 'stashDomain': {
+      return withStateMutationLock(async () => {
       const allTabs = await getAllTabs({ allWindows: true });
       const domainTabs = allTabs.filter(t => extractDomain(t.url) === msg.domain);
       if (domainTabs.length === 0) return { error: 'No tabs for domain' };
@@ -1751,12 +1969,14 @@ export async function handleMessage(msg, options = {}) {
       if (closableIds.length > 0) await closeTabs(closableIds);
 
       return { success: true, stash };
+      });
     }
 
     case 'listStashes':
       return listStashesDB();
 
     case 'restoreStash': {
+      return withStateMutationLock(async () => {
       const stash = await getStash(msg.stashId);
       if (!stash) throw new Error('Stash not found');
 
@@ -1785,18 +2005,23 @@ export async function handleMessage(msg, options = {}) {
       await applyStashRestoreDisposition(stash, restoreResult, shouldRemove);
 
       return restoreResult;
+      });
     }
 
     case 'deleteStash':
-      await deleteStashDB(msg.stashId);
-      return { success: true };
+      return withStateMutationLock(async () => {
+        await deleteStashDB(msg.stashId);
+        return { success: true };
+      });
 
     case 'undoDeleteStash':
-      await saveStash(msg.stash);
-      return { success: true };
+      return withStateMutationLock(async () => {
+        await saveStash(msg.stash);
+        return { success: true };
+      });
 
     case 'importStashes':
-      return importStashesDB(msg.stashes || []);
+      return withStateMutationLock(() => importStashesDB(msg.stashes || []));
 
     // ── Drive Operations ──
 
@@ -1848,27 +2073,27 @@ export async function handleMessage(msg, options = {}) {
 
     case 'startFocus':
       await focusReadiness;
-      return startFocus(msg);
+      return withStateMutationLock(() => startFocus(msg));
 
     case 'endFocus':
       await focusReadiness;
       if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
-      return endFocus({ expectedRunId: msg.expectedRunId });
+      return withStateMutationLock(() => endFocus({ expectedRunId: msg.expectedRunId }));
 
     case 'pauseFocus':
       await focusReadiness;
       if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
-      return pauseFocus(msg.expectedRunId);
+      return withStateMutationLock(() => pauseFocus(msg.expectedRunId));
 
     case 'resumeFocus':
       await focusReadiness;
       if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
-      return resumeFocus(msg.expectedRunId);
+      return withStateMutationLock(() => resumeFocus(msg.expectedRunId));
 
     case 'extendFocus':
       await focusReadiness;
       if (typeof msg.expectedRunId !== 'string' || msg.expectedRunId.length === 0) return null;
-      return extendFocus(msg.minutes || 5, msg.expectedRunId);
+      return withStateMutationLock(() => extendFocus(msg.minutes || 5, msg.expectedRunId));
 
     case 'getFocusHistory':
       return getFocusHistory();
