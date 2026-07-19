@@ -1080,6 +1080,22 @@ function mergeSettings(local, incoming) {
   return result;
 }
 
+function urlOrigin(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function canImportCustomBaseUrl(current, importedBaseUrl) {
+  if (!Object.hasOwn(current, 'apiKey')) return true;
+  const localOrigin = urlOrigin(current.baseUrl);
+  const importedOrigin = urlOrigin(importedBaseUrl);
+  return localOrigin !== null && importedOrigin !== null && localOrigin === importedOrigin;
+}
+
 function mergeAISettings(local, incoming) {
   if (!incoming) return local;
   const base = isPlainRecord(local) ? local : Object.create(null);
@@ -1093,7 +1109,11 @@ function mergeAISettings(local, incoming) {
       ? Object.assign(Object.create(null), localConfigs[providerId])
       : Object.create(null);
     if (Object.hasOwn(importedConfig, 'model')) current.model = importedConfig.model;
-    if (providerId === 'custom' && Object.hasOwn(importedConfig, 'baseUrl')) {
+    if (
+      providerId === 'custom' &&
+      Object.hasOwn(importedConfig, 'baseUrl') &&
+      canImportCustomBaseUrl(current, importedConfig.baseUrl)
+    ) {
       current.baseUrl = importedConfig.baseUrl;
     }
     mergedConfigs.set(providerId, current);

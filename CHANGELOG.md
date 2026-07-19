@@ -4,6 +4,33 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.14] — 2026-07-19
+
+### Added
+
+- Passphrase-only restart unlock for each encrypted AI provider key, with exact secret-free public settings, typed lock state, and a visible Unlock flow that rejects wrong passphrases without mutating stored ciphertext.
+- One atomic AI-settings operation that validates the complete provider/protection transition, encrypts every replacement in memory, commits local settings once, and updates fingerprint-bound decrypted session entries once.
+- Regression coverage for credential lifecycle, strict worker messages, mixed-protection normalization, storage failures, Custom endpoint origin binding, secret reflection, scoped caching, and stale side-panel operations.
+
+### Changed
+
+- Decrypted provider keys now remain usable across service-worker idle cycles in `chrome.storage.session`, but are rejected when their encrypted-blob fingerprint no longer matches. A full browser restart, extension reload/update, or disable still clears the session and requires passphrase unlock.
+- AI Settings now exposes only `hasApiKey`, `usesPassphrase`, and aggregate protection mode. Save, Unlock, Test Connection, Load Models, provider-status refresh, and full refresh share one exclusive UI owner with last-call-wins generations.
+- AI response-cache identities are SHA-256 hashes scoped to provider, model, prompts, credential, complete Custom endpoint, and response-affecting options. Legacy cache data is cleared on update.
+- Google Gemini authenticates with the `x-goog-api-key` header instead of a URL parameter. Custom endpoints require remote HTTPS or loopback HTTP and cannot contain credentials, queries, or fragments.
+
+### Fixed
+
+- Prevented ciphertext, passphrase metadata, plaintext keys, and caller-supplied private provider configuration from crossing ordinary runtime responses or AI execution messages.
+- Prevented split settings/key writes, partial protection transitions, stale decrypted-key reuse, cross-origin Custom-key redirects through settings/import, provider error or response credential reflection, and cache reuse across endpoints or accounts.
+- Prevented rapid provider changes, stale same-provider failures, overlapping status/save/test/model requests, and failed refreshes from exposing, moving, or submitting an old unlock passphrase.
+
+### Verification note
+
+- The mandatory pre-production RED was `17 pass / 51 fail / 159 assertions`. Final focused verification is `188 pass / 0 fail / 1376 assertions`; the full and coverage suites are `640 pass / 0 fail / 3711 assertions`; coverage is `61.29%` functions and `57.40%` lines; syntax is `2 pass / 0 fail / 101 assertions`. Whitespace, version parity, secret scanning, and the zero package/lockfile audit pass under Bun `1.3.11`.
+- Two independent code/security audits found no remaining blocker at exact functional tree `a32a08e93aecc03d7b7072294db159a39a35c9ab`; their immutable focused reruns passed with zero failures.
+- Chrome for Testing `148.0.7778.96` passes the tree-hash-guarded production panel/worker credential fixture: a passphrase-only encrypted key survives unchanged across full Chrome exit/relaunch, wrong unlock fails, correct unlock enables one intercepted provider request with header authentication, and no key appears in URL, body, logs, local plaintext, or runtime responses. The fixture reaches no external network and removes every disposable resource. Exact terminal tree/counters live in the gitdir-local Task 12 report so recording them cannot recursively change the tracked tree.
+
 ## [1.2.13] — 2026-07-19
 
 ### Added

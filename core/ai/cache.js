@@ -4,22 +4,28 @@ const CACHE_KEY = 'aiCache';
 const MAX_ENTRIES = 200;
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// FNV-1a 32-bit hash for fast cache key generation
-function fnv1a(str) {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
+const textEncoder = new TextEncoder();
+
+async function sha256(value) {
+  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(value));
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 export const AICache = {
   /**
    * Generate a cache key from request parameters.
    */
-  makeCacheKey(providerId, model, systemPrompt, userPrompt) {
-    return fnv1a(`${providerId}|${model}|${systemPrompt}|${userPrompt}`);
+  async makeCacheKey(providerId, model, systemPrompt, userPrompt, requestScope = null) {
+    return sha256(JSON.stringify([
+      'tabkebab-ai-response-v2',
+      providerId,
+      model,
+      systemPrompt,
+      userPrompt,
+      requestScope,
+    ]));
   },
 
   /**

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import { encryptApiKey } from '../../core/ai/crypto.js';
+import { applyPortableImport } from '../../core/export-import.js';
 import { createPortableExportDocument } from '../../core/export-schema.js';
 import { installChromeMock } from '../helpers/chrome-mock.js';
 
@@ -23,6 +25,37 @@ async function flushMicrotasks() {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function editableAISettings(overrides = {}) {
+  return {
+    enabled: true,
+    providerId: 'openai',
+    providerConfigs: {
+      openai: { model: 'gpt-4.1-nano' },
+      claude: { model: 'claude-haiku-4-5' },
+      gemini: { model: 'gemini-2.5-flash' },
+      'chrome-ai': { model: 'default' },
+      custom: { model: 'default', baseUrl: 'http://localhost:11434/v1' },
+    },
+    protectionMode: 'device',
+    ...overrides,
+  };
+}
+
+function publicAIProjection(overrides = {}) {
+  const editable = editableAISettings();
+  return {
+    ...editable,
+    providerConfigs: Object.fromEntries(Object.entries(editable.providerConfigs).map(
+      ([providerId, config]) => [providerId, {
+        ...config,
+        hasApiKey: false,
+        usesPassphrase: false,
+      }],
+    )),
+    ...overrides,
+  };
 }
 
 function session(id = 'session-1') {
@@ -113,6 +146,77 @@ function rawFullDocument(overrides = {}) {
 }
 
 describe('portable import worker boundary', () => {
+  test('cannot redirect a preserved Custom credential through a full portable import', async () => {
+    const installId = `portable-custom-install-${crypto.randomUUID()}`;
+    const apiKey = `portable-custom-key-${crypto.randomUUID()}`;
+    const firstBaseUrl = 'https://first-provider.example.test/v1';
+    const redirectedBaseUrl = 'https://redirect.example.test/v1';
+    const harness = installChromeMock({ local: { installId } });
+    const encryptedKey = await encryptApiKey(apiKey);
+    const localAISettings = {
+      enabled: true,
+      providerId: 'custom',
+      providerConfigs: {
+        custom: {
+          model: 'local-model',
+          baseUrl: firstBaseUrl,
+          apiKey: encryptedKey,
+        },
+      },
+      usePassphrase: false,
+    };
+    await chrome.storage.local.set({ aiSettings: localAISettings });
+    const beforeKeyBytes = JSON.stringify(encryptedKey);
+
+    const worker = await freshWorker('custom-origin-import');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flushMicrotasks();
+    const document = rawFullDocument({
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: {
+          custom: { model: 'imported-model', baseUrl: redirectedBaseUrl },
+        },
+      },
+    });
+    await expect(worker.handleMessage(
+      { action: 'importPortableData', document },
+      {
+        applyPortableImport: (parsed) => applyPortableImport(parsed, {
+          stashRepository: { list: async () => [], replace: async () => {} },
+          now: () => 100,
+        }),
+        getSettings: async () => ({}),
+        reconfigureAlarms: async () => {},
+      },
+    )).resolves.toEqual(importSummary());
+
+    const storedCustom = harness.snapshot().local.aiSettings.providerConfigs.custom;
+    expect(storedCustom.baseUrl).toBe(firstBaseUrl);
+    expect(storedCustom.model).toBe('imported-model');
+    expect(JSON.stringify(storedCustom.apiKey)).toBe(beforeKeyBytes);
+
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), headers: options.headers || {} });
+      return { ok: true, status: 200 };
+    };
+    try {
+      await expect(worker.handleMessage({
+        action: 'testAIConnection',
+        providerId: 'custom',
+      })).resolves.toEqual({ success: true });
+      expect(requests).toHaveLength(1);
+      expect(requests[0].url.startsWith(firstBaseUrl)).toBeTrue();
+      expect(requests[0].url.includes(redirectedBaseUrl)).toBeFalse();
+      expect(requests[0].headers.Authorization).toBe(`Bearer ${apiKey}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('re-parses hostile documents before any repository operation', async () => {
     const harness = installChromeMock({ local: { unrelated: { preserved: true } } });
     const worker = await freshWorker('hostile-imports');
@@ -488,7 +592,7 @@ describe('portable import worker boundary', () => {
       'undoDriveSettings',
       'saveFocusProfilePrefs',
       'saveAISettings',
-      'setAIApiKey',
+      'unlockAIApiKey',
       'saveKeepAwakeList',
       'toggleKeepAwakeDomain',
       'setKeepAwake',
@@ -505,7 +609,9 @@ describe('portable import worker boundary', () => {
       'resumeFocus',
       'extendFocus',
     ]) {
-      expect(actionBody(action)).toContain('withStateMutationLock');
+      const body = actionBody(action);
+      expect(body).toContain('withStateMutationLock');
+      expect(body.match(/withStateMutationLock/g)).toHaveLength(1);
     }
 
     expect(actionBody('createBookmarks')).toContain('return createBookmarks(');
@@ -560,6 +666,278 @@ describe('portable import worker boundary', () => {
       preferences: { blockedCategories: { bad: true }, blockedDomains: { bad: true } },
     })).rejects.toThrow();
     expect(harness.calls.storage.local.set).toHaveLength(writes);
+  });
+});
+
+describe('AI credential worker boundary', () => {
+  test('getAISettings returns only the exact public AI projection', async () => {
+    installChromeMock();
+    const expected = publicAIProjection({
+      providerConfigs: {
+        ...publicAIProjection().providerConfigs,
+        openai: { model: 'gpt-4.1-nano', hasApiKey: true, usesPassphrase: true },
+      },
+      protectionMode: 'passphrase',
+    });
+    const calls = [];
+    const aiClient = {
+      async getPublicSettings(...args) {
+        calls.push(args);
+        return expected;
+      },
+    };
+    const worker = await freshWorker('ai-public-settings');
+    await expect(worker.handleMessage(
+      { action: 'getAISettings' },
+      { aiClient },
+    )).resolves.toEqual(expected);
+    expect(calls).toEqual([[]]);
+  });
+
+  test('needsAIPassphrase validates one provider and returns the exact boolean envelope', async () => {
+    installChromeMock();
+    const calls = [];
+    const aiClient = {
+      async needsPassphrase(...args) {
+        calls.push(args);
+        return true;
+      },
+    };
+    const worker = await freshWorker('ai-needs-passphrase');
+    await expect(worker.handleMessage({
+      action: 'needsAIPassphrase',
+      providerId: 'openai',
+    }, { aiClient })).resolves.toEqual({ needsPassphrase: true });
+    expect(calls).toEqual([['openai']]);
+  });
+
+  test('unlockAIApiKey returns no key and maps void success to the exact unlock envelope', async () => {
+    installChromeMock();
+    const passphrase = `task12-passphrase-${crypto.randomUUID()}`;
+    const calls = [];
+    const aiClient = {
+      async unlockApiKey(...args) {
+        calls.push(args);
+      },
+    };
+    const worker = await freshWorker('ai-unlock');
+    const result = await worker.handleMessage({
+      action: 'unlockAIApiKey',
+      providerId: 'openai',
+      passphrase,
+    }, { aiClient });
+    expect(result).toEqual({ unlocked: true });
+    expect(calls).toEqual([['openai', passphrase]]);
+    expect(JSON.stringify(result)).not.toContain(passphrase);
+  });
+
+  test('saveAISettings delegates one atomic request and preserves the exact committed-lock result', async () => {
+    installChromeMock();
+    const settings = editableAISettings();
+    const keyUpdates = [];
+    const calls = [];
+    const aiClient = {
+      async saveConfiguration(...args) {
+        calls.push(args);
+        return { saved: true, unlocked: false };
+      },
+    };
+    const worker = await freshWorker('ai-atomic-save');
+    await expect(worker.handleMessage({
+      action: 'saveAISettings',
+      settings,
+      keyUpdates,
+      passphrase: null,
+    }, { aiClient })).resolves.toEqual({ saved: true, unlocked: false });
+    expect(calls).toEqual([[settings, keyUpdates, null]]);
+  });
+
+  test('test and model actions reconstruct private config and receive only provider identity', async () => {
+    installChromeMock();
+    const testCalls = [];
+    const listCalls = [];
+    const privateMarker = `private-model-field-${crypto.randomUUID()}`;
+    const aiClient = {
+      async testConnection(...args) {
+        testCalls.push(args);
+        return 1;
+      },
+      async listModels(...args) {
+        listCalls.push(args);
+        return [{ id: 'safe-model', name: 'Safe model', privateMarker }];
+      },
+    };
+    const worker = await freshWorker('ai-private-reconstruction');
+    await expect(worker.handleMessage({
+      action: 'testAIConnection',
+      providerId: 'openai',
+    }, { aiClient })).resolves.toEqual({ success: true });
+    const listResult = await worker.handleMessage({
+      action: 'listModels',
+      providerId: 'openai',
+    }, { aiClient });
+    expect(listResult).toEqual({ models: [{ id: 'safe-model', name: 'Safe model' }] });
+    expect(JSON.stringify(listResult)).not.toContain(privateMarker);
+    expect(testCalls).toEqual([['openai']]);
+    expect(listCalls).toEqual([['openai']]);
+    expect(testCalls.map((args) => args.length)).toEqual([1]);
+    expect(listCalls.map((args) => args.length)).toEqual([1]);
+  });
+
+  test('rejects injected private provider fields before provider work without echoing plaintext', async () => {
+    installChromeMock();
+    const secret = `task12-key-${crypto.randomUUID()}`;
+    const providerCalls = [];
+    const aiClient = {
+      async testConnection(...args) {
+        providerCalls.push(args);
+        return true;
+      },
+      async listModels(...args) {
+        providerCalls.push(args);
+        return [];
+      },
+    };
+    const worker = await freshWorker('ai-private-injection');
+    for (const message of [
+      { action: 'testAIConnection', providerId: 'openai', config: { apiKey: secret } },
+      { action: 'testAIConnection', providerId: 'openai', apiKey: secret },
+      { action: 'testAIConnection', providerId: 'openai', passphrase: secret },
+      { action: 'listModels', providerId: 'custom', config: { apiKey: secret } },
+      { action: 'listModels', providerId: 'custom', baseUrl: `https://${secret}.invalid/v1` },
+      { action: 'listModels', providerId: 'custom', endpoint: `https://${secret}.invalid/v1` },
+    ]) {
+      let rejection = null;
+      try {
+        await worker.handleMessage(message, { aiClient });
+      } catch (error) {
+        rejection = error;
+      }
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection.message).not.toContain(secret);
+    }
+    expect(providerCalls).toEqual([]);
+  });
+
+  test('AI state actions reject extra or missing fields before entering core methods', async () => {
+    installChromeMock();
+    const coreCalls = [];
+    const aiClient = {
+      async getPublicSettings(...args) { coreCalls.push(args); return {}; },
+      async needsPassphrase(...args) { coreCalls.push(args); return false; },
+      async unlockApiKey(...args) { coreCalls.push(args); },
+      async saveConfiguration(...args) {
+        coreCalls.push(args);
+        return { saved: true, unlocked: true };
+      },
+    };
+    const worker = await freshWorker('ai-strict-actions');
+    for (const message of [
+      { action: 'getAISettings', config: {} },
+      { action: 'needsAIPassphrase', providerId: 'openai', apiKey: 'injected' },
+      { action: 'unlockAIApiKey', providerId: 'openai' },
+      {
+        action: 'saveAISettings',
+        settings: editableAISettings(),
+        keyUpdates: [],
+        passphrase: null,
+        config: {},
+      },
+    ]) {
+      await expect(worker.handleMessage(message, { aiClient })).rejects.toThrow();
+    }
+    expect(coreCalls).toEqual([]);
+  });
+
+  test('the obsolete split setAIApiKey route is unavailable and cannot reach key storage', async () => {
+    installChromeMock();
+    const secret = `task12-removed-route-${crypto.randomUUID()}`;
+    const calls = [];
+    const aiClient = {
+      async setApiKey(...args) {
+        calls.push(args);
+      },
+    };
+    const worker = await freshWorker('ai-removed-route');
+    await expect(worker.handleMessage({
+      action: 'setAIApiKey',
+      providerId: 'openai',
+      plainKey: secret,
+      passphrase: null,
+    }, { aiClient })).resolves.toEqual({ error: 'Unknown action' });
+    expect(calls).toEqual([]);
+    const source = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
+    expect(source).not.toContain("case 'setAIApiKey'");
+  });
+
+  test('atomic save and unlock remain queued behind an in-flight portable import', async () => {
+    installChromeMock();
+    const worker = await freshWorker('ai-lock-serialization');
+    const entered = deferred();
+    const gate = deferred();
+    const order = [];
+    const aiClient = {
+      async saveConfiguration() {
+        order.push('save:core');
+        return { saved: true, unlocked: true };
+      },
+      async unlockApiKey() {
+        order.push('unlock:core');
+      },
+    };
+    try {
+      const importing = worker.handleMessage(
+        { action: 'importPortableData', document: sessionsDocument() },
+        {
+          applyPortableImport: async () => {
+            order.push('import:start');
+            entered.resolve();
+            await gate.promise;
+            order.push('import:end');
+            return importSummary();
+          },
+        },
+      );
+      await entered.promise;
+
+      const saving = worker.handleMessage({
+        action: 'saveAISettings',
+        settings: editableAISettings(),
+        keyUpdates: [],
+        passphrase: null,
+      }, { aiClient }).then(
+        (value) => { order.push('save:settled'); return { ok: true, value }; },
+        (error) => { order.push('save:settled'); return { ok: false, error }; },
+      );
+      const unlocking = worker.handleMessage({
+        action: 'unlockAIApiKey',
+        providerId: 'openai',
+        passphrase: 'synthetic-passphrase',
+      }, { aiClient }).then(
+        (value) => { order.push('unlock:settled'); return { ok: true, value }; },
+        (error) => { order.push('unlock:settled'); return { ok: false, error }; },
+      );
+
+      await flushMicrotasks();
+      const beforeRelease = [...order];
+      gate.resolve();
+      await importing;
+      const [saveResult, unlockResult] = await Promise.all([saving, unlocking]);
+
+      expect(beforeRelease).toEqual(['import:start']);
+      expect(saveResult).toEqual({ ok: true, value: { saved: true, unlocked: true } });
+      expect(unlockResult).toEqual({ ok: true, value: { unlocked: true } });
+      expect(order).toEqual([
+        'import:start',
+        'import:end',
+        'save:core',
+        'unlock:core',
+        'save:settled',
+        'unlock:settled',
+      ]);
+    } finally {
+      gate.resolve();
+    }
   });
 });
 

@@ -2,13 +2,14 @@
 
 ## Current state
 
-- Repository version: `1.2.13`
+- Repository version: `1.2.14`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–11 implemented and independently code-reviewed; portable data remains bounded and transactional, every side-panel request/response command crosses one checked rejection boundary, direct promise-returning Chrome/Storage calls are owned, Ctrl+K validates grouped tabs plus current nested saved records with stale-work protection, and delayed Focus badge resets are queue-owned
+- Implementation status: Tasks 1–12 implemented and independently code-reviewed; AI settings expose only a public projection, credential/protection changes commit atomically, passphrase keys unlock per browser session, Custom credentials are origin-bound, and AI cache/request boundaries reject stale or reflected secrets
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
-- Phase 2 status: Tasks 7–11 implementation is complete at `1.2.13`; Task 10 is tagged and pushed at `v1.2.12`, while Task 11 code, independent review, regression evidence, documentation, deterministic gates, and documentation-updated terminal Chrome proof are complete. The `v1.2.13` commit/tag/push, exact-commit CI, and GitHub release remain
+- Phase 2 release status: `v1.2.13` is committed, tagged, pushed, exact-commit CI-green, and published as a GitHub release
+- Phase 3 status: Task 12 implementation, independent code/security review, regression evidence, documentation, deterministic gates, and preliminary real-Chrome credential proof are complete at `1.2.14`; the controller owns the documentation-updated terminal Chrome rerun and release checkpoint closeout
 
 ## Completed implementation slices
 
@@ -112,6 +113,16 @@
 - Final evidence is `62 pass / 0 fail / 277 assertions` side-panel focused, `115 pass / 0 fail / 656 assertions` affected, `56 pass / 0 fail / 164 assertions` Focus lifecycle, `541 pass / 0 fail / 2966 assertions` in both full and coverage runs, and `2 pass / 0 fail / 100 assertions` for syntax. Coverage is `52.52%` functions and `51.06%` lines; raw-runtime, 15-file request, direct-Chrome, Storage, whitespace, version, bounded Focus-core scope, and zero-dependency gates pass under Bun `1.3.11`.
 - Two independent side-panel reviews found no Critical, Important, or Minor issue at pre-documentation tree `c925bf65dfdabbb0358ab5a0d5570192a8eeafcc`; independent timer analysis and follow-up concurrency review drove the final bounded repair. Chrome 148 then passed the tree-hash-guarded production panel/worker fixture after tracked evidence freeze: one natural cleanup error produced one safe failure and no success/optimistic/unhandled effect; ordered grouped tabs and current nested stash/session matches rendered in Ctrl+K; valid no-match stayed distinct from unavailable; no request reached the network; and every disposable resource was removed. Exact terminal tree/hash counters live in the gitdir-local report.
 
+### Task 12 — Atomic AI credential lifecycle (`1.2.14`)
+
+- Added provider-specific passphrase unlock after browser restart without re-entering or replacing the encrypted key. Public settings contain only safe configuration plus key-presence/protection booleans; private blobs and session plaintext never cross ordinary runtime responses.
+- Replaced split settings/key mutation with one validated operation under the worker FIFO lock. All replacement keys encrypt before one local commit; the one session batch is best-effort, so a session failure is reported as saved-but-locked while a local failure changes neither store.
+- Bound session plaintext to the current encrypted blob fingerprint, derived lock state from each blob, preserved explicit legacy mixed mode, and required complete replacements for protection normalization. Device/no-key Chrome AI paths cannot consume legacy ciphertext.
+- Restricted Custom endpoints to remote HTTPS or loopback HTTP, bound stored Custom credentials to origin across settings and portable import, moved Gemini authentication into a header, sanitized provider errors/results, and replaced weak response-cache identities with SHA-256 hashes scoped across credential, endpoint, prompts, model, and request options.
+- Made provider changes, lock-status refresh, Save, Unlock, Test Connection, Load Models, and full refresh mutually exclusive and generation-owned. Old passphrases clear synchronously, unsaved selections cannot execute, and stale success/failure cannot repaint or submit against a newer selection.
+- Mandatory RED evidence was `17 pass / 51 fail / 159 assertions`. Final focused verification is `188 pass / 0 fail / 1376 assertions`; full and coverage runs are `640 pass / 0 fail / 3711 assertions`; syntax is `2 pass / 0 fail / 101 assertions`; coverage is `61.29%` functions and `57.40%` lines. Two independent terminal audits report no blocker at functional tree `a32a08e93aecc03d7b7072294db159a39a35c9ab`.
+- Chrome 148 verifies a passphrase-only blob survives a full process exit/relaunch unchanged, wrong unlock fails, correct unlock enables one intercepted OpenAI request, the credential appears only in the authorization header, no request reaches an external network, and disposable resources are removed. The exact documentation-updated terminal tree is recorded gitdir-locally after tracked evidence freeze.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -140,4 +151,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Freeze and independently review the Task 11 tree, commit it, annotate `v1.2.13`, atomically push `main` plus the task tag, verify exact-commit GitHub Actions, and create the Phase 2 GitHub release with Drive v2, deletion convergence, portable data, checked messaging, and grouped-search notes. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Run the tree-hash-guarded terminal Task 12 Chrome credential fixture after this tracked evidence freeze, commit it, annotate `v1.2.14`, atomically push `main` plus the task tag, and verify exact-commit GitHub Actions. Then begin Task 13's abort-before-retry lifecycle with regression-first non-overlap proof. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

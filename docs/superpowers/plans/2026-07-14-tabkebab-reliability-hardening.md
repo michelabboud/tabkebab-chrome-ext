@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved plan in progress. Tasks 1–8 are implemented, independently reviewed, and published as task checkpoints through `v1.2.10`, with exact-commit CI green. Task 9 implementation, independent review, documentation, and deterministic gates are complete at version `1.2.11`; commit, tag, push, and exact-commit CI remain. The real Chrome/Drive fixture is still unpassed and retained as an explicit validation item rather than being replaced by synthetic evidence.
+**Status:** Approved plan in progress. Tasks 1–11 are implemented, independently reviewed, and published as task checkpoints through `v1.2.13`, with exact-commit CI green and Phase 2 released. Task 12 implementation, independent review, documentation, and deterministic gates are complete at version `1.2.14`; its documentation-updated terminal Chrome rerun and release checkpoint closeout remain. The real Chrome/Drive fixture is still unpassed and retained as an explicit validation item rather than being replaced by synthetic evidence.
 
 **Goal:** Fix all thirteen confirmed review findings with regression-first tests, preserve existing local and Drive data, and release verified source checkpoints without introducing a production dependency or build step.
 
@@ -895,7 +895,7 @@ new GlobalSearch({ send = sendOrThrow } = {});
 - [x] Repair the final-gate Focus timer leak without weakening the checked side-panel scope. Keep distraction reset ownership inside the serialized badge queue, cancel only after an authoritative repaint succeeds, re-arm rapid distractions atomically, recheck a fired timer token after queue entry, and own reset rejection with generic logging. Preserve the missing-context and overlapping-flash RED evidence.
 - [x] In real Chrome, force one representative background action to return `{ error }` and verify an error toast, no success toast, and no optimistic state mutation. Open tabs in multiple domain groups and confirm Ctrl+K returns them alongside current nested stashes and sessions; append exact documentation-updated tree evidence. **Chrome 148 passed the tree-hash-guarded panel/worker fixture with current-only saved-record fields, zero external network, and complete teardown; the exact non-recursive tree/hash evidence is gitdir-local.**
 - [x] Update `ARCHITECTURE.md`, `CHANGELOG.md`, and `PROGRESS.md`; record Phase 2 implementation complete, then close/tag/push the task. **Implementation, two independent terminal reviews, deterministic gates, tracked documentation, version parity, and final Chrome evidence are complete; the controller now owns commit/tag/push, exact-commit CI, and release closeout.**
-- [ ] Create and verify the GitHub release for `v$(cat VERSION)` with notes covering Drive v2, deletion convergence, portable export/import, checked messaging, and global search. Record dependency audit as not applicable because no package or lockfile exists.
+- [x] Create and verify the GitHub release for `v$(cat VERSION)` with notes covering Drive v2, deletion convergence, portable export/import, checked messaging, and global search. Record dependency audit as not applicable because no package or lockfile exists. **Published `v1.2.13` after exact-commit CI passed.**
 
 ---
 
@@ -912,10 +912,16 @@ new GlobalSearch({ send = sendOrThrow } = {});
 - Create: `tests/ai/ai-client-passphrase.test.js`
 - Modify: `docs/reports/2026-07-14-reliability-smoke.md`
 - Modify: `core/ai/ai-client.js`
+- Modify: `core/ai/cache.js`
 - Modify: `core/ai/provider.js`
+- Modify: `core/ai/provider-gemini.js`
+- Modify: `core/export-schema.js`
 - Modify: `service-worker.js`
 - Modify: `sidepanel/components/ai-settings.js`
 - Modify: `sidepanel/panel.html`
+- Modify: `sidepanel/panel.js`
+- Modify: `tests/core/export-schema.test.js`
+- Modify: `tests/core/portable-worker.test.js`
 - Modify: `GUIDE.md`
 - Modify: `PRIVACY.md`
 - Modify: `CHANGELOG.md`
@@ -948,22 +954,22 @@ AIClient.getPublicSettings();
 // -> { saved: true, unlocked: boolean }
 ```
 
-- [ ] Write tests first for correct unlock after clearing `chrome.storage.session`, wrong-passphrase rejection with no session mutation, already-unlocked, no-key, device-key/no-passphrase, and legacy global/blob metadata mismatch.
-- [ ] Add untrusted-message cases for unknown provider IDs, missing/non-string passphrases, malformed key-update arrays, and duplicate provider updates. Reject before crypto or storage calls.
-- [ ] Assert the unlock handler response is exactly `{ unlocked: true }`. Prove every AI settings/unlock/save runtime response excludes plaintext, ciphertext, and passphrase. The one-shot save request necessarily contains newly entered plaintext/passphrase and the storage adapter necessarily receives ciphertext; tests must instead prove neither is logged, echoed, or copied into any response.
-- [ ] Add atomic transition tests. Enabling or disabling protection with stored keys requires replacement plaintext for every stored provider whose blob protection differs; otherwise reject before any write and preserve local settings byte-for-byte.
-- [ ] Cover legacy mixed-provider blobs explicitly. Public settings report `protectionMode: 'mixed'` and the UI checkbox is indeterminate; model/endpoint edits may preserve mixed mode, but changing to device/passphrase or replacing keys requires replacements for every stored provider and normalizes all blobs in one write.
-- [ ] Inject the local settings write failure and prove session cache remains unchanged. Inject session-cache failure after a successful local write and require committed-but-locked semantics: return `{ saved: true, unlocked: false }`, keep valid encrypted settings, and let a later unlock/decrypt repopulate session. Cover successful all-provider replacement in both protection directions.
-- [ ] Run `bun test tests/ai/ai-client-passphrase.test.js` and preserve failures from the missing runtime unlock path and split settings/key writes.
-- [ ] Make `needsPassphrase()` derive truth from the selected provider's encrypted blob `usesPassphrase`, not the potentially stale global flag.
-- [ ] Implement `getPublicSettings()` and make the `getAISettings` handler return it. Replace each stored `apiKey` blob with `hasApiKey` and `usesPassphrase` booleans before crossing the runtime boundary. Derive `protectionMode` from all stored blobs; do not collapse mixed mode into a false boolean. Update UI placeholder/toggle logic to consume these public fields.
-- [ ] Implement `unlockApiKey()` using the existing decryptor. Wrong passphrase throws `AIAuthError('Incorrect passphrase')`; success stores only `aiDecryptedKey_<providerId>` in session storage and returns no key.
-- [ ] Implement `saveConfiguration()` as: read private current settings → validate/allowlist public model/provider/endpoint edits → preserve private blobs not replaced → validate protection transition → encrypt all replacements in memory → one local `aiSettings` write → one best-effort session-cache write. Persist `usePassphrase: true|false|null` where null means legacy mixed; normalized saves contain only true or false. Session-cache failure returns `unlocked: false` rather than rolling back valid encrypted persistence or rejecting ambiguously.
-- [ ] Replace separate save/key runtime calls with the single atomic handler above. Keep legacy internal methods only if another caller still requires them and tests cover the behavior.
-- [ ] Add `#ai-unlock-section`, `#ai-unlock-passphrase`, `#btn-unlock-ai`, and `#ai-unlock-result`. Refresh and provider selection query `needsAIPassphrase`; correct unlock clears input and refreshes availability, wrong unlock shows failure only.
-- [ ] Run `bun test tests/ai/ai-client-passphrase.test.js`, then the full three-command gate.
-- [ ] Fully restart Chrome, verify the Unlock UI appears for a protected key, reject a wrong passphrase, accept the right one, and make one provider call. Confirm no key appears in service-worker/panel logs; append evidence.
-- [ ] Update key-handling docs, then close the task using the global chain.
+- [x] Write tests first for correct unlock after clearing `chrome.storage.session`, wrong-passphrase rejection with no session mutation, already-unlocked, no-key, device-key/no-passphrase, and legacy global/blob metadata mismatch.
+- [x] Add untrusted-message cases for unknown provider IDs, missing/non-string passphrases, malformed key-update arrays, and duplicate provider updates. Reject before crypto or storage calls.
+- [x] Assert the unlock handler response is exactly `{ unlocked: true }`. Prove every AI settings/unlock/save runtime response excludes plaintext, ciphertext, and passphrase. The one-shot save request necessarily contains newly entered plaintext/passphrase and the storage adapter necessarily receives ciphertext; tests must instead prove neither is logged, echoed, or copied into any response.
+- [x] Add atomic transition tests. Enabling or disabling protection with stored keys requires replacement plaintext for every stored provider whose blob protection differs; otherwise reject before any write and preserve local settings byte-for-byte.
+- [x] Cover legacy mixed-provider blobs explicitly. Public settings report `protectionMode: 'mixed'` and the UI checkbox is indeterminate; model/endpoint edits may preserve mixed mode, but changing to device/passphrase or replacing keys requires replacements for every stored provider and normalizes all blobs in one write.
+- [x] Inject the local settings write failure and prove session cache remains unchanged. Inject session-cache failure after a successful local write and require committed-but-locked semantics: return `{ saved: true, unlocked: false }`, keep valid encrypted settings, and let a later unlock/decrypt repopulate session. Cover successful all-provider replacement in both protection directions.
+- [x] Run `bun test tests/ai/ai-client-passphrase.test.js` and preserve failures from the missing runtime unlock path and split settings/key writes.
+- [x] Make `needsPassphrase()` derive truth from the selected provider's encrypted blob `usesPassphrase`, not the potentially stale global flag.
+- [x] Implement `getPublicSettings()` and make the `getAISettings` handler return it. Replace each stored `apiKey` blob with `hasApiKey` and `usesPassphrase` booleans before crossing the runtime boundary. Derive `protectionMode` from all stored blobs; do not collapse mixed mode into a false boolean. Update UI placeholder/toggle logic to consume these public fields.
+- [x] Implement `unlockApiKey()` using the existing decryptor. Wrong passphrase throws `AIAuthError('Incorrect passphrase')`; success stores only `aiDecryptedKey_<providerId>` in session storage and returns no key.
+- [x] Implement `saveConfiguration()` as: read private current settings → validate/allowlist public model/provider/endpoint edits → preserve private blobs not replaced → validate protection transition → encrypt all replacements in memory → one local `aiSettings` write → one best-effort session-cache write. Persist `usePassphrase: true|false|null` where null means legacy mixed; normalized saves contain only true or false. Session-cache failure returns `unlocked: false` rather than rolling back valid encrypted persistence or rejecting ambiguously.
+- [x] Replace separate save/key runtime calls with the single atomic handler above. Keep legacy internal methods only if another caller still requires them and tests cover the behavior.
+- [x] Add `#ai-unlock-section`, `#ai-unlock-passphrase`, `#btn-unlock-ai`, and `#ai-unlock-result`. Refresh and provider selection query `needsAIPassphrase`; correct unlock clears input and refreshes availability, wrong unlock shows failure only.
+- [x] Run `bun test tests/ai/ai-client-passphrase.test.js`, then the full three-command gate.
+- [x] Fully restart Chrome, verify the Unlock UI appears for a protected key, reject a wrong passphrase, accept the right one, and make one provider call. Confirm no key appears in service-worker/panel logs; append evidence. **Chrome 148 passed the preliminary functional fixture; the controller now runs the same tree-hash-guarded fixture against the documentation-updated terminal tree.**
+- [x] Update key-handling docs, then close the task using the global chain. **Implementation, independent code/security review, documentation, and deterministic gates are complete; terminal Chrome plus commit/tag/push/exact-commit CI remain controller-owned.**
 
 ### Task 13: Abort timed-out provider attempts before bounded retry
 

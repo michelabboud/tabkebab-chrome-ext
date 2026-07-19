@@ -878,7 +878,71 @@ describe('secret-free portable section merge', () => {
     expect(merged.aiSettings.providerConfigs.openai.model).toBe('new-model');
     expect(merged.aiSettings.providerConfigs.custom).toMatchObject({
       model: 'new-custom',
-      baseUrl: 'http://new.local/v1',
+      baseUrl: 'http://old.local/v1',
+    });
+  });
+
+  test('only imports a Custom endpoint change when it cannot redirect a local credential', () => {
+    const localKey = { ciphertext: 'local-custom-ciphertext' };
+    const base = fullSections({
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: {
+          custom: {
+            model: 'local-model',
+            baseUrl: 'https://provider.example.test/v1',
+            apiKey: localKey,
+          },
+        },
+      },
+    });
+    const options = { tombstones: { sessions: {}, manualGroups: {} }, now: 100 };
+
+    const sameOrigin = mergePortableSections(base, {
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: {
+          custom: { model: 'same-origin', baseUrl: 'https://provider.example.test/v2' },
+        },
+      },
+    }, options);
+    expect(sameOrigin.aiSettings.providerConfigs.custom).toMatchObject({
+      model: 'same-origin',
+      baseUrl: 'https://provider.example.test/v2',
+      apiKey: localKey,
+    });
+
+    const differentOrigin = mergePortableSections(base, {
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: {
+          custom: { model: 'different-origin', baseUrl: 'https://redirect.example.test/v1' },
+        },
+      },
+    }, options);
+    expect(differentOrigin.aiSettings.providerConfigs.custom).toMatchObject({
+      model: 'different-origin',
+      baseUrl: 'https://provider.example.test/v1',
+      apiKey: localKey,
+    });
+
+    const withoutLocalKey = structuredClone(base);
+    delete withoutLocalKey.aiSettings.providerConfigs.custom.apiKey;
+    const unbound = mergePortableSections(withoutLocalKey, {
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: {
+          custom: { model: 'unbound', baseUrl: 'https://redirect.example.test/v1' },
+        },
+      },
+    }, options);
+    expect(unbound.aiSettings.providerConfigs.custom).toMatchObject({
+      model: 'unbound',
+      baseUrl: 'https://redirect.example.test/v1',
     });
   });
 

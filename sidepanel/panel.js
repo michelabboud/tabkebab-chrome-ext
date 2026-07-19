@@ -28,7 +28,14 @@ async function refreshController(controller, label) {
 
 const settingsRoot = document.getElementById('view-settings');
 const driveSyncCtrl = new DriveSync(settingsRoot);
-const aiSettingsCtrl = new AISettings(settingsRoot);
+const aiSettingsCtrl = new AISettings(settingsRoot, {
+  async onAvailabilityChanged() {
+    await Promise.all([
+      updateAIVisibility(),
+      updateAIStatusIcon(),
+    ]);
+  },
+});
 const settingsManagerCtrl = new SettingsManager(settingsRoot);
 
 const controllers = {
@@ -299,10 +306,27 @@ document.querySelectorAll('.app-version').forEach(el => {
 });
 
 // --- Toggle AI-dependent UI elements ---
+let aiVisibilityGeneration = 0;
+
 async function updateAIVisibility() {
+  const visibilityGeneration = ++aiVisibilityGeneration;
   try {
     const result = await sendOrThrow({ action: 'isAIAvailable' });
     const available = result?.available || false;
+    let providerName = '';
+
+    if (available) {
+      const aiSettings = await sendOrThrow({ action: 'getAISettings' });
+      const providerNames = {
+        openai: 'OpenAI',
+        claude: 'Claude',
+        gemini: 'Gemini',
+        'chrome-ai': 'Chrome AI',
+        custom: 'Custom',
+      };
+      providerName = providerNames[aiSettings?.providerId] || '';
+    }
+    if (visibilityGeneration !== aiVisibilityGeneration) return false;
 
     // Toggle body class so CSS can show/hide .ai-feature elements
     document.body.classList.toggle('ai-available', available);
@@ -321,26 +345,19 @@ async function updateAIVisibility() {
 
     // Update AI provider label
     const providerLabel = document.getElementById('ai-provider-label');
-    if (providerLabel && available) {
-      try {
-        const aiSettings = await sendOrThrow({ action: 'getAISettings' });
-        const providerNames = {
-          openai: 'OpenAI',
-          claude: 'Claude',
-          gemini: 'Gemini',
-          'chrome-ai': 'Chrome AI',
-          custom: 'Custom',
-        };
-        providerLabel.textContent = providerNames[aiSettings?.providerId] || '';
-      } catch {
-        providerLabel.textContent = '';
-      }
-    } else if (providerLabel) {
-      providerLabel.textContent = '';
-    }
+    if (providerLabel) providerLabel.textContent = providerName;
+    return available;
   } catch {
+    if (visibilityGeneration !== aiVisibilityGeneration) return false;
     // AI not available — keep hidden
     document.body.classList.remove('ai-available');
+    for (const id of ['command-bar', 'btn-smart-group', 'btn-suggest-keep-awake']) {
+      const element = document.getElementById(id);
+      if (element) element.hidden = true;
+    }
+    const providerLabel = document.getElementById('ai-provider-label');
+    if (providerLabel) providerLabel.textContent = '';
+    return false;
   }
 }
 
@@ -349,6 +366,7 @@ updateAIVisibility();
 // --- Status icons (Drive & AI) ---
 const driveStatusBtn = document.getElementById('btn-drive-status');
 const aiStatusBtn = document.getElementById('btn-ai-status');
+let aiStatusGeneration = 0;
 
 async function updateDriveStatusIcon() {
   try {
@@ -365,16 +383,21 @@ async function updateDriveStatusIcon() {
 }
 
 async function updateAIStatusIcon() {
+  const statusGeneration = ++aiStatusGeneration;
   try {
     const result = await sendOrThrow({ action: 'isAIAvailable' });
+    if (statusGeneration !== aiStatusGeneration) return false;
     const available = result?.available || false;
     aiStatusBtn.classList.toggle('connected', available);
     aiStatusBtn.classList.toggle('disconnected', !available);
     aiStatusBtn.dataset.tooltip = available ? 'AI: Connected' : 'AI: Not configured';
+    return available;
   } catch {
+    if (statusGeneration !== aiStatusGeneration) return false;
     aiStatusBtn.classList.add('disconnected');
     aiStatusBtn.classList.remove('connected');
     aiStatusBtn.dataset.tooltip = 'AI: Not configured';
+    return false;
   }
 }
 

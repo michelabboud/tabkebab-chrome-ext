@@ -709,6 +709,17 @@
             </div>
           </div>
 
+          <!-- Restart/session unlock for the selected provider -->
+          <div id="ai-unlock-section" class="passphrase-area" hidden>
+            <label class="input-label" for="ai-unlock-passphrase">Unlock selected provider</label>
+            <p class="description">This provider is passphrase-protected and locked for this browser session.</p>
+            <div class="toolbar" style="margin-bottom: 8px;">
+              <input type="password" id="ai-unlock-passphrase" class="input" placeholder="Enter provider passphrase..." autocomplete="current-password">
+              <button type="button" id="btn-unlock-ai" class="action-btn secondary" style="flex:0">Unlock</button>
+            </div>
+          </div>
+          <div id="ai-unlock-result" class="drive-status" role="status" aria-live="polite" hidden></div>
+
           <!-- Actions -->
           <div class="toolbar">
             <button id="btn-test-ai" class="action-btn secondary">Test Connection</button>

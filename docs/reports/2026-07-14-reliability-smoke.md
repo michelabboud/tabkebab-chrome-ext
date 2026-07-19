@@ -766,3 +766,74 @@ proof. It deliberately fails before authentication and makes no Drive call or
 artifact. Even after the terminal rerun, it does not replace the separately
 tracked registered-identity and operator-authenticated two-profile Drive
 fixture.
+
+---
+
+Slice: Task 12, atomic AI credential lifecycle
+
+Extension version: `1.2.14`
+
+## Task 12 deterministic and independent-review evidence
+
+The untouched Task 11 AI-adjacent baseline passed at `33 pass / 0 fail / 178
+assertions`. The mandatory pre-production Task 12 boundary was then RED at `17
+pass / 51 fail / 159 assertions`, covering the absent restart-unlock path,
+private/public settings split, atomic protection transition, strict worker
+messages, and checked UI lifecycle.
+
+After implementation and reviewer-driven race/security regressions, the final
+tracked source passes:
+
+```text
+affected credential/UI/export suites: 188 pass / 0 fail / 1376 assertions
+full suite: 640 pass / 0 fail / 3711 assertions
+coverage suite: 640 pass / 0 fail / 3711 assertions
+coverage: 61.29% functions / 57.40% lines
+syntax: 2 pass / 0 fail / 101 assertions
+```
+
+Whitespace, version parity, secret scanning, and the no-package/no-lockfile
+audit pass under Bun `1.3.11`. Two independent final audits report no blocker
+at functional tree `a32a08e93aecc03d7b7072294db159a39a35c9ab` after focused
+immutable reruns with zero failures. Their reviews include the exact public and
+private configuration boundary, Custom origin binding, response/cache
+credential rejection, and provider-change/status/unlock race ownership.
+
+## Task 12 preliminary real-Chrome credential result (superseded)
+
+Chrome for Testing `148.0.7778.96` loaded the actual unpacked extension at
+functional tree `6523bb885c8936646e12256c22baaf08cc7ca078` in one disposable
+profile. The fixture used generated synthetic credential material that was
+never printed. It saved a passphrase-only OpenAI key, recorded the encrypted
+blob, cleared active UI state by fully exiting Chrome, and relaunched the same
+profile.
+
+The encrypted blob remained byte-for-byte unchanged and local storage contained
+no plaintext key or install ID for this passphrase-only path. The relaunched
+session was locked, the Unlock controls were visible, the wrong passphrase was
+rejected, and the correct passphrase unlocked the provider. One subsequent
+production provider request carried the generated credential only in its
+authorization header. It was intercepted before network; the URL, request body,
+runtime responses, and panel/service-worker logs contained no credential. No
+other external request or page error occurred, and the disposable Chrome,
+display, and profile resources were removed.
+
+This run predates the final reviewer repairs and tracked documentation/version
+freeze, so it is retained only as preliminary functional evidence. The
+controller reruns the same tree-hash-guarded harness after all tracked Task 12
+content is frozen. Its exact non-recursive tree, redacted counters, and cleanup
+proof live in the gitdir-local Task 12 report so recording the tree cannot
+recursively alter the source under test.
+
+## Task 12 terminal credential assertions
+
+The terminal run must preserve the encrypted blob across a full Chrome
+exit/relaunch, start locked, reject one wrong passphrase, accept the right one,
+show visible success, and issue exactly one intercepted provider request with
+the expected provider runtime fields. It must report zero credential matches in
+the URL, body, local plaintext, runtime responses, or logs; zero external
+requests reaching the network; and complete process/profile/display cleanup.
+
+This is a local credential-boundary proof, not a live provider-account or Google
+Drive/OAuth proof. The provider response is intercepted and synthetic, and no
+secret or private browsing payload is preserved in repository evidence.

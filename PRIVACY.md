@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** January 31, 2026
+**Last updated:** July 19, 2026
 
 ## The short version
 
@@ -26,13 +26,13 @@ All extension data lives inside your browser profile and never leaves it unless 
 | **Manual groups** | Custom tab groups you create (group name, color, tab URLs) |
 | **Keep-awake domains** | The list of domains you protect from tab sleep (e.g. `gmail.com`) |
 | **AI settings** | Your chosen provider, model, and encrypted API key (if AI features are enabled) |
-| **AI response cache** | A local LRU cache (max 200 entries, 24-hour expiry) of AI responses to avoid redundant API calls |
+| **AI response cache** | A local LRU cache (max 200 entries, 24-hour expiry) of AI responses keyed by a SHA-256 request identity to avoid redundant API calls |
 | **Drive sync state** | Whether Google Drive sync is connected and last sync timestamp |
 | **Install ID** | A random UUID generated once per browser profile, used as a fallback encryption key if you don't set a passphrase |
 
 ### Chrome session storage (`chrome.storage.session`)
 
-Decrypted AI API keys are held in session storage while the extension is active. This storage is automatically wiped every time Chrome's service worker restarts (browser restart, idle timeout, etc.). Keys are never written to disk in plaintext.
+Decrypted AI API keys are held in session storage while the extension is active. They survive an ordinary service-worker idle timeout or restart, so background suspension does not repeatedly lock the provider. Chrome clears extension session storage on a full browser restart, extension reload, extension update, or disable. Keys are never written to disk in plaintext.
 
 ### IndexedDB (`TabKebabStash`)
 
@@ -40,7 +40,9 @@ Stashed tabs are stored in an IndexedDB database on your device. Each stash cont
 
 ### API key encryption
 
-If you use AI features, your API key is encrypted with AES-GCM (256-bit) using PBKDF2 key derivation (100,000 iterations, SHA-256). You can optionally set a passphrase for encryption; otherwise the per-profile install ID is used. The plaintext key is never persisted to disk.
+If you use AI features, your API key is encrypted with AES-GCM (256-bit) using PBKDF2 key derivation (100,000 iterations, SHA-256). You can use a passphrase you know or device protection backed by the random per-profile install ID. Changing protection for stored keys requires entering every affected key so all ciphertext is replaced atomically. The plaintext key is never persisted to disk.
+
+Only a secret-free public projection of AI settings crosses ordinary runtime responses. A newly entered key and passphrase exist in one panel-to-worker save request solely so the worker can validate and encrypt them; neither value is echoed in a response or logged. The encrypted settings commit occurs once, and the session cache is updated only afterward. A session-cache failure leaves valid encrypted settings committed but locked.
 
 ---
 
@@ -53,14 +55,16 @@ If — and only if — you enable AI features and configure an API key, the exte
 - **OpenAI** (`api.openai.com`)
 - **Anthropic Claude** (`api.anthropic.com`)
 - **Google Gemini** (`generativelanguage.googleapis.com`)
-- **Custom endpoint** (whatever URL you configure, e.g. a local Ollama instance)
+- **Custom endpoint** (a remote HTTPS URL you configure, or an HTTP loopback development URL such as local Ollama)
 - **Chrome Built-in AI** — runs entirely on-device, nothing sent over the network
 
-**What is sent:** A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. Your API key is sent in the request header for authentication.
+**What is sent:** A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. Your API key is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
 
 **What is NOT sent:** Browsing history, page content, cookies, passwords, form data, or any data beyond tab titles and URLs relevant to the specific AI request.
 
 Each provider has its own privacy policy that governs how they handle the data you send them. We have no control over that.
+
+Remote Custom endpoints must use HTTPS. HTTP is allowed only for loopback hosts; URLs containing embedded credentials, query strings, or fragments are rejected. Changing a stored Custom endpoint to another origin requires a replacement key, and portable import cannot redirect a preserved local key across origins. Provider failures are reduced to safe typed errors, and both successful and cached responses are rejected if they reflect a submitted credential. Legacy response-cache entries are cleared on extension update.
 
 ### Google Drive sync (opt-in only)
 

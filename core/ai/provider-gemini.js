@@ -103,8 +103,9 @@ export const GeminiProvider = {
    */
   async listModels(config) {
     try {
-      const response = await fetch(`${BASE_URL}/models?key=${encodeURIComponent(config.apiKey)}`, {
+      const response = await fetch(`${BASE_URL}/models`, {
         method: 'GET',
+        headers: { 'x-goog-api-key': config.apiKey },
       });
       if (!response.ok) return [];
 

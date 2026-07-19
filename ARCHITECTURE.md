@@ -60,6 +60,20 @@ All Focus badge writes pass through one serialized generation-aware reconciler. 
 
 Pure policy and merge decisions belong in core modules that can run without Chrome. Chrome API calls remain at explicit adapters and orchestration boundaries.
 
+### AI credential boundary
+
+`core/ai/ai-client.js` owns the private AI configuration. Encrypted provider blobs and passphrase metadata never cross the ordinary runtime boundary: `getPublicSettings()` projects only allowlisted provider/model/endpoint choices plus `hasApiKey`, `usesPassphrase`, and the aggregate `device`, `passphrase`, or `mixed` protection mode. Provider execution reconstructs its private configuration inside the worker. Runtime handlers accept exact closed request shapes and return exact secret-free result envelopes.
+
+`saveConfiguration()` is the only user-facing credential write. It validates public fields and the complete replacement set before crypto or storage, encrypts every replacement in memory, performs one local `aiSettings` write under the worker FIFO mutation lock, then performs one best-effort session-storage batch. A local-write failure leaves both stores unchanged. A later session-write failure reports saved-but-locked while retaining the valid encrypted commit. Protection changes and legacy mixed-mode normalization require replacement plaintext for every stored key whose protection would change.
+
+Session entries contain only a version, the encrypted-blob fingerprint, and the decrypted key. A cache hit is usable only when its fingerprint matches current ciphertext, which prevents stale session plaintext from surviving a key or protection change. Passphrase unlock derives truth from the selected provider blob, decrypts without mutating local settings, and maps failure to a typed generic authentication error. Device-protected keys can be reconstructed from the local install ID; passphrase-protected keys remain unavailable until unlocked. `chrome.storage.session` survives service-worker suspension but is cleared by browser restart, extension reload/update, or disable.
+
+Custom endpoints accept remote HTTPS or HTTP loopback only and reject userinfo, query, and fragment components. A stored Custom key cannot move to another origin without replacement plaintext, and portable merge preserves the local endpoint rather than redirecting a preserved key across origins. Same-origin path changes remain allowed. Gemini authenticates through `x-goog-api-key`, never a URL query parameter. Provider exceptions cross the core boundary only as safe typed errors; successful and cached results are scanned for exact submitted-secret reflection before return.
+
+`core/ai/cache.js` stores responses under a SHA-256 identity covering provider, model, system/user prompts, a credential fingerprint, the full canonical Custom base URL, and response-affecting request options. It never stores the plaintext credential or unhashed request material. Update/install migration clears the legacy response cache so older weakly scoped entries cannot be reused.
+
+The AI Settings controller owns Save, Unlock, Test Connection, Load Models, provider-status refresh, and full refresh through one exclusive-operation boundary. Provider and request generations make overlapping settlements last-call-wins. A provider change synchronously hides and clears the old unlock input before awaiting status, unsaved provider selection cannot trigger runtime use, and hidden or disabled unlock controls are revalidated at the send boundary. Panel-level availability refreshes use the same generation rule so stale status cannot repaint the shell.
+
 ## Persistence
 
 - `chrome.storage.local`: sessions, settings, manual groups, Focus Mode preferences/history, Drive state, AI configuration, and sync metadata.

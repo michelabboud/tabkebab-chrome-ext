@@ -5,6 +5,7 @@ import { findDuplicates, findEmptyPages } from './core/duplicates.js';
 import { saveSession, restoreSession, listSessions, deleteSession, deleteSessions, restoreDeletedSession } from './core/sessions.js';
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
+import { ProviderId } from './core/ai/provider.js';
 import { Prompts } from './core/ai/prompts.js';
 import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
@@ -900,6 +901,14 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Auto-save on extension install/update + open panel on first install
 chrome.runtime.onInstalled.addListener(async (details) => {
+  // Pre-v1.2.14 provider responses were cached without a credential-reflection
+  // check. The cache is disposable, so clear it on install/update before use.
+  try {
+    await AIClient.clearCache();
+  } catch {
+    console.warn('[TabKebab] AI cache migration failed');
+  }
+
   // On first install, open the side panel to welcome the user
   if (details.reason === 'install') {
     try {
@@ -1156,6 +1165,7 @@ function isPlainRecord(value) {
 }
 
 const MAX_RUNTIME_PORTABLE_STRING = 16_384;
+const AI_PROVIDER_IDS = new Set(Object.values(ProviderId));
 const MANUAL_GROUP_COLORS = new Set([
   'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
 ]);
@@ -1207,12 +1217,49 @@ function requireExactRuntimeFields(message, expectedFields, label) {
   const keys = Object.keys(message);
   const unexpected = keys.filter((key) => !expected.has(key));
   if (unexpected.length > 0) {
-    throw new TypeError(`${label} has unexpected fields: ${unexpected.join(', ')}`);
+    // Field names are untrusted too. Do not reflect them into runtime errors or
+    // service-worker logs because a caller could place credential material in a key.
+    throw new TypeError(`${label} has unexpected fields`);
   }
   const missing = expectedFields.filter((key) => !Object.hasOwn(message, key));
   if (missing.length > 0) {
-    throw new TypeError(`${label} is missing fields: ${missing.join(', ')}`);
+    throw new TypeError(`${label} is missing required fields`);
   }
+}
+
+function requireAIProviderId(value) {
+  if (typeof value !== 'string' || !AI_PROVIDER_IDS.has(value)) {
+    throw new TypeError('AI provider is invalid');
+  }
+  return value;
+}
+
+function requireAIPassphrase(value, { optional = false } = {}) {
+  if (optional && value === null) return null;
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_RUNTIME_PORTABLE_STRING) {
+    throw new TypeError(optional
+      ? 'AI passphrase must be null or a non-empty bounded string'
+      : 'AI passphrase must be a non-empty bounded string');
+  }
+  return value;
+}
+
+function normalizeAIModels(models) {
+  if (!Array.isArray(models) || models.length > 1_000) {
+    throw new TypeError('AI model list must be a bounded array');
+  }
+  const normalized = [];
+  for (let index = 0; index < models.length; index += 1) {
+    if (!Object.hasOwn(models, index)) {
+      throw new TypeError('AI model list must be a dense array');
+    }
+    const model = models[index];
+    if (!isPlainRecord(model)) throw new TypeError('AI model must be an object');
+    const id = requireRuntimeString(model.id, 'AI model ID');
+    const name = requireRuntimeString(model.name, 'AI model name');
+    normalized.push({ id, name });
+  }
+  return normalized;
 }
 
 function requirePortableKind(kind) {
@@ -1293,6 +1340,7 @@ export async function handleMessage(msg, options = {}) {
     applyPortableImport: applyPortableImportOperation = applyPortableImport,
     buildPortableExportPayload: buildPortableExportOperation = buildPortableExportPayload,
     reconfigureAlarms: reconfigureAlarmsOperation = reconfigureAlarms,
+    aiClient = AIClient,
   } = options;
   switch (msg.action) {
     case 'getTabs':
@@ -1562,35 +1610,73 @@ export async function handleMessage(msg, options = {}) {
     // ── AI Settings ──
 
     case 'getAISettings':
-      return AIClient.getSettings();
+      requireExactRuntimeFields(msg, ['action'], 'AI settings request');
+      return aiClient.getPublicSettings();
 
-    case 'saveAISettings':
-      return withStateMutationLock(async () => {
-        await AIClient.saveSettings(msg.settings);
-        return { success: true };
-      });
+    case 'needsAIPassphrase': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'providerId'],
+        'AI passphrase-status request',
+      );
+      const providerId = requireAIProviderId(msg.providerId);
+      return { needsPassphrase: Boolean(await aiClient.needsPassphrase(providerId)) };
+    }
 
-    case 'setAIApiKey':
+    case 'unlockAIApiKey': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'providerId', 'passphrase'],
+        'AI unlock request',
+      );
+      const providerId = requireAIProviderId(msg.providerId);
+      const passphrase = requireAIPassphrase(msg.passphrase);
       return withStateMutationLock(async () => {
-        await AIClient.setApiKey(msg.providerId, msg.plainKey, msg.passphrase || undefined);
-        return { success: true };
+        await aiClient.unlockApiKey(providerId, passphrase);
+        return { unlocked: true };
       });
+    }
+
+    case 'saveAISettings': {
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'settings', 'keyUpdates', 'passphrase'],
+        'AI settings save request',
+      );
+      const passphrase = requireAIPassphrase(msg.passphrase, { optional: true });
+      return withStateMutationLock(async () => {
+        const result = await aiClient.saveConfiguration(msg.settings, msg.keyUpdates, passphrase);
+        if (result?.saved !== true || typeof result.unlocked !== 'boolean') {
+          throw new TypeError('AI settings save returned an invalid result');
+        }
+        return { saved: true, unlocked: result.unlocked };
+      });
+    }
 
     case 'isAIAvailable':
-      return { available: await AIClient.isAvailable() };
+      requireExactRuntimeFields(msg, ['action'], 'AI availability request');
+      return { available: Boolean(await aiClient.isAvailable()) };
 
     case 'testAIConnection': {
-      const success = await AIClient.testConnection(msg.providerId, msg.config);
-      return { success };
+      requireExactRuntimeFields(
+        msg,
+        ['action', 'providerId'],
+        'AI connection-test request',
+      );
+      const providerId = requireAIProviderId(msg.providerId);
+      return { success: Boolean(await aiClient.testConnection(providerId)) };
     }
 
     case 'clearAICache':
-      await AIClient.clearCache();
+      requireExactRuntimeFields(msg, ['action'], 'AI cache-clear request');
+      await aiClient.clearCache();
       return { success: true };
 
     case 'listModels': {
-      const models = await AIClient.listModels(msg.providerId, msg.config);
-      return { models };
+      requireExactRuntimeFields(msg, ['action', 'providerId'], 'AI model-list request');
+      const providerId = requireAIProviderId(msg.providerId);
+      const models = await aiClient.listModels(providerId);
+      return { models: normalizeAIModels(models) };
     }
 
     // ── AI Smart Grouping ──
@@ -2102,6 +2188,6 @@ export async function handleMessage(msg, options = {}) {
       return getAllProfiles();
 
     default:
-      return { error: `Unknown action: ${msg.action}` };
+      return { error: 'Unknown action' };
   }
 }

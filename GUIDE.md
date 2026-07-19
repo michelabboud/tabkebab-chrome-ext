@@ -599,8 +599,11 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 2. The AI section appears in settings with provider options
 3. Select a provider from the dropdown
 4. Enter your API key (if required)
-5. Optionally set a passphrase to encrypt the API key
-6. Choose a model
+5. Choose device protection or enable passphrase protection
+6. Choose a model and, for Custom, review the endpoint URL
+7. Click **Save AI Settings**
+
+**Test Connection** and **Load Models** use only the saved provider configuration. If the selected provider has unsaved changes, save them first. A passphrase-protected key must also be unlocked for the current browser session before either action or any AI command can use it.
 
 ### Available Providers
 
@@ -615,9 +618,19 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 ### API Key Security
 
 - Keys are encrypted with **AES-GCM 256-bit** using PBKDF2 key derivation (100,000 iterations)
-- Optional **passphrase** for encryption; otherwise a per-profile install ID is used
-- Decrypted keys are held in **session storage** (cleared on browser restart)
+- Optional **passphrase** protection derives the encryption key from a passphrase you know; otherwise device protection uses a random per-profile install ID
+- Decrypted keys are held only in **session storage**. They survive service-worker idle/suspension, but Chrome clears them on a full browser restart, extension reload, extension update, or disable
 - Plaintext keys are **never written to disk**
+- Settings and newly entered keys are validated, encrypted, and committed as one operation; keys and passphrases are never returned in a runtime response or written to logs
+- Changing between device and passphrase protection requires re-entering every stored provider key. Older profiles with a mixture of protection modes show an indeterminate setting and likewise require every key to normalize the profile
+
+After a browser restart, select the protected provider and use the **Unlock AI key** prompt. A wrong passphrase leaves the provider locked and does not alter the encrypted key. The correct passphrase unlocks only that provider for the current browser session.
+
+### Custom Endpoint Safety
+
+Remote Custom endpoints must use HTTPS. Plain HTTP is accepted only for loopback development hosts such as `localhost`, `*.localhost`, `127.0.0.0/8`, and `[::1]`; endpoint URLs cannot contain credentials, query strings, or fragments. Changing the origin of a Custom endpoint that already has a stored key requires re-entering that key. Portable imports cannot redirect an existing local Custom key to a different origin; the local endpoint is preserved instead.
+
+Google Gemini authentication is sent in the `x-goog-api-key` request header, never in the request URL. TabKebab also rejects provider errors or successful responses that reflect a submitted credential.
 
 ### Chrome Built-in AI
 
@@ -631,7 +644,7 @@ To use Gemini Nano (on-device, no API key):
 
 ### Response Caching
 
-AI responses are cached locally (LRU, max 200 entries, 24-hour expiry) to avoid redundant API calls. Same tab configuration → cached response → no API cost.
+AI responses are cached locally (LRU, max 200 entries, 24-hour expiry) to avoid redundant API calls. Cache identities are SHA-256 hashes scoped to the provider, model, prompts, credential, complete Custom endpoint, and request options, so changing an account, endpoint, or request configuration cannot reuse an older response.
 
 ---
 
@@ -802,7 +815,9 @@ Stashes are stored in IndexedDB, which is per-profile. If you switched Chrome pr
 
 ### API key issues
 
-- If you set a passphrase, you'll need to re-enter it after Chrome restarts
+- If you set a passphrase, re-enter it in **Unlock AI key** after Chrome fully restarts, the extension reloads or updates, or you disable and re-enable it
+- Service-worker idle by itself does not lock the key; the session-storage entry remains available
+- Save a changed provider selection before using **Test Connection** or **Load Models**
 - If you forgot your passphrase, remove the API key and add it again
 - Keys are encrypted at rest — they can't be recovered from storage
 
