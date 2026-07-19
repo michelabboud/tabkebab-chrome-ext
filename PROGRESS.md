@@ -7,7 +7,7 @@
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
 - Implementation status: Tasks 1–6 implemented; restoration, Focus lifecycle, exact-host/duplicate Undo, and fail-closed Drive retention established
-- Phase 1 release status: implementation and deterministic gates complete; mandatory real Chrome/Drive fixture proof and controller-owned `v1.2.8` release remain pending because disposable OAuth cannot be established safely in this checkout
+- Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
 
 ## Completed implementation slices
 
@@ -90,4 +90,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Use an approved, credential-safe registered environment plus an operator-authenticated disposable Google test-user session, without transmitting a token. Either test a signed/published package built from the exact Task 6 bytes under the registered production identity/client, or run commit-exact production code with an explicit manifest-only overlay for the documented development identity/client and record that the resulting package is not byte-exact. Then run and clean up the Task 6 real-Drive fixture. Only after that proof may the controller mark Phase 1 complete and publish `v1.2.8`.
+Publish and verify the operator-authorized `v1.2.8` refs, exact-commit CI run, and browsable GitHub release, then begin Task 7. The credential-safe real-Drive fixture remains an explicit post-release validation item: run it only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

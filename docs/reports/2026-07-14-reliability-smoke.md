@@ -411,3 +411,7 @@ Safe follow-up requires an approved registered environment and an operator-authe
 ## Task 6 cleanup
 
 The identity-only preflight launched a clean disposable Chrome/Xvfb profile, observed the service-worker ID, and then shut down. It requested no OAuth token and created no Drive folder or file. A post-run host process check found zero command lines matching the Task 6 disposable prefix. The profile contained no authenticated Google state, and no Drive artifact, fixture server, or display process remained to clean up.
+
+## Task 6 release disposition
+
+On 2026-07-19, the repository owner explicitly directed the controller to commit, tag, push, and publish `v1.2.8` without waiting for the blocked real Chrome/Drive fixture. The live gate remains unpassed and is not replaced by the deterministic adapter tests. The release proceeds on the independently reviewed focused, full, coverage, syntax, and diff evidence above; the credential-safe live fixture remains tracked as post-release validation.

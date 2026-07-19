@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Detailed plan complete and ready for Michel's implementation approval on 2026-07-14; production changes have not started.
+**Status:** Approved plan in progress. Tasks 1–6 are implemented and independently reviewed; the repository owner explicitly authorized the `v1.2.8` release on 2026-07-19 with the real Chrome/Drive fixture still unpassed and retained as post-release validation.
 
 **Goal:** Fix all thirteen confirmed review findings with regression-first tests, preserve existing local and Drive data, and release verified source checkpoints without introducing a production dependency or build step.
 
@@ -403,6 +403,8 @@ export function collectUndoUrls(duplicateGroups, closingTabIds);
 
 **Phase 1 release checkpoint:** expected `v1.2.8`
 
+**Release decision (2026-07-19):** the repository owner explicitly directed the controller to commit, tag, push, and publish `v1.2.8` with the real Chrome/Drive fixture still unpassed. This waives that fixture only as a release prerequisite; it does not convert deterministic tests into live evidence, and the unchecked fixture remains post-release validation.
+
 **Files:**
 
 - Create: `core/drive-retention.js`
@@ -448,8 +450,9 @@ The only categories are `sessions`, `stashes`, `bookmarks-json`, `bookmarks-html
 - [x] Replace both retention loops in `runRetentionCleanup()` and `cleanDriveFiles` with `selectDriveRetentionDeletions()`. Continue after an individual Drive delete error and return structured errors for manual cleanup.
 - [x] Update `settings-manager.js` to call the Task 1 `sendOrThrow()` boundary and state how many files were deleted and how many canonical/newest/undated files were protected. Any returned/transport error displays failure and never a success toast.
 - [x] Run `bun test tests/core/drive-retention.test.js tests/integration/drive-cleanup.test.js`, then the full three-command gate.
-- [ ] In real Chrome/Drive, place old canonical, archive, and dated export files in a throwaway profile folder; run manual cleanup and confirm canonical plus newest-per-category preservation. Append file names and post-cleanup listing to the smoke report. **Blocked:** the repository documents development ID `hkhlbjmokednepfjmnlglapgppfdpmck` and a development OAuth client, but the exact Task 6 manifest uses the production client without a pinning `key`; a clean disposable load observed ID `fignfifoniblkonapihmkfakmlgkbkcf`, matching neither the documented development nor published ID and therefore no documented client, and the profile had no authenticated Google test-user session. The gate needs an approved registered identity/client environment plus an operator-authenticated disposable session; a manifest-only development overlay must be recorded as non-byte-exact.
-- [ ] Update `GUIDE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `PROGRESS.md`; record Phase 1 complete, then close/tag/push the task.
+- [ ] In real Chrome/Drive, place old canonical, archive, and dated export files in a throwaway profile folder; run manual cleanup and confirm canonical plus newest-per-category preservation. Append file names and post-cleanup listing to the smoke report. **Blocked and explicitly waived as a release prerequisite on 2026-07-19:** the repository documents development ID `hkhlbjmokednepfjmnlglapgppfdpmck` and a development OAuth client, but the exact Task 6 manifest uses the production client without a pinning `key`; a clean disposable load observed ID `fignfifoniblkonapihmkfakmlgkbkcf`, matching neither the documented development nor published ID and therefore no documented client, and the profile had no authenticated Google test-user session. The post-release gate needs an approved registered identity/client environment plus an operator-authenticated disposable session; a manifest-only development overlay must be recorded as non-byte-exact.
+- [x] Update `GUIDE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `PROGRESS.md`; record the deterministic Task 6 evidence and the explicit 2026-07-19 release waiver without claiming the live fixture passed.
+- [ ] Close, tag, and push `v1.2.8` under the repository owner's explicit release instruction; keep the live fixture unchecked as post-release validation.
 - [ ] Create a browsable GitHub release for `v$(cat VERSION)` summarizing Findings 1-6/12, attach no credential-bearing artifacts, and verify with `gh release view v$(cat VERSION) --json tagName,targetCommitish,url` plus `git ls-remote origin refs/tags/v$(cat VERSION)`.
 
 ---
