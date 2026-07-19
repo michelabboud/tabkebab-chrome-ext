@@ -876,7 +876,7 @@ fallback-after-cleanup, and no-cache late results. Whitespace, version parity,
 credential-signature scanning, and the no-package/no-lockfile audit are part of
 the release closeout under Bun `1.3.11`.
 
-## Task 13 preliminary real-Chrome timeout result
+## Task 13 terminal real-Chrome timeout result
 
 Chrome for Testing `148.0.7778.96` loaded the production extension at exact
 functional tree `c073b4e2f4fd542f39a26a0302fbb19e7cfa821b`. The committed Bun
@@ -991,3 +991,64 @@ requests, zero runtime errors, zero final panel-pending requests, and no final
 Focus state. The disposable profile contained 345 entries before removal; the
 profile was removed, remaining matching Chrome processes were zero, Xvfb
 exited, and the loopback server stopped.
+
+---
+
+## Task 15 consolidation and exact-artifact gate
+
+The accepted implementation slices are immutable, pushed checkpoints. This
+table consolidates their owning commits and the evidence already recorded
+above; it does not convert a local source-tree smoke into proof for the final CI
+package.
+
+| Task | Tag | Tested commit | Accepted evidence | Explicit boundary |
+|---|---|---|---|---|
+| 2 | `v1.2.4` | `3906670200e01a75a712204cb8c876becd903ceb` | Recoverable restore and audio-safe browser rows | Exact final package row still required |
+| 3 | `v1.2.5` | `b3193cba6bc155a6fd7050d6b5ba1827e3e1e934` | Complete allowlist policy in Chrome | Exact final package row still required |
+| 4 | `v1.2.6` | `7a4075d840d04a084df6de3a33db5f32750e857d` | Focus lifecycle/restart browser rows | Exact final package row still required |
+| 5 | `v1.2.7` | `533a86e10c03d2e3230e043ae09a2bd5458c1d30` | Host/hash identity and Undo browser rows | Exact final package row still required |
+| 6 | `v1.2.8` | `54ac85ac11bf99b2fc2882481ec27ef2cb29c2ff` | Fail-closed deterministic retention | Live registered Drive fixture remains unpassed |
+| 7 | `v1.2.9` | `4a48a08dc3e613e2fd0cdf22cffc84b4357859e1` | Real worker-lock ordering with intercepted Drive | No live OAuth/Drive claim |
+| 8 | `v1.2.10` | `fbea7ada92694f3de94a14540378a742eb255381` | Real local delete/Undo/group serialization | Live two-profile Drive convergence remains unpassed |
+| 9 | `v1.2.11` | `906416d4c18a87bcb8b5743608bcf1273ba381d4` | Bounded secret-free export schema | Final package export/import row still required |
+| 10 | `v1.2.12` | `dc16829ae51efd0225a6d70669bcb93820780769` | Physical export/import transaction row | Final package export/import row still required |
+| 11 | `v1.2.13` | `2970c99f7284f080a7a0b3a0df401771c5944d99` | Checked failure UI and Ctrl+K browser row | Final package row still required |
+| 12 | `v1.2.14` | `7b0d41a9225f87a0e475363ae53ca11e7cb8b2ab` | Full-restart passphrase credential boundary | Intercepted provider, not an account claim |
+| 13 | `v1.2.15` | `14d19008872984306235805efe85f4dd8a66ad1b` | Real 120-second loopback abort/cleanup row | Must repeat against the exact package |
+| 14 | `v1.2.16` | `13cc0d5442789abb5269558a28ee3b727a251b2e` | Broker/Web Locks/reconnect/closed-panel rows | Prompt completion remains unpassed while status is `unavailable` |
+
+Task 15's local packaging boundary was exercised through real Windows
+PowerShell 5.1/cmd interop. The former script accepted a mismatched version and
+flattened 147 repository files. Independent review then caught and repaired 73
+non-canonical backslash entry names, retained owned output after failure, and
+case-insensitive CI root comparison. The terminal packager emits 75 files under
+exactly `core`, `icons`, `manifest.json`, `service-worker.js`, and `sidepanel`;
+raw unsafe names are zero, Windows expansion and Linux `unzip` pass, failed
+mismatch/missing/metacharacter runs leave zero owned zip/staging resources, and
+unrelated `dist` files survive. The final local source gate is `854/0/4804` for
+both full and coverage runs, `2/0/116` for syntax, `71.07%` function and
+`67.55%` line coverage, with version, whitespace, and no-dependency checks
+green under Bun `1.3.11`.
+
+The owner explicitly approved adding the public production manifest key for
+Task 15. The checked-in value matches both installed Store-manifest copies and
+deterministically derives extension ID
+`cgfnjdcioainbclbbihglaopbhikhdob`. It is public identity material, not a
+password, OAuth/access token, client secret, or private signing key. This closes
+the random unpacked-ID precondition only; it does not claim a live Google login,
+OAuth grant, Drive request, or two-profile convergence result.
+
+Task 15's operator guide requires one release commit, one unique CI zip, one
+package SHA-256, and all eleven rows to pass from the expanded artifact. Live
+Drive must use the pinned registered production extension/client identity and two disposable
+browser profiles authenticated to the same operator-approved Google account.
+Chrome AI must use a supported browser where the on-device Prompt model is
+already available. Neither blocker may be replaced with mock/intercepted
+traffic, a different unpacked path, or credentials embedded in evidence.
+
+Final artifact results belong in the mode-0600 controller report/release-notes
+file because editing this tracked report afterward would change the tested
+commit. Evidence may contain only release/browser identity, expected/actual,
+redacted counters, pass/fail, and cleanup. Browsing history, API keys,
+passphrases, OAuth tokens, authorization headers, prompts, and private Drive or
+portable payloads are prohibited.

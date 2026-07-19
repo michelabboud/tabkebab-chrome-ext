@@ -2,14 +2,14 @@
 
 ## Current state
 
-- Repository version: `1.2.16`
+- Repository version: `1.2.17`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
 - Implementation status: Tasks 1–14 implemented and independently code-reviewed; Chrome Built-in AI now executes only in the side-panel document through a bounded named-port protocol while preserving Task 13 cleanup-before-settlement
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
 - Phase 2 release status: `v1.2.13` is committed, tagged, pushed, exact-commit CI-green, and published as a GitHub release
-- Phase 3 status: Task 12 is released as exact-commit CI-green `v1.2.14`; Task 13 is released as exact-commit CI-green `v1.2.15`; Task 14 implementation, independent review, deterministic verification, and the available Chrome 148 browser subcases are complete at `1.2.16`, with commit/tag/push/CI closeout in progress; the installed Prompt model reports unavailable, so real completion remains an explicit Task 15 blocker
+- Phase 3 status: Tasks 12–14 are released as exact-commit CI-green `v1.2.14`–`v1.2.16`; Task 14 commit `13cc0d5442789abb5269558a28ee3b727a251b2e`, tag `v1.2.16`, remote `main`, and CI run `29692667393` match. Task 15 packaging, owner-approved production identity pinning, exact-artifact guidance, and final documentation are in progress at `1.2.17`. Final publication remains blocked until all eleven package-matrix rows pass, including live Drive OAuth and an available Prompt model.
 
 ## Completed implementation slices
 
@@ -144,23 +144,54 @@
 - Current focused verification is `85 pass / 0 fail / 620 assertions`; full and coverage runs are `854 pass / 0 fail / 4804 assertions`; syntax is `2 pass / 0 fail / 116 assertions`; coverage is `71.07%` functions and `67.55%` lines. Independent protocol/broker reviews passed; final cross-boundary and Web Locks reviews exposed duplicate-correlation, stranded-standby, combined port-loss/cleanup, and test-lock-ordering gaps that now have direct RED/GREEN repairs. Both terminal runtime reviews are clean; the documentation-frozen real-Chrome result remains the release gate.
 - Chrome for Testing `148.0.7778.96` passed the exact functional tree `df1a7569b67a14c1e3bffc22ecbdb12c767fcf3e` for real Web Locks, named-port reconnect, newest-owner routing, standby promotion, foreground-required closed-panel behavior, background Focus no-mutation, reopen, network isolation, and complete cleanup. Prompt API status was exactly `unavailable`; no model download occurred, and real completion plus close-during-active-completion remain unpassed for Task 15.
 
+### Task 15 — Exact artifact and final release gate (`1.2.17`)
+
+- Replaces recursive negative-exclusion packaging with a Windows-native,
+  version-checked positive allowlist and adds a dependent Windows CI artifact
+  job after the unchanged Bun gate.
+- Adds an eleven-row operator runbook that always loads the unique exact-CI
+  zip, persists secure release/PID state across shells, records only redacted
+  evidence, and performs guarded disposable cleanup.
+- Real Windows RED/GREEN and independent review are complete. The old packager
+  accepted mismatched versions and flattened repository files; the terminal
+  replacement produces 75 canonical entries under exactly five case-sensitive
+  roots, extracts on Windows and Linux, rejects mismatch/missing/metacharacter
+  cases, removes owned failed output, and preserves unrelated files.
+- Current local verification is `854 pass / 0 fail / 4804 assertions` for full
+  and coverage runs, `2 / 0 / 116` for syntax, `71.07%` function coverage, and
+  `67.55%` line coverage under Bun `1.3.11`. Version, whitespace,
+  no-package/no-lockfile, guide Bash/JavaScript parsing, row arity, and Markdown
+  fence gates pass.
+- Pins the owner-approved public production manifest key and verifies that it
+  derives Store extension ID `cgfnjdcioainbclbbihglaopbhikhdob`. No OAuth
+  token, client secret, password, or private key is stored in the repository.
+- Consolidates the accepted Task 2–14 test and browser evidence. This is not a
+  final-matrix success claim: exact CI, artifact inspection, live Drive,
+  available-model Chrome AI, and every other row remain controller gates after
+  the Task 15 commit is pushed.
+
 ## Confirmed remediation scope
 
-The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
+The hardening initiative covers all thirteen findings from the 2026-07-14 code
+review. Each implementation is complete and linked to named automated coverage
+plus its committed browser/evidence row; the separate final exact-package
+matrix still governs publication.
 
-1. Preserve stashes after incomplete restores.
-2. Preserve canonical Google Drive sync and settings files during retention cleanup.
-3. Cancel stale Focus Mode actions and make teardown non-blocking.
-4. Apply URL, domain, and Chrome-group allowlists consistently, including strict-empty behavior.
-5. Match natural-language domain filters by exact host or subdomain.
-6. Preserve hash-routed pages during duplicate cleanup and make Undo complete.
-7. Add a passphrase-only API-key unlock flow.
-8. Run Chrome Built-in AI in a document context rather than the service worker.
-9. Convert background `{ error }` responses into rejected UI operations.
-10. Add Drive deletion tombstones and a complete, versioned non-secret export.
-11. Restore open-tab results to global search.
-12. Restore tabs without leaving them permanently muted.
-13. Abort timed-out AI requests before any retry.
+| # | Finding | Named automated authority | Committed smoke/evidence row |
+|---|---|---|---|
+| 1 | Preserve stashes after incomplete restores | [`stash-restore-handler.test.js`](tests/integration/stash-restore-handler.test.js), [`restore-outcome.test.js`](tests/core/restore-outcome.test.js) | [Task 2 browser boundary](docs/reports/2026-07-14-reliability-smoke.md#browser-boundary) |
+| 2 | Preserve canonical Drive sync/settings files during retention | [`drive-retention.test.js`](tests/core/drive-retention.test.js), [`drive-cleanup.test.js`](tests/integration/drive-cleanup.test.js) | [Task 6 evidence](docs/reports/2026-07-14-reliability-smoke.md#task-6-deterministic-evidence) |
+| 3 | Cancel stale Focus actions and make teardown non-blocking | [`focus-lifecycle.test.js`](tests/core/focus-lifecycle.test.js), [`focus-worker.test.js`](tests/integration/focus-worker.test.js) | [Task 4 browser boundary](docs/reports/2026-07-14-reliability-smoke.md#task-4-browser-and-provider-boundary) |
+| 4 | Apply URL/domain/group allowlists consistently, including strict-empty | [`focus-policy.test.js`](tests/core/focus-policy.test.js), [`focus-navigation.test.js`](tests/integration/focus-navigation.test.js) | [Task 3 browser boundary](docs/reports/2026-07-14-reliability-smoke.md#task-3-browser-boundary) |
+| 5 | Match NL domains by exact host or true subdomain | [`nl-executor.test.js`](tests/core/nl-executor.test.js) | [Task 5 browser boundary](docs/reports/2026-07-14-reliability-smoke.md#task-5-browser-and-provider-boundary) |
+| 6 | Preserve hash routes and make duplicate Undo complete | [`duplicates.test.js`](tests/core/duplicates.test.js), [`hash-route-restore.test.js`](tests/integration/hash-route-restore.test.js) | [Task 5 redacted results](docs/reports/2026-07-14-reliability-smoke.md#task-5-redacted-results) |
+| 7 | Unlock passphrase-only API keys after restart | [`ai-client-passphrase.test.js`](tests/ai/ai-client-passphrase.test.js) | [Task 12 terminal credential result](docs/reports/2026-07-14-reliability-smoke.md#task-12-terminal-credential-result) |
+| 8 | Run Chrome Built-in AI in a foreground document | [`chrome-ai-focus.test.js`](tests/integration/chrome-ai-focus.test.js), [`chrome-ai-broker.test.js`](tests/sidepanel/chrome-ai-broker.test.js) | [Task 14 Prompt gate](docs/reports/2026-07-14-reliability-smoke.md#task-14-real-chrome-prompt-api-gate) |
+| 9 | Reject background `{ error }` responses in the UI | [`message-client.test.js`](tests/sidepanel/message-client.test.js), [`component-messaging.test.js`](tests/sidepanel/component-messaging.test.js) | [Task 11 terminal result](docs/reports/2026-07-14-reliability-smoke.md#task-11-terminal-real-chrome-result) |
+| 10 | Converge Drive deletions and export complete versioned non-secret data | [`deletion-tombstones.test.js`](tests/core/deletion-tombstones.test.js), [`export-schema.test.js`](tests/core/export-schema.test.js), [`export-import.test.js`](tests/core/export-import.test.js) | [Task 8 completed tree](docs/reports/2026-07-14-reliability-smoke.md#task-8-completed-functional-tree-local-evidence), [Task 10 boundary](docs/reports/2026-07-14-reliability-smoke.md#task-10-real-chrome-portable-data-boundary) |
+| 11 | Return tabs, stashes, and sessions in Ctrl+K | [`global-search.test.js`](tests/sidepanel/global-search.test.js) | [Task 11 terminal result](docs/reports/2026-07-14-reliability-smoke.md#task-11-terminal-real-chrome-result) |
+| 12 | Restore tabs without leaving them muted | [`stash-restore.test.js`](tests/core/stash-restore.test.js), [`session-restore.test.js`](tests/core/session-restore.test.js) | [Task 2 redacted results](docs/reports/2026-07-14-reliability-smoke.md#redacted-results) |
+| 13 | Abort timed-out AI attempts before retry | [`request-lifecycle.test.js`](tests/ai/request-lifecycle.test.js), [`ai-client-lifecycle.test.js`](tests/ai/ai-client-lifecycle.test.js), [`queue.test.js`](tests/ai/queue.test.js) | [Task 13 timeout result](docs/reports/2026-07-14-reliability-smoke.md#task-13-terminal-real-chrome-timeout-result) |
 
 ## Approved technical direction
 
@@ -172,4 +203,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Publish exact-commit CI-green `v1.2.16`, then begin Task 15's reproducible real-Chrome matrix and final `v1.2.17` phase release. The installed Chrome Prompt model is unavailable, and the credential-safe real-Drive fixture remains an explicit validation item; those two real-service rows must pass before the final phase release. Drive may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Finish and independently review Task 15, publish immutable `v1.2.17` to exact-commit CI, download its unique Windows artifact, and run all eleven rows against that expansion. Create the GitHub release only if every row passes. The public production identity is now pinned and verified, but live OAuth/Drive still requires an operator-authenticated disposable Google session. The installed WSL Chrome Prompt model is currently unavailable. Neither live gate may be replaced by synthetic evidence or transmitted credentials.

@@ -4,6 +4,52 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.17] — 2026-07-19
+
+### Added
+
+- A fail-closed Windows release packager that reads and validates `VERSION`,
+  requires manifest parity, stages only the five runtime entries, and produces
+  one versioned zip with no repository-only material.
+- A dependent `windows-latest` CI job that packages only after the Bun test job
+  passes, expands and verifies the zip's exact root/version, and uploads one
+  versioned extension artifact.
+- A reproducible eleven-row real-Chrome operator matrix for the exact CI
+  artifact, including secure release-state continuity, disposable profiles,
+  redacted evidence, PID ownership, and guarded cleanup.
+
+### Changed
+
+- The owner-approved public Chrome Web Store manifest key now pins unpacked and
+  CI-packaged builds to production extension ID
+  `cgfnjdcioainbclbbihglaopbhikhdob`. This is public identity material, not an
+  OAuth secret, password, access token, or client secret.
+- Contributor, architecture, privacy, user, progress, and smoke documentation
+  now describe the exact-artifact boundary and consolidate the accepted
+  Task 2–14 evidence without treating mocks as browser, OAuth, or model proof.
+- The final GitHub release is fail-closed: every matrix row must pass against
+  one exact commit/package, including registered live Drive OAuth, an available
+  Chrome Prompt model, and the unchanged 120-second provider timeout.
+
+### Verification note
+
+- Real Windows RED proved the old batch file accepted `VERSION=9.9.9` against a
+  `1.2.16` manifest and flattened 147 repository files. Its first replacement
+  also exposed 73 backslash ZIP names that Linux `unzip` rejected and retained
+  owned zips after failure. The repaired packager rejects mismatch, missing,
+  and metacharacter inputs; removes stale/partial owned output on failure while
+  preserving unrelated files; and emits 75 files at exactly the five allowed
+  roots with canonical `/` names. Windows expansion and Linux `unzip` both pass.
+- Independent packaging review additionally made raw and expanded CI root
+  comparisons case-sensitive. Its terminal PowerShell 5.1/Linux rerun is clean,
+  with zero unsafe entry names and no remaining staging/output resource.
+- Local Bun and coverage runs pass `854 tests / 0 failures / 4804 assertions`;
+  syntax passes `2 / 0 / 116`; coverage is `71.07%` functions and `67.55%`
+  lines under Bun `1.3.11`. Whitespace, version parity at `1.2.17`, the
+  no-package/no-lockfile audit, matrix Bash/JavaScript parsing, row arity, and
+  balanced fences pass. Exact CI, artifact inspection, and the eleven browser
+  rows remain post-push release gates and are never inferred from the checkout.
+
 ## [1.2.16] — 2026-07-19
 
 ### Added

@@ -27,3 +27,95 @@ jobs:
 
       - name: Verify JavaScript and manifest syntax
         run: bun test tests/syntax.test.js
+
+  package:
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build extension package
+        shell: pwsh
+        run: cmd /c package.cmd
+
+      - name: Verify extension package
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:EXPECTED_VERSION
+          $zipFiles = @(Get-ChildItem -LiteralPath dist -File -Filter '*.zip')
+          $expectedZip = Join-Path (Convert-Path -LiteralPath dist) "tabkebab-$version.zip"
+
+          if ($zipFiles.Count -ne 1) {
+            throw "Expected exactly one zip in dist, found $($zipFiles.Count)."
+          }
+          if ($zipFiles[0].FullName -cne $expectedZip) {
+            throw "Unexpected package path: $($zipFiles[0].FullName)"
+          }
+
+          $expanded = Join-Path ([IO.Path]::GetTempPath()) ("tabkebab-ci-" + [guid]::NewGuid().ToString('N'))
+          try {
+            Add-Type -AssemblyName System.IO.Compression
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($expectedZip)
+            try {
+              $entryNames = @($archive.Entries | ForEach-Object FullName)
+            } finally {
+              $archive.Dispose()
+            }
+
+            if ($entryNames.Count -eq 0) {
+              throw "Package archive contains no entries."
+            }
+            $unsafeEntries = @($entryNames | Where-Object {
+              $_.Contains('\') -or
+              $_.StartsWith('/') -or
+              $_ -match '^[A-Za-z]:' -or
+              $_ -match '(^|/)\.\.(/|$)'
+            })
+            if ($unsafeEntries.Count -ne 0) {
+              throw "Package contains unsafe or non-canonical entry names."
+            }
+
+            $expectedEntries = @('core', 'icons', 'manifest.json', 'service-worker.js', 'sidepanel') | Sort-Object -CaseSensitive
+            $rawTopLevel = @($entryNames | ForEach-Object { ($_ -split '/', 2)[0] } | Sort-Object -CaseSensitive -Unique)
+            $rawDifference = @(Compare-Object -ReferenceObject $expectedEntries -DifferenceObject $rawTopLevel -CaseSensitive)
+            if ($rawDifference.Count -ne 0) {
+              throw "Raw package entries do not match the release allowlist: $($rawTopLevel -join ', ')"
+            }
+
+            [IO.Directory]::CreateDirectory($expanded) | Out-Null
+            Expand-Archive -LiteralPath $expectedZip -DestinationPath $expanded
+
+            $actualEntries = @(Get-ChildItem -LiteralPath $expanded -Force | ForEach-Object Name | Sort-Object -CaseSensitive)
+            $difference = @(Compare-Object -ReferenceObject $expectedEntries -DifferenceObject $actualEntries -CaseSensitive)
+            if ($difference.Count -ne 0) {
+              throw "Package top-level entries do not match the release allowlist: $($actualEntries -join ', ')"
+            }
+
+            $packagedManifest = Get-Content -LiteralPath (Join-Path $expanded 'manifest.json') -Raw | ConvertFrom-Json
+            if ([string]$packagedManifest.version -cne $version) {
+              throw "Packaged manifest version does not equal VERSION."
+            }
+          } finally {
+            if (Test-Path -LiteralPath $expanded) {
+              Remove-Item -LiteralPath $expanded -Recurse -Force
+            }
+          }
+
+      - name: Upload extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabkebab-extension-${{ steps.version.outputs.value }}
+          path: dist/tabkebab-${{ steps.version.outputs.value }}.zip
+          if-no-files-found: error

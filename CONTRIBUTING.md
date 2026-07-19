@@ -24,7 +24,8 @@ No package installation is required. TabKebab has no runtime or test dependencie
 
 ## Branch Strategy
 
-- **`main`** — production, matches the published Chrome Web Store version
+- **`main`** — release-ready source and GitHub release history; the separately
+  operated Chrome Web Store listing may lag
 - **`dev`** — active development, all PRs target this branch
 
 **Do not submit PRs directly to `main`.**
@@ -38,12 +39,19 @@ No package installation is required. TabKebab has no runtime or test dependencie
    bun test --coverage
    bun test tests/syntax.test.js
    ```
-3. Test browser-only behavior thoroughly in unpacked Chrome
+3. Test browser-only behavior thoroughly in unpacked Chrome; use the
+   [real-Chrome smoke matrix](docs/guides/real-chrome-smoke-matrix.md) for a
+   release candidate
 4. Push to your fork
 5. Open a Pull Request targeting the **`dev`** branch
 6. Describe what you changed and why
 
-GitHub Actions repeats the three Bun commands, in order, for pull requests, manual dispatches, and pushes to `main`; tag pushes are excluded.
+GitHub Actions repeats the three Bun commands, in order, for pull requests,
+manual dispatches, and pushes to `main`. A dependent `windows-latest` job then
+runs `package.cmd`, verifies its exact positive-allowlist archive and version,
+and uploads one versioned extension artifact; tag pushes are excluded. A local
+package is only test evidence—the release matrix uses the artifact produced by
+the exact successful CI run.
 
 ## Guidelines
 

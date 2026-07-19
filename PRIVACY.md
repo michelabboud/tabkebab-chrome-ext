@@ -50,7 +50,7 @@ Only a secret-free public projection of AI settings crosses ordinary runtime res
 
 ### AI providers (opt-in only)
 
-If — and only if — you enable AI features and configure an API key, the extension sends requests to your chosen provider:
+If — and only if — you enable AI features and use a network-backed provider, the extension sends requests to your chosen provider. OpenAI, Claude, and Gemini require an API key; a Custom endpoint may be configured with or without one:
 
 - **OpenAI** (`api.openai.com`)
 - **Anthropic Claude** (`api.anthropic.com`)
@@ -58,7 +58,7 @@ If — and only if — you enable AI features and configure an API key, the exte
 - **Custom endpoint** (a remote HTTPS URL you configure, or an HTTP loopback development URL such as local Ollama)
 - **Chrome Built-in AI** — runs entirely on-device, nothing sent over the network
 
-**What is sent:** A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. Your API key is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
+**What is sent:** A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. When a key is configured, it is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
 
 **What is NOT sent:** Browsing history, page content, cookies, passwords, form data, or any data beyond tab titles and URLs relevant to the specific AI request.
 
@@ -68,7 +68,7 @@ Remote Custom endpoints must use HTTPS. HTTP is allowed only for loopback hosts;
 
 ### Google Drive sync (opt-in only)
 
-If you connect Google Drive, the extension creates a **TabKebab** folder in your Drive and stores JSON files there (sync data, exported sessions, exported stashes). The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. The sync uses a `drive.file` OAuth scope — the extension can only access files it created, never any other file in your Drive. This also lets you sync across multiple computers logged into the same Google account.
+If you connect Google Drive, the extension creates a **TabKebab** folder in your Drive and may store sync data, settings, exported sessions and stashes, bookmark snapshots, portable exports, and optional bookmark HTML pages there. The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. The sync uses a `drive.file` OAuth scope — the extension can only access files it created, never any other file in your Drive. This also lets you sync across multiple computers logged into the same Google account.
 
 Google's own privacy practices apply to data stored on Google Drive.
 
@@ -83,6 +83,17 @@ When you export data, a JSON file is downloaded to your computer. A full backup 
 Portable files never include API keys (encrypted or plaintext), passphrase metadata, decrypted-key session caches, OAuth tokens/state, Drive connection/profile state, install identifiers, active Focus state, or AI response caches. Import files are still untrusted input: TabKebab enforces a 25 MiB file limit, validates the complete document in both the panel and service worker, and changes only the repositories named by the file kind.
 
 Exporting does not upload the file anywhere. Where the downloaded file goes after that is up to you, so treat a full backup as sensitive because it can contain browsing URLs, titles, and Focus history.
+
+### Release verification evidence
+
+The repository's CI/GitHub release-candidate archive contains only the manifest,
+service worker, runtime `core/` and `sidepanel/` sources, and icons. It never contains tests,
+documentation, browser profiles, credentials, or smoke-test evidence. Release
+verification records only redacted identities and counters such as the release
+commit, package hash, browser/OS version, expected versus actual outcome, and
+cleanup status. It must not record browsing history, API keys or passphrases,
+OAuth tokens, authorization headers, private Drive payloads, or private prompt
+content.
 
 ---
 

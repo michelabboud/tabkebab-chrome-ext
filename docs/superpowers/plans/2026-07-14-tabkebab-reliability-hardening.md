@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** Approved plan in progress. Tasks 1–11 are published through `v1.2.13` with exact-commit CI green and Phase 2 released. Tasks 12 and 13 are published as exact-commit CI-green `v1.2.14` and `v1.2.15`. Task 14 implementation, independent review, and focused/full deterministic verification are complete at version `1.2.16`; documentation-frozen browser and release closeout remain in progress. The real Chrome/Drive fixture is still unpassed and retained as an explicit validation item rather than being replaced by synthetic evidence.
+**Status:** Approved plan in progress. Tasks 1–11 are published through `v1.2.13` with exact-commit CI green and Phase 2 released. Tasks 12–14 are published as exact-commit CI-green `v1.2.14`–`v1.2.16`; Task 14 commit `13cc0d5442789abb5269558a28ee3b727a251b2e`, tag/remote, and run `29692667393` match. Task 15 packaging, guide, evidence consolidation, version `1.2.17`, local verification, and independent review are complete; controller closeout remains. Live Drive and available-model Prompt rows are still unpassed and retained as explicit final-release gates rather than replaced by synthetic evidence.
 
 **Goal:** Fix all thirteen confirmed review findings with regression-first tests, preserve existing local and Drive data, and release verified source checkpoints without introducing a production dependency or build step.
 
@@ -451,6 +451,13 @@ The only categories are `sessions`, `stashes`, `bookmarks-json`, `bookmarks-html
 - [x] Update `settings-manager.js` to call the Task 1 `sendOrThrow()` boundary and state how many files were deleted and how many canonical/newest/undated files were protected. Any returned/transport error displays failure and never a success toast.
 - [x] Run `bun test tests/core/drive-retention.test.js tests/integration/drive-cleanup.test.js`, then the full three-command gate.
 - [ ] In real Chrome/Drive, place old canonical, archive, and dated export files in a throwaway profile folder; run manual cleanup and confirm canonical plus newest-per-category preservation. Append file names and post-cleanup listing to the smoke report. **Blocked and explicitly waived as a release prerequisite on 2026-07-19:** the repository documents development ID `hkhlbjmokednepfjmnlglapgppfdpmck` and a development OAuth client, but the exact Task 6 manifest uses the production client without a pinning `key`; a clean disposable load observed ID `fignfifoniblkonapihmkfakmlgkbkcf`, matching neither the documented development nor published ID and therefore no documented client, and the profile had no authenticated Google test-user session. The post-release gate needs an approved registered identity/client environment plus an operator-authenticated disposable session; a manifest-only development overlay must be recorded as non-byte-exact.
+
+  **Task 15 supersession:** the historical Task 6 blocker above remains an
+  accurate record for `v1.2.8`. On 2026-07-19 the owner explicitly approved
+  pinning the public production manifest key in `1.2.17`; the derived ID is the
+  published `cgfnjdcioainbclbbihglaopbhikhdob`. Live OAuth/Drive proof still
+  requires operator authentication and remains unchecked until the exact
+  package row passes.
 - [x] Update `GUIDE.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, and `PROGRESS.md`; record the deterministic Task 6 evidence and the explicit 2026-07-19 release waiver without claiming the live fixture passed.
 - [x] Close, tag, and push `v1.2.8` under the repository owner's explicit release instruction; keep the live fixture unchecked as post-release validation.
 - [x] Create a browsable GitHub release for `v$(cat VERSION)` summarizing Findings 1-6/12, attach no credential-bearing artifacts, and verify with `gh release view v$(cat VERSION) --json tagName,targetCommitish,url` plus `git ls-remote origin refs/tags/v$(cat VERSION)`.
@@ -1155,10 +1162,15 @@ export function startChromeAIBroker({
 
 `docs/reports/2026-07-14-reliability-smoke.md` consolidates the per-slice evidence already committed by Tasks 2-14, including each tested task commit. Never include browsing history, API keys, OAuth tokens, or private Drive payload contents. After Task 15 is pushed, rerun the complete matrix against the exact CI-produced package; preserve that final exact-commit table in the GitHub release notes and five-section closeout report because the repository report is already part of the tested commit.
 
-- [ ] Before modifying Task 15 files, assert Task 14 is clean. Write `docs/guides/real-chrome-smoke-matrix.md` as a reproducible operator guide with setup, action, assertion, evidence, and cleanup commands for every row. Use two disposable profiles where required: `profile_a="$(mktemp -d /tmp/tabkebab-smoke-a.XXXXXX)"` and `profile_b="$(mktemp -d /tmp/tabkebab-smoke-b.XXXXXX)"`. The guide sources the release-state file defined below and appends every spawned fixture/Chrome PID to `matrix_pid_file`, one numeric PID per line, so later steps work in fresh shells.
-- [ ] Rewrite `package.cmd` around `setlocal EnableExtensions EnableDelayedExpansion`. Read the exact version from `VERSION`, parse `manifest.json` with PowerShell, fail unless both match, and produce only `dist\tabkebab-!VERSION!.zip`. Copy exactly `manifest.json`, `service-worker.js`, `core/`, `sidepanel/`, and `icons/` into a temporary staging tree so relative directories survive compression; remove staging on success or failure. Reject any missing allowlisted entry. This positive allowlist excludes `.github/`, tests, coverage, docs, store assets, Git metadata, Bun configuration, the packager, and repository-only Markdown by construction.
-- [ ] Extend `.github/workflows/ci.yml` with a Windows `package` job that depends on the test job. A PowerShell step with `id: version` reads `VERSION` into both `$version` and `$env:GITHUB_OUTPUT`, runs `cmd /c package.cmd`, expands `dist/tabkebab-$version.zip` into a fresh staging directory, asserts its top-level entry set is exactly `manifest.json`, `service-worker.js`, `core`, `sidepanel`, and `icons`, and asserts the packaged manifest version equals `VERSION`. Upload exactly `dist/tabkebab-${{ steps.version.outputs.value }}.zip` through `actions/upload-artifact@v4` with `name: tabkebab-extension-${{ steps.version.outputs.value }}` and `if-no-files-found: error`.
-- [ ] Consolidate the already collected per-task report rows and ensure the guide makes these deterministic: two-profile Drive uses the same Google account with distinct profile names, syncs both before deletion, then syncs A-delete → B → A and requires absence on both; background-error UI uses a clean profile with `driveSync.connected=true` but no `driveProfileName`, then clicks manual cleanup and requires the checked error toast; timeout uses the committed CORS hanging-provider fixture and the production 120-second timeout.
+- [x] Before modifying Task 15 files, assert Task 14 is clean. Write `docs/guides/real-chrome-smoke-matrix.md` as a reproducible operator guide with setup, action, assertion, evidence, and cleanup commands for every row. Use two disposable profiles where required: `profile_a="$(mktemp -d /tmp/tabkebab-smoke-a.XXXXXX)"` and `profile_b="$(mktemp -d /tmp/tabkebab-smoke-b.XXXXXX)"`. The guide sources the release-state file defined below and appends every spawned fixture/Chrome PID to `matrix_pid_file`, one numeric PID per line, so later steps work in fresh shells. **Base `13cc0d5442789abb5269558a28ee3b727a251b2e` was clean; 51 Bash blocks, 30 JavaScript blocks, 11 eight-argument PASS-row records, and 166 balanced Markdown fence delimiters pass static validation.**
+- [x] Apply the owner's explicit 2026-07-19 Task 15 scope override: add the
+  recovered public production manifest key and verify it derives extension ID
+  `cgfnjdcioainbclbbihglaopbhikhdob`. This public identity pin is not an OAuth
+  token, client secret, password, or private key; no credential is added to
+  source or CI secrets.
+- [x] Rewrite `package.cmd` around `setlocal EnableExtensions EnableDelayedExpansion`. Read the exact version from `VERSION`, parse `manifest.json` with PowerShell, fail unless both match, and produce only `dist\tabkebab-!VERSION!.zip`. Copy exactly `manifest.json`, `service-worker.js`, `core/`, `sidepanel/`, and `icons/` into a temporary staging tree so relative directories survive compression; remove staging on success or failure. Reject any missing allowlisted entry. This positive allowlist excludes `.github/`, tests, coverage, docs, store assets, Git metadata, Bun configuration, the packager, and repository-only Markdown by construction. **Terminal real-Windows evidence: 75 canonical entries/five exact roots; mismatch, missing, and metacharacter inputs fail with zero owned output; Linux `unzip` passes; staging is empty.**
+- [x] Extend `.github/workflows/ci.yml` with a Windows `package` job that depends on the test job. A PowerShell step with `id: version` reads `VERSION` into both `$version` and `$env:GITHUB_OUTPUT`, runs `cmd /c package.cmd`, expands `dist/tabkebab-$version.zip` into a fresh staging directory, asserts its top-level entry set is exactly `manifest.json`, `service-worker.js`, `core`, `sidepanel`, and `icons`, and asserts the packaged manifest version equals `VERSION`. Upload exactly `dist/tabkebab-${{ steps.version.outputs.value }}.zip` through `actions/upload-artifact@v4` with `name: tabkebab-extension-${{ steps.version.outputs.value }}` and `if-no-files-found: error`. **Independent review repaired canonical separator, failed-output cleanup, and case-sensitive raw/expanded identity gaps; terminal review is clean.**
+- [x] Consolidate the already collected per-task report rows and ensure the guide makes these deterministic: two-profile Drive uses the same Google account with distinct profile names, syncs both before deletion, then syncs A-delete → B → A and requires absence on both; background-error UI uses a clean profile with `driveSync.connected=true` but no `driveProfileName`, then clicks manual cleanup and requires the checked error toast; timeout uses the committed CORS hanging-provider fixture and the production 120-second timeout.
 - [ ] The exact-commit matrix to run after CI contains:
 
   1. Complete and forced-partial stash restore, including retained recovery data.
@@ -1173,7 +1185,7 @@ export function startChromeAIBroker({
   10. Forced background errors display failure and never success.
   11. Ctrl+K returns tabs, stashes, and sessions.
 
-- [ ] Run the final local gate before closeout:
+- [x] Run the final local gate before closeout:
 
 ```bash
 bun --version
@@ -1185,9 +1197,9 @@ test "$(cat VERSION)" = "$(bun -e 'console.log((await Bun.file("manifest.json").
 git status --short
 ```
 
-- [ ] Review coverage output by changed module. Every success/failure path listed in the approved specification must have a named automated test; do not substitute a repository-wide percentage target.
-- [ ] Update docs to match shipped behavior: Bun contributor workflow, recoverable partial restores, exact Focus/URL semantics, Drive v2 and retention protection, portable export v2 boundaries, passphrase unlock, checked UI errors, Chrome AI foreground requirement, and abort-before-retry.
-- [ ] Mark all thirteen findings complete with links to named tests and smoke rows in `PROGRESS.md`. Add final release notes to `CHANGELOG.md` and confirm `README.md`, `GUIDE.md`, `ARCHITECTURE.md`, and `PRIVACY.md` contain no stale claims.
+- [x] Review coverage output by changed module. Every success/failure path listed in the approved specification must have a named automated test; do not substitute a repository-wide percentage target. **Task 15 changes no runtime module; owning modules retain named Task 2–14 success/failure coverage. Current full/coverage evidence is `854/0/4804`, `71.07%` functions, `67.55%` lines.**
+- [x] Update docs to match shipped behavior: Bun contributor workflow, recoverable partial restores, exact Focus/URL semantics, Drive v2 and retention protection, portable export v2 boundaries, passphrase unlock, checked UI errors, Chrome AI foreground requirement, and abort-before-retry.
+- [x] Mark all thirteen findings complete with links to named tests and smoke rows in `PROGRESS.md`. Add final release notes to `CHANGELOG.md` and confirm `README.md`, `GUIDE.md`, `ARCHITECTURE.md`, and `PRIVACY.md` contain no stale claims.
 - [ ] Perform the global closeout chain for the final version: bump both version files, rerun the full gate after the bump, commit, tag, push `main`, and push the tag. Do not create the GitHub release yet.
 - [ ] Wait for exact-commit GitHub Actions and require success:
 

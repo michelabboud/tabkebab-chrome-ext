@@ -823,7 +823,9 @@ Large session restores create many tabs at once. The pipeline restore (batched c
 
 - Ensure you've selected a provider and entered a valid API key in Settings
 - Check that the API key has credits/quota remaining
-- For Chrome Built-in AI, verify the required flags are enabled in `chrome://flags`
+- For Chrome Built-in AI, use a supported Chrome/device with an already
+  available on-device Prompt model and keep the side panel open. TabKebab does
+  not silently start a model download.
 
 ### Google Drive not syncing
 
@@ -848,6 +850,17 @@ Stashes are stored in IndexedDB, which is per-profile. If you switched Chrome pr
 - Save a changed provider selection before using **Test Connection** or **Load Models**
 - If you forgot your passphrase, remove the API key and add it again
 - Keys are encrypted at rest — they can't be recovered from storage
+
+### Release-candidate verification
+
+Maintainers verify browser-only behavior against the single zip produced by
+the exact successful CI run, not against the repository checkout. The
+[real-Chrome smoke matrix](docs/guides/real-chrome-smoke-matrix.md) covers
+recoverable restores, Focus races and URL identity, Drive v2 convergence and
+retention, portable export/import, passphrase restart unlock, Chrome AI's
+foreground boundary, the production 120-second timeout, checked UI failures,
+and Ctrl+K. Its disposable-profile and cleanup rules intentionally exclude
+private browsing data and credentials from evidence.
 
 ---
 
