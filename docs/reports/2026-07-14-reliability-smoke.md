@@ -825,15 +825,91 @@ content is frozen. Its exact non-recursive tree, redacted counters, and cleanup
 proof live in the gitdir-local Task 12 report so recording the tree cannot
 recursively alter the source under test.
 
-## Task 12 terminal credential assertions
+## Task 12 terminal credential result
 
-The terminal run must preserve the encrypted blob across a full Chrome
-exit/relaunch, start locked, reject one wrong passphrase, accept the right one,
-show visible success, and issue exactly one intercepted provider request with
-the expected provider runtime fields. It must report zero credential matches in
-the URL, body, local plaintext, runtime responses, or logs; zero external
-requests reaching the network; and complete process/profile/display cleanup.
+Chrome for Testing `148.0.7778.96` passed the documentation-frozen tree
+`7c29fbde2adf2e68abbd391ea876a52639c34e3b`. The encrypted blob survived a
+full Chrome exit/relaunch, the restarted profile was locked, one wrong
+passphrase failed without mutation, the correct passphrase unlocked the
+provider, and one intercepted request carried the expected runtime fields.
+Credential matches in URL, body, local plaintext, runtime responses, and logs
+were zero; external requests reaching the network were zero; and the profile,
+Chrome, display, and fixture resources were removed. Commit
+`7b0d41a9225f87a0e475363ae53ca11e7cb8b2ab` was tagged `v1.2.14`, pushed, and
+passed exact-commit GitHub Actions run `29686848868`.
 
 This is a local credential-boundary proof, not a live provider-account or Google
 Drive/OAuth proof. The provider response is intercepted and synthetic, and no
 secret or private browsing payload is preserved in repository evidence.
+
+---
+
+Slice: Task 13, abort-before-retry AI lifecycle
+
+Extension version: `1.2.15`
+
+## Task 13 deterministic and independent-review evidence
+
+Regression-first work began with the missing lifecycle module and retry/signal
+contract failures. Reviewer-driven RED cases then exposed pre-cancelled calls
+starting provider work, zero timeout acceptance, raw and custom-reason aborts
+escaping their typed category, connection-test timeout rethrow, missing
+first-cause and non-cooperative-provider proof, and a late-result cache gap.
+
+After repair, the tracked source passes:
+
+```text
+lifecycle/queue/provider/client focused: 129 pass / 0 fail / 458 assertions
+Task 12 credential/export compatibility: 146 pass / 0 fail / 1044 assertions
+full suite: 769 pass / 0 fail / 4177 assertions
+coverage suite: 769 pass / 0 fail / 4177 assertions
+coverage: 69.93% functions / 66.11% lines
+syntax: 2 pass / 0 fail / 109 assertions
+```
+
+Two independent immutable reviews report no remaining functional blocker at
+tree `e95cb671ffb6c60a18f34a354e04b97012bf287a`. Their reruns passed `219/0`
+and `129/0`, covering positive-only timeout validation, no-work pre-abort,
+first-cause ownership, synchronous and non-cooperative cleanup, exact signal
+threading, custom abort reasons, retry classification, attempt isolation,
+fallback-after-cleanup, and no-cache late results. Whitespace, version parity,
+credential-signature scanning, and the no-package/no-lockfile audit are part of
+the release closeout under Bun `1.3.11`.
+
+## Task 13 preliminary real-Chrome timeout result
+
+Chrome for Testing `148.0.7778.96` loaded the production extension at exact
+functional tree `c073b4e2f4fd542f39a26a0302fbb19e7cfa821b`. The committed Bun
+fixture listened only on loopback, allowed CORS for the extension, held
+`/v1/chat/completions` until the client disconnected, and exposed only redacted
+lifecycle counters. The harness blocked every other HTTP(S) request.
+
+Using the unchanged 120-second production boundary, the real Test Connection
+UI action settled after `120.078s`; the fixture observed its request active for
+`119.913s`. The runtime returned the exact existing `{ success: false }`
+fallback only after the connection abort settled. Metrics then showed one
+start, one abort, zero completions, zero active requests, and maximum active
+one, with no automatic retry. One explicit later click produced the second and
+only second request. Closing Chrome yielded the exact final counters:
+
+```text
+request starts: 2
+connection aborts: 2
+completed requests: 0
+active requests: 0
+maximum active requests: 1
+other external requests: 0
+runtime errors: 0
+```
+
+The disposable profile contained 347 entries before teardown and was removed;
+matching Chrome processes were zero, and Xvfb plus the fixture exited. The
+terminal release gate repeats this tree-hash-guarded harness after tracked
+documentation and version freeze. Its exact tree, counters, and cleanup proof
+live in the gitdir-local Task 13 report so recording them cannot recursively
+change the source under test.
+
+This is a real extension/panel/worker/HTTP cancellation proof against a local
+synthetic provider. It does not validate an external provider account,
+authentication, model quality, or availability, and it preserves no private
+browsing payload or credential.

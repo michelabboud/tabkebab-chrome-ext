@@ -1,13 +1,45 @@
 // core/ai/provider-custom.js — OpenAI-compatible custom provider
 // Works with: Ollama, LM Studio, vLLM, LocalAI, Together AI, Groq, etc.
 
-import { AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+
+function ensureNotAborted(signal) {
+  if (signal?.aborted) throw new AIAbortError();
+}
+
+function rethrowAbort(error, signal) {
+  if (signal?.aborted) throw new AIAbortError();
+  if (error instanceof AIAbortError) throw error;
+  if (error?.name === 'AbortError') throw new AIAbortError();
+}
+
+async function abortAware(operation, signal) {
+  ensureNotAborted(signal);
+  try {
+    const result = await operation();
+    ensureNotAborted(signal);
+    return result;
+  } catch (error) {
+    rethrowAbort(error, signal);
+    throw error;
+  }
+}
+
+async function readErrorText(response, signal) {
+  try {
+    return await abortAware(() => response.text(), signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
+    return '';
+  }
+}
 
 export const CustomProvider = {
   id: 'custom',
   name: 'Custom (OpenAI-Compatible)',
 
-  async testConnection(config) {
+  async testConnection(config, signal) {
+    ensureNotAborted(signal);
     const baseUrl = (config.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
     try {
       const headers = { 'Content-Type': 'application/json' };
@@ -23,16 +55,20 @@ export const CustomProvider = {
           messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
           max_tokens: 5,
         }),
+        signal,
       });
+      ensureNotAborted(signal);
 
       if (response.status === 401 || response.status === 403) return false;
       return response.ok;
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return false;
     }
   },
 
-  async complete(request, config) {
+  async complete(request, config, signal) {
+    ensureNotAborted(signal);
     const baseUrl = (config.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
     const model = config.model || 'default';
 
@@ -64,8 +100,11 @@ export const CustomProvider = {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal,
       });
+      ensureNotAborted(signal);
     } catch (err) {
+      rethrowAbort(err, signal);
       throw new AINetworkError(`Network error: ${err.message}`);
     }
 
@@ -76,11 +115,11 @@ export const CustomProvider = {
       throw new AIRateLimitError('Rate limit exceeded');
     }
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
+      const text = await readErrorText(response, signal);
       throw new AINetworkError(`API error ${response.status}: ${text.slice(0, 200)}`);
     }
 
-    const data = await response.json();
+    const data = await abortAware(() => response.json(), signal);
     const text = data.choices?.[0]?.message?.content || '';
     const tokensUsed = (data.usage?.total_tokens) || 0;
 
@@ -102,7 +141,8 @@ export const CustomProvider = {
    * @param {Object} config - { baseUrl, apiKey? }
    * @returns {Promise<Array<{id: string, name: string}>>}
    */
-  async listModels(config) {
+  async listModels(config, signal) {
+    ensureNotAborted(signal);
     const baseUrl = (config.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
     try {
       const headers = {};
@@ -110,17 +150,19 @@ export const CustomProvider = {
         headers['Authorization'] = `Bearer ${config.apiKey}`;
       }
 
-      const response = await fetch(`${baseUrl}/models`, { method: 'GET', headers });
+      const response = await fetch(`${baseUrl}/models`, { method: 'GET', headers, signal });
+      ensureNotAborted(signal);
       if (!response.ok) return [];
 
-      const data = await response.json();
+      const data = await abortAware(() => response.json(), signal);
       return (data.data || [])
         .map(m => ({
           id: m.id,
           name: m.id,
         }))
         .sort((a, b) => a.id.localeCompare(b.id));
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return [];
     }
   },

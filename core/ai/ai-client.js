@@ -3,6 +3,7 @@
 import { Storage } from '../storage.js';
 import { AICache } from './cache.js';
 import { AIQueue } from './queue.js';
+import { runAbortableAttempt } from './request-lifecycle.js';
 import { encryptApiKey, decryptApiKey } from './crypto.js';
 import { OpenAIProvider } from './provider-openai.js';
 import { ClaudeProvider } from './provider-claude.js';
@@ -12,11 +13,15 @@ import { CustomProvider } from './provider-custom.js';
 import {
   ProviderId,
   PROVIDER_DEFAULTS,
+  AIAbortError,
   AIAuthError,
   AIDisabledError,
+  AIForegroundRequiredError,
+  AIMalformedResultError,
   AINetworkError,
   AIRateLimitError,
   AITimeoutError,
+  AIUnavailableError,
 } from './provider.js';
 
 const PROVIDERS = Object.freeze({
@@ -186,7 +191,11 @@ function requireCustomBaseUrl(value) {
 function sanitizeProviderFailure(error) {
   if (error instanceof AIAuthError) return new AIAuthError();
   if (error instanceof AIRateLimitError) return new AIRateLimitError();
+  if (error instanceof AIAbortError) return new AIAbortError();
   if (error instanceof AITimeoutError) return new AITimeoutError();
+  if (error instanceof AIForegroundRequiredError) return new AIForegroundRequiredError();
+  if (error instanceof AIUnavailableError) return new AIUnavailableError();
+  if (error instanceof AIMalformedResultError) return new AIMalformedResultError();
   if (error instanceof AIDisabledError) return new AIDisabledError();
   return new AINetworkError();
 }
@@ -864,8 +873,12 @@ export const AIClient = {
     const settings = await this.getSettings();
     const config = await buildPrivateProviderConfig(settings, providerId);
     try {
-      return Boolean(await provider.testConnection(config));
+      return Boolean(await runAbortableAttempt(
+        (signal) => provider.testConnection(config, signal),
+        REQUEST_TIMEOUT_MS,
+      ));
     } catch (error) {
+      if (error instanceof AIAbortError || error instanceof AITimeoutError) return false;
       throw sanitizeProviderFailure(error);
     }
   },
@@ -902,8 +915,8 @@ export const AIClient = {
     let response;
     try {
       response = await queue.enqueue(() =>
-        this._withTimeout(
-          provider.complete(request, config),
+        runAbortableAttempt(
+          (signal) => provider.complete(request, config, signal),
           REQUEST_TIMEOUT_MS,
         ));
     } catch (error) {
@@ -927,7 +940,10 @@ export const AIClient = {
     const settings = await this.getSettings();
     const config = await buildPrivateProviderConfig(settings, providerId);
     try {
-      const models = await provider.listModels(config);
+      const models = await runAbortableAttempt(
+        (signal) => provider.listModels(config, signal),
+        REQUEST_TIMEOUT_MS,
+      );
       if (config.apiKey && containsPrivatePlaintext(models, config.apiKey)) return [];
       return normalizeModelList(models);
     } catch {
@@ -941,13 +957,4 @@ export const AIClient = {
     return AICache.clear();
   },
 
-  // ── Helpers ──
-
-  _withTimeout(promise, ms) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new AITimeoutError()), ms)),
-    ]);
-  },
 };

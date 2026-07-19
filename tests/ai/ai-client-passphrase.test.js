@@ -1521,17 +1521,18 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
     }), { installId: device.installId });
 
     const originalComplete = CustomProvider.complete;
-    const originalWithTimeout = AIClient._withTimeout;
     const originalSetTimeout = globalThis.setTimeout;
     let providerSawPrivateKey = false;
     CustomProvider.complete = async (_request, config) => {
       providerSawPrivateKey = config.apiKey === device.plainKey;
       throw new AINetworkError(`Provider echoed ${config.apiKey}`);
     };
-    AIClient._withTimeout = (promise) => promise;
-    globalThis.setTimeout = (callback) => {
-      queueMicrotask(callback);
-      return 0;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (Number(delay) < 10_000) {
+        queueMicrotask(() => callback(...args));
+        return 0;
+      }
+      return originalSetTimeout(callback, delay, ...args);
     };
     try {
       const error = await rejectionOf(() => AIClient.complete({
@@ -1544,7 +1545,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
       expect(containsSecret(error, [device.plainKey])).toBeFalse();
     } finally {
       CustomProvider.complete = originalComplete;
-      AIClient._withTimeout = originalWithTimeout;
       globalThis.setTimeout = originalSetTimeout;
     }
   });
@@ -1581,17 +1581,18 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
       },
     }), { installId: device.installId });
     const originalComplete = CustomProvider.complete;
-    const originalWithTimeout = AIClient._withTimeout;
     const originalSetTimeout = globalThis.setTimeout;
     CustomProvider.complete = async (_request, config) => ({
       text: `echo ${config.apiKey}`,
       parsed: { reflected: config.apiKey },
       tokensUsed: 1,
     });
-    AIClient._withTimeout = (promise) => promise;
-    globalThis.setTimeout = (callback) => {
-      queueMicrotask(callback);
-      return 0;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (Number(delay) < 10_000) {
+        queueMicrotask(() => callback(...args));
+        return 0;
+      }
+      return originalSetTimeout(callback, delay, ...args);
     };
     try {
       const error = await rejectionOf(() => AIClient.complete({
@@ -1604,7 +1605,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
       expect(containsSecret(readStorageArea('local').aiCache, [device.plainKey])).toBeFalse();
     } finally {
       CustomProvider.complete = originalComplete;
-      AIClient._withTimeout = originalWithTimeout;
       globalThis.setTimeout = originalSetTimeout;
     }
   });
@@ -1618,7 +1618,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
     }));
 
     const originalComplete = CustomProvider.complete;
-    const originalWithTimeout = AIClient._withTimeout;
     const originalSetTimeout = globalThis.setTimeout;
     let providerCalls = 0;
     CustomProvider.complete = async (_request, config) => {
@@ -1629,10 +1628,12 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
         tokensUsed: 1,
       };
     };
-    AIClient._withTimeout = (promise) => promise;
-    globalThis.setTimeout = (callback) => {
-      queueMicrotask(callback);
-      return 0;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (Number(delay) < 10_000) {
+        queueMicrotask(() => callback(...args));
+        return 0;
+      }
+      return originalSetTimeout(callback, delay, ...args);
     };
     const request = { systemPrompt: 'same-system', userPrompt: 'same-user' };
     try {
@@ -1654,7 +1655,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
       expect(providerCalls).toBe(2);
     } finally {
       CustomProvider.complete = originalComplete;
-      AIClient._withTimeout = originalWithTimeout;
       globalThis.setTimeout = originalSetTimeout;
     }
   });
@@ -1670,7 +1670,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
     await AIClient.unlockApiKey('custom', first.passphrase);
 
     const originalComplete = CustomProvider.complete;
-    const originalWithTimeout = AIClient._withTimeout;
     const originalSetTimeout = globalThis.setTimeout;
     let providerCalls = 0;
     CustomProvider.complete = async (_request, config) => {
@@ -1681,10 +1680,12 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
         tokensUsed: 1,
       };
     };
-    AIClient._withTimeout = (promise) => promise;
-    globalThis.setTimeout = (callback) => {
-      queueMicrotask(callback);
-      return 0;
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (Number(delay) < 10_000) {
+        queueMicrotask(() => callback(...args));
+        return 0;
+      }
+      return originalSetTimeout(callback, delay, ...args);
     };
     const request = { systemPrompt: 'same-system', userPrompt: 'same-user' };
     try {
@@ -1710,7 +1711,6 @@ describe('Task 12 lock-aware availability and private provider reconstruction', 
       expect(providerCalls).toBe(2);
     } finally {
       CustomProvider.complete = originalComplete;
-      AIClient._withTimeout = originalWithTimeout;
       globalThis.setTimeout = originalSetTimeout;
     }
   });

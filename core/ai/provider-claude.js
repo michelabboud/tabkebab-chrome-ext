@@ -1,15 +1,47 @@
 // core/ai/provider-claude.js — Anthropic Claude API provider implementation
 
-import { AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
 
 const BASE_URL = 'https://api.anthropic.com/v1';
 const API_VERSION = '2023-06-01';
+
+function ensureNotAborted(signal) {
+  if (signal?.aborted) throw new AIAbortError();
+}
+
+function rethrowAbort(error, signal) {
+  if (signal?.aborted) throw new AIAbortError();
+  if (error instanceof AIAbortError) throw error;
+  if (error?.name === 'AbortError') throw new AIAbortError();
+}
+
+async function abortAware(operation, signal) {
+  ensureNotAborted(signal);
+  try {
+    const result = await operation();
+    ensureNotAborted(signal);
+    return result;
+  } catch (error) {
+    rethrowAbort(error, signal);
+    throw error;
+  }
+}
+
+async function readErrorText(response, signal) {
+  try {
+    return await abortAware(() => response.text(), signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
+    return '';
+  }
+}
 
 export const ClaudeProvider = {
   id: 'claude',
   name: 'Claude (Anthropic)',
 
-  async testConnection(config) {
+  async testConnection(config, signal) {
+    ensureNotAborted(signal);
     try {
       const response = await fetch(`${BASE_URL}/messages`, {
         method: 'POST',
@@ -24,16 +56,20 @@ export const ClaudeProvider = {
           max_tokens: 10,
           messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
         }),
+        signal,
       });
+      ensureNotAborted(signal);
 
       if (response.status === 401 || response.status === 403) return false;
       return response.ok;
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return false;
     }
   },
 
-  async complete(request, config) {
+  async complete(request, config, signal) {
+    ensureNotAborted(signal);
     let systemPrompt = request.systemPrompt || '';
     if (request.responseFormat === 'json') {
       systemPrompt += '\n\nRespond ONLY with valid JSON. No markdown, no explanation.';
@@ -65,8 +101,11 @@ export const ClaudeProvider = {
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify(body),
+        signal,
       });
+      ensureNotAborted(signal);
     } catch (err) {
+      rethrowAbort(err, signal);
       throw new AINetworkError(`Network error: ${err.message}`);
     }
 
@@ -77,11 +116,11 @@ export const ClaudeProvider = {
       throw new AIRateLimitError('Anthropic rate limit exceeded');
     }
     if (!response.ok) {
-      const errText = await response.text().catch(() => '');
+      const errText = await readErrorText(response, signal);
       throw new AINetworkError(`Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
     }
 
-    const data = await response.json();
+    const data = await abortAware(() => response.json(), signal);
     const text = data.content?.[0]?.text || '';
     const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
 
@@ -104,7 +143,8 @@ export const ClaudeProvider = {
    * Anthropic has a /v1/models endpoint (requires API key).
    * Falls back to a hardcoded list on failure.
    */
-  async listModels(config) {
+  async listModels(config, signal) {
+    ensureNotAborted(signal);
     // Try the API endpoint first
     try {
       const response = await fetch(`${BASE_URL}/models`, {
@@ -114,9 +154,11 @@ export const ClaudeProvider = {
           'anthropic-version': API_VERSION,
           'anthropic-dangerous-direct-browser-access': 'true',
         },
+        signal,
       });
+      ensureNotAborted(signal);
       if (response.ok) {
-        const data = await response.json();
+        const data = await abortAware(() => response.json(), signal);
         if (data.data?.length > 0) {
           return data.data
             .filter(m => m.type === 'model')
@@ -124,7 +166,8 @@ export const ClaudeProvider = {
             .sort((a, b) => a.id.localeCompare(b.id));
         }
       }
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       // Fall through to hardcoded list
     }
 

@@ -1,14 +1,46 @@
 // core/ai/provider-gemini.js — Google Gemini API provider implementation
 
-import { AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+
+function ensureNotAborted(signal) {
+  if (signal?.aborted) throw new AIAbortError();
+}
+
+function rethrowAbort(error, signal) {
+  if (signal?.aborted) throw new AIAbortError();
+  if (error instanceof AIAbortError) throw error;
+  if (error?.name === 'AbortError') throw new AIAbortError();
+}
+
+async function abortAware(operation, signal) {
+  ensureNotAborted(signal);
+  try {
+    const result = await operation();
+    ensureNotAborted(signal);
+    return result;
+  } catch (error) {
+    rethrowAbort(error, signal);
+    throw error;
+  }
+}
+
+async function readErrorText(response, signal) {
+  try {
+    return await abortAware(() => response.text(), signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
+    return '';
+  }
+}
 
 export const GeminiProvider = {
   id: 'gemini',
   name: 'Google Gemini',
 
-  async testConnection(config) {
+  async testConnection(config, signal) {
+    ensureNotAborted(signal);
     try {
       const url = `${BASE_URL}/models/${config.model || 'gemini-2.5-flash'}:generateContent`;
       const response = await fetch(url, {
@@ -21,16 +53,20 @@ export const GeminiProvider = {
           contents: [{ parts: [{ text: 'Reply with the word "ok".' }] }],
           generationConfig: { maxOutputTokens: 5 },
         }),
+        signal,
       });
+      ensureNotAborted(signal);
 
       if (response.status === 401 || response.status === 403) return false;
       return response.ok;
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return false;
     }
   },
 
-  async complete(request, config) {
+  async complete(request, config, signal) {
+    ensureNotAborted(signal);
     const model = config.model || 'gemini-2.5-flash';
     const url = `${BASE_URL}/models/${model}:generateContent`;
 
@@ -62,8 +98,11 @@ export const GeminiProvider = {
           'x-goog-api-key': config.apiKey,
         },
         body: JSON.stringify(body),
+        signal,
       });
+      ensureNotAborted(signal);
     } catch (err) {
+      rethrowAbort(err, signal);
       throw new AINetworkError(`Network error: ${err.message}`);
     }
 
@@ -74,11 +113,11 @@ export const GeminiProvider = {
       throw new AIRateLimitError('Gemini rate limit exceeded');
     }
     if (!response.ok) {
-      const errText = await response.text().catch(() => '');
+      const errText = await readErrorText(response, signal);
       throw new AINetworkError(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`);
     }
 
-    const data = await response.json();
+    const data = await abortAware(() => response.json(), signal);
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const tokensUsed = (data.usageMetadata?.totalTokenCount) || 0;
 
@@ -101,15 +140,18 @@ export const GeminiProvider = {
    * @param {Object} config - { apiKey }
    * @returns {Promise<Array<{id: string, name: string}>>}
    */
-  async listModels(config) {
+  async listModels(config, signal) {
+    ensureNotAborted(signal);
     try {
       const response = await fetch(`${BASE_URL}/models`, {
         method: 'GET',
         headers: { 'x-goog-api-key': config.apiKey },
+        signal,
       });
+      ensureNotAborted(signal);
       if (!response.ok) return [];
 
-      const data = await response.json();
+      const data = await abortAware(() => response.json(), signal);
       return (data.models || [])
         .filter(m =>
           m.supportedGenerationMethods?.includes('generateContent') &&
@@ -122,7 +164,8 @@ export const GeminiProvider = {
           name: m.displayName || m.name.replace('models/', ''),
         }))
         .sort((a, b) => a.id.localeCompare(b.id));
-    } catch {
+    } catch (error) {
+      rethrowAbort(error, signal);
       return [];
     }
   },

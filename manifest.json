@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabKebab",
-  "version": "1.2.14",
+  "version": "1.2.15",
   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
 
   "permissions": [

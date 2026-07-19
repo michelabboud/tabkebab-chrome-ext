@@ -4,6 +4,32 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.15] — 2026-07-19
+
+### Added
+
+- One abortable lifecycle for every AI provider attempt, with a fresh controller, a positive bounded timeout, optional caller cancellation, stable `AI_ABORTED` and `AI_TIMEOUT` categories, and settlement-before-return semantics.
+- Stable error codes for disabled, authentication, rate-limit, network, abort, timeout, foreground-required, unavailable-provider, and malformed-result failures.
+- Deterministic lifecycle, queue, client, provider-signal, custom-abort-reason, and late-result cache regressions, plus a loopback-only CORS hanging-provider fixture with redacted start, abort, completion, active, and maximum-active metrics.
+
+### Changed
+
+- OpenAI, Claude, Gemini, Custom, and Chrome Prompt API adapters now receive one exact `AbortSignal` throughout fetch/create/prompt and body-read work. Chrome sessions are destroyed before their result or failure settles.
+- Automatic retry is restricted to typed network and rate-limit failures, with two retries and three total attempts by default. Timeout, cancellation, authentication, disabled, unavailable, foreground-required, malformed, and unknown local failures perform one attempt.
+- Connection tests and model lists use the same lifecycle and preserve their existing `false`/empty-list fallback only after provider cleanup has settled. Explicit user retry starts a distinct later request.
+
+### Fixed
+
+- Timed-out requests can no longer remain active while a later attempt starts, cache a late success, or be relabeled as a retryable network failure.
+- Already-cancelled calls start no provider work; raw `AbortError` values and custom `AbortSignal.reason` rejections normalize to non-retryable cancellation.
+- Chrome Prompt API absence, download-required states, and unknown availability states are non-retryable unavailable-provider failures rather than transport failures.
+
+### Verification note
+
+- Reviewer-driven RED cases covered pre-cancelled work, raw/custom abort reasons, first-cause ownership, synchronous cleanup, non-cooperative late settlement, timeout fallback ordering, and late-result cache rejection. Final focused verification is `129 pass / 0 fail / 458 assertions`; the full and coverage suites are `769 pass / 0 fail / 4177 assertions`; coverage is `69.93%` functions and `66.11%` lines; syntax is `2 pass / 0 fail / 109 assertions` under Bun `1.3.11`.
+- Two independent immutable reviews found no remaining functional blocker at tree `e95cb671ffb6c60a18f34a354e04b97012bf287a`; their focused reruns passed `219/0` and `129/0`. Whitespace, version parity, credential-signature scanning, and the zero package/lockfile audit remain release gates.
+- Chrome for Testing `148.0.7778.96` passed the preliminary tree-hash-guarded production Custom-provider fixture at tree `c073b4e2f4fd542f39a26a0302fbb19e7cfa821b`: the UI action settled at `120.078s`, the request was observed active for `119.913s`, timeout returned the exact safe false fallback, explicit retry created only one distinct later request, final metrics were two starts, two connection aborts, zero completions, zero active, and maximum active one, and no external request or runtime error occurred. Every disposable resource was removed. Release closeout repeats this gate on the documentation/version-frozen tree and records its exact non-recursive result in the gitdir-local Task 13 report.
+
 ## [1.2.14] — 2026-07-19
 
 ### Added

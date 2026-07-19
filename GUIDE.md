@@ -632,6 +632,12 @@ Remote Custom endpoints must use HTTPS. Plain HTTP is accepted only for loopback
 
 Google Gemini authentication is sent in the `x-goog-api-key` request header, never in the request URL. TabKebab also rejects provider errors or successful responses that reflect a submitted credential.
 
+### Request Timeouts and Retries
+
+Each AI attempt has a 120-second limit. When that limit is reached, TabKebab cancels the provider operation and waits for its cleanup before the UI becomes available again. A connection test reports failure and model loading returns no models; a timed-out late response is never cached.
+
+Only transient network and rate-limit failures retry automatically, with at most three total attempts. Timeout, cancellation, authentication, unavailable-provider, malformed-result, and local Chrome AI failures do not retry automatically. Clicking **Test Connection** or submitting the command again is an explicit new attempt, started only after the prior attempt has settled.
+
 ### Chrome Built-in AI
 
 To use Gemini Nano (on-device, no API key):

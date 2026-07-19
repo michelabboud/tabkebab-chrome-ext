@@ -74,6 +74,16 @@ Custom endpoints accept remote HTTPS or HTTP loopback only and reject userinfo, 
 
 The AI Settings controller owns Save, Unlock, Test Connection, Load Models, provider-status refresh, and full refresh through one exclusive-operation boundary. Provider and request generations make overlapping settlements last-call-wins. A provider change synchronously hides and clears the old unlock input before awaiting status, unsaved provider selection cannot trigger runtime use, and hidden or disabled unlock controls are revalidated at the send boundary. Panel-level availability refreshes use the same generation rule so stale status cannot repaint the shell.
 
+### AI request lifecycle
+
+`core/ai/request-lifecycle.js` owns one fresh `AbortController` per explicit provider attempt. It accepts only a positive bounded integer timeout, rejects an already-cancelled caller before starting work, links later caller cancellation to the exact provider signal, and records the first abort cause. Timeout or cancellation aborts that signal but does not settle the lifecycle early: the provider promise must finish its own cleanup before `AITimeoutError` or `AIAbortError` is exposed. Timers and external listeners are always removed, including after synchronous provider failure, and a late provider success after abort remains a failure.
+
+Every HTTP provider threads that exact signal through `fetch()` and lazy response-body reads. Abort classification checks both the thrown value and `signal.aborted`, so browsers that reject with a custom `AbortSignal.reason` cannot turn cancellation into a retryable network failure. Chrome Prompt API create/prompt receive the same signal and every created session is destroyed in `finally` before the attempt settles. Missing, download-required, or unknown Chrome model availability is a typed non-retryable unavailable-provider result.
+
+`core/ai/queue.js` retries only typed network and rate-limit failures. Its default `maxRetries: 2` means three total attempts, and each retry begins only after the preceding provider promise has settled; timeout, cancellation, authentication, disabled, unavailable, foreground-required, malformed, and unknown failures perform one attempt. AIClient creates the lifecycle inside the queued closure so every retry receives a new controller, and it caches only a completed successful response. Connection testing and model listing use independent controllers and return their existing `false`/`[]` fallback only after abort cleanup settles.
+
+The manual Chrome boundary uses `tests/fixtures/hanging-ai-server.js`, a loopback-only CORS endpoint that holds completion requests until disconnect and exposes only redacted lifecycle counters. The tree-hash-guarded browser harness uses the unchanged 120-second production timeout, requires maximum active one, proves no automatic retry, then starts one explicit later retry and verifies complete process, display, fixture, and profile cleanup.
+
 ## Persistence
 
 - `chrome.storage.local`: sessions, settings, manual groups, Focus Mode preferences/history, Drive state, AI configuration, and sync metadata.

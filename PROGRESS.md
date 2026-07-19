@@ -2,14 +2,14 @@
 
 ## Current state
 
-- Repository version: `1.2.14`
+- Repository version: `1.2.15`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–12 implemented and independently code-reviewed; AI settings expose only a public projection, credential/protection changes commit atomically, passphrase keys unlock per browser session, Custom credentials are origin-bound, and AI cache/request boundaries reject stale or reflected secrets
+- Implementation status: Tasks 1–13 implemented and independently code-reviewed; every AI attempt owns one abort signal, timeout/cancellation waits for provider cleanup, retries are typed and bounded, and late timed-out results cannot overlap or enter the response cache
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
 - Phase 2 release status: `v1.2.13` is committed, tagged, pushed, exact-commit CI-green, and published as a GitHub release
-- Phase 3 status: Task 12 implementation, independent code/security review, regression evidence, documentation, deterministic gates, and preliminary real-Chrome credential proof are complete at `1.2.14`; the controller owns the documentation-updated terminal Chrome rerun and release checkpoint closeout
+- Phase 3 status: Task 12 is released as exact-commit CI-green `v1.2.14`. Task 13 tracked implementation, review, deterministic gates, documentation, and preliminary real-Chrome timeout proof are complete at `1.2.15`; terminal Chrome, commit/tag/push, and exact-commit CI remain closeout gates whose outcomes belong in the non-recursive gitdir report and GitHub
 
 ## Completed implementation slices
 
@@ -123,6 +123,14 @@
 - Mandatory RED evidence was `17 pass / 51 fail / 159 assertions`. Final focused verification is `188 pass / 0 fail / 1376 assertions`; full and coverage runs are `640 pass / 0 fail / 3711 assertions`; syntax is `2 pass / 0 fail / 101 assertions`; coverage is `61.29%` functions and `57.40%` lines. Two independent terminal audits report no blocker at functional tree `a32a08e93aecc03d7b7072294db159a39a35c9ab`.
 - Chrome 148 verifies a passphrase-only blob survives a full process exit/relaunch unchanged, wrong unlock fails, correct unlock enables one intercepted OpenAI request, the credential appears only in the authorization header, no request reaches an external network, and disposable resources are removed. The exact documentation-updated terminal tree is recorded gitdir-locally after tracked evidence freeze.
 
+### Task 13 — Abort-before-retry AI lifecycle (`1.2.15`)
+
+- Added a one-controller lifecycle per explicit provider attempt. Positive bounded timeouts and optional caller cancellation abort the exact provider signal, preserve the first cause, wait for provider settlement, remove timer/listener state, and expose stable safe error codes. Already-cancelled calls start no work, raw/custom-reason aborts normalize to `AI_ABORTED`, and swallowed late success still returns `AI_TIMEOUT`.
+- Threaded the same signal through every OpenAI, Claude, Gemini, Custom, and Chrome Prompt API path, including lazy body reads. Chrome sessions are destroyed before settlement; missing/download-required/unknown Chrome model states are non-retryable unavailable failures.
+- Restricted automatic retry to `AINetworkError` and `AIRateLimitError`, with three total attempts by default and no overlap between attempts. AIClient creates a new lifecycle inside each queued closure and caches only settled success; test connection and model listing preserve `false`/`[]` only after cleanup.
+- Reviewer-driven RED/GREEN coverage includes pre-abort no-work, raw and custom abort reasons, synchronous cleanup, first-cause races, non-cooperative providers, late-result cache rejection, typed retry boundaries, and maximum-active ordering. Focused verification is `129 pass / 0 fail / 458 assertions`; full and coverage runs are `769 pass / 0 fail / 4177 assertions`; syntax is `2 pass / 0 fail / 109 assertions`; coverage is `69.93%` functions and `66.11%` lines. Two independent immutable reviews are clean at functional tree `e95cb671ffb6c60a18f34a354e04b97012bf287a`.
+- Chrome 148 passed the preliminary exact-tree hanging-provider fixture at `c073b4e2f4fd542f39a26a0302fbb19e7cfa821b`: the unchanged production boundary settled at `120.078s`, the observed request remained active for `119.913s`, timeout returned the exact safe false fallback, explicit retry produced one distinct request, final metrics were two starts/two aborts/zero completions/zero active/maximum active one, no request reached an external network, and all disposable resources were removed. Release closeout will keep the documentation-frozen terminal result in the gitdir-local report to avoid changing the tested tree.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -151,4 +159,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Run the tree-hash-guarded terminal Task 12 Chrome credential fixture after this tracked evidence freeze, commit it, annotate `v1.2.14`, atomically push `main` plus the task tag, and verify exact-commit GitHub Actions. Then begin Task 13's abort-before-retry lifecycle with regression-first non-overlap proof. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Begin Task 14 only after the gitdir report confirms Task 13's terminal Chrome gate on the exact `1.2.15` tracked tree and GitHub reports exact-commit CI green for `v1.2.15`. Task 14 brokers Chrome Built-in AI through the side-panel document while preserving Task 13's signal and cleanup contract. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

@@ -2,7 +2,7 @@
 // Uses the LanguageModel global (Chrome 138+ origin trial)
 // Falls back to self.ai.languageModel for older Chrome versions
 
-import { AINetworkError } from './provider.js';
+import { AIAbortError, AIUnavailableError } from './provider.js';
 
 /**
  * Get the LanguageModel API, supporting both new global and legacy namespace.
@@ -13,55 +13,67 @@ function getLanguageModelAPI() {
   return null;
 }
 
+function ensureNotAborted(signal) {
+  if (signal?.aborted) throw new AIAbortError();
+}
+
+function rethrowAbort(error, signal) {
+  if (signal?.aborted) throw new AIAbortError();
+  if (error instanceof AIAbortError) throw error;
+  if (error?.name === 'AbortError') throw new AIAbortError();
+}
+
+async function requireAvailable(api, signal) {
+  ensureNotAborted(signal);
+  let status;
+  try {
+    if (typeof api.availability === 'function') {
+      status = await api.availability();
+    } else if (typeof api.capabilities === 'function') {
+      const capabilities = await api.capabilities();
+      status = capabilities?.available === 'readily'
+        ? 'available'
+        : capabilities?.available;
+    }
+    ensureNotAborted(signal);
+  } catch (error) {
+    rethrowAbort(error, signal);
+    throw new AIUnavailableError('Chrome AI availability could not be determined.');
+  }
+
+  if (status === 'available') return;
+  if (status === 'downloadable' || status === 'downloading' || status === 'after-download') {
+    throw new AIUnavailableError('Chrome AI model must be downloaded before use.');
+  }
+  throw new AIUnavailableError('Chrome AI model is not available on this device.');
+}
+
 export const ChromeAIProvider = {
   id: 'chrome-ai',
   name: 'Chrome Built-in AI (Experimental)',
 
-  async testConnection(_config) {
+  async testConnection(_config, signal) {
+    ensureNotAborted(signal);
     try {
       const api = getLanguageModelAPI();
       if (!api) return false;
 
-      // New API uses availability(), legacy uses capabilities()
-      if (typeof api.availability === 'function') {
-        const status = await api.availability();
-        return status === 'available' || status === 'downloadable';
-      }
-      if (typeof api.capabilities === 'function') {
-        const caps = await api.capabilities();
-        return caps.available === 'readily' || caps.available === 'after-download';
-      }
-      return false;
-    } catch {
+      await requireAvailable(api, signal);
+      return true;
+    } catch (error) {
+      rethrowAbort(error, signal);
       return false;
     }
   },
 
-  async complete(request, _config) {
+  async complete(request, _config, signal) {
+    ensureNotAborted(signal);
     const api = getLanguageModelAPI();
     if (!api) {
-      throw new AINetworkError('Chrome Built-in AI is not available. Requires Chrome 138+ with the Prompt API origin trial enabled.');
+      throw new AIUnavailableError('Chrome Built-in AI is not available on this device.');
     }
 
-    // Check availability first
-    try {
-      let status;
-      if (typeof api.availability === 'function') {
-        status = await api.availability();
-      } else if (typeof api.capabilities === 'function') {
-        const caps = await api.capabilities();
-        status = caps.available === 'readily' ? 'available' : caps.available;
-      }
-      if (status === 'unavailable' || status === 'no') {
-        throw new AINetworkError('Chrome AI model is not available on this device.');
-      }
-      if (status === 'downloadable' || status === 'after-download') {
-        throw new AINetworkError('Chrome AI model needs to be downloaded first. Go to chrome://components and update "Optimization Guide On Device Model".');
-      }
-    } catch (err) {
-      if (err instanceof AINetworkError) throw err;
-      // Availability check failed, try to proceed anyway
-    }
+    await requireAvailable(api, signal);
 
     let session;
     try {
@@ -74,9 +86,14 @@ export const ChromeAIProvider = {
         options.temperature = request.temperature;
         options.topK = 40; // reasonable default
       }
+      if (signal !== undefined) options.signal = signal;
 
       session = await api.create(options);
-      const text = await session.prompt(request.userPrompt);
+      ensureNotAborted(signal);
+      const text = signal === undefined
+        ? await session.prompt(request.userPrompt)
+        : await session.prompt(request.userPrompt, { signal });
+      ensureNotAborted(signal);
 
       // Approximate token count (no exact count available from Chrome AI)
       const tokensUsed = Math.ceil((request.userPrompt.length + text.length) / 4);
@@ -93,10 +110,14 @@ export const ChromeAIProvider = {
 
       return { text, parsed, tokensUsed };
     } catch (err) {
-      throw new AINetworkError(`Chrome AI error: ${err.message}`);
+      rethrowAbort(err, signal);
+      // Chrome Prompt API failures are local provider failures, not network
+      // transport errors. Preserve the unknown type so the queue will not
+      // automatically retry and overlap a potentially expensive local call.
+      throw err;
     } finally {
-      if (session) {
-        try { session.destroy(); } catch { /* ignore */ }
+      if (session && typeof session.destroy === 'function') {
+        try { await session.destroy(); } catch { /* best-effort cleanup */ }
       }
     }
   },
