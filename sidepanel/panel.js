@@ -12,7 +12,17 @@ import { StashList } from './components/stash-list.js';
 import { SettingsManager } from './components/settings-manager.js';
 import { GlobalSearch } from './components/global-search.js';
 import { FocusPanel } from './components/focus-panel.js';
+import { showToast } from './components/toast.js';
 import { routePanelFocusMessage } from './focus-events.js';
+import { sendOrThrow } from './message-client.js';
+
+async function refreshController(controller, label) {
+  try {
+    await controller?.refresh?.();
+  } catch (err) {
+    showToast(`Failed to refresh ${label}: ${err.message}`, 'error');
+  }
+}
 
 // --- Initialize view controllers ---
 
@@ -29,10 +39,12 @@ const controllers = {
   windows: new WindowList(document.getElementById('view-windows')),
   stash: new StashList(document.getElementById('view-stash')),
   settings: {
-    refresh() {
-      driveSyncCtrl.refresh();
-      aiSettingsCtrl.refresh();
-      settingsManagerCtrl.refresh();
+    async refresh() {
+      await Promise.all([
+        driveSyncCtrl.refresh(),
+        aiSettingsCtrl.refresh(),
+        settingsManagerCtrl.refresh(),
+      ]);
     },
   },
 };
@@ -75,9 +87,9 @@ navButtons.forEach(btn => {
       // Refresh the active sub-tab's controller
       const activeSub = document.querySelector('#view-tabs .sub-nav [role="tab"].active');
       const subKey = subControllers[activeSub?.dataset.subtab || 'domains'];
-      controllers[subKey]?.refresh?.();
+      void refreshController(controllers[subKey], 'tabs');
     } else {
-      controllers[target]?.refresh?.();
+      void refreshController(controllers[target], target);
     }
   });
 });
@@ -93,7 +105,7 @@ settingsBtn.addEventListener('click', () => {
 
   // Show settings view, hide all others
   views.forEach(v => v.classList.toggle('hidden', v.id !== 'view-settings'));
-  controllers.settings?.refresh?.();
+  void refreshController(controllers.settings, 'settings');
 });
 
 // --- Focus panel ---
@@ -112,7 +124,7 @@ function showFocusView() {
   settingsBtn.classList.remove('active');
   focusBtn.classList.add('active');
   views.forEach(v => v.classList.toggle('hidden', v.id !== 'view-focus'));
-  focusPanel.refresh();
+  void refreshController(focusPanel, 'Focus Mode');
 }
 
 focusBtn.addEventListener('click', showFocusView);
@@ -126,7 +138,7 @@ settingsBtn.addEventListener('click', () => focusBtn.classList.remove('active'))
 // Update focus button pulse state on load and focus events
 async function updateFocusBtnState() {
   try {
-    const state = await chrome.runtime.sendMessage({ action: 'getFocusState' });
+    const state = await sendOrThrow({ action: 'getFocusState' });
     const isRuntimeState = state?.status === 'active' || state?.status === 'paused';
     focusPanel.state = isRuntimeState ? state : null;
     focusBtn.classList.toggle('focus-active', isRuntimeState);
@@ -156,14 +168,14 @@ subNavButtons.forEach(btn => {
 
     // Refresh the activated sub-controller
     const key = subControllers[target];
-    controllers[key]?.refresh?.();
+    void refreshController(controllers[key], target);
   });
 });
 
 // --- Global stats bar ---
 async function refreshGlobalStats() {
   try {
-    const data = await chrome.runtime.sendMessage({ action: 'getWindowStats' });
+    const data = await sendOrThrow({ action: 'getWindowStats' });
     if (!data) return;
     document.getElementById('stat-windows').textContent = data.totalWindows ?? 0;
     document.getElementById('stat-tabs').textContent = data.totalTabs ?? 0;
@@ -196,8 +208,8 @@ document.addEventListener('dupesUpdated', (e) => {
 async function checkDuplicates() {
   try {
     const [dupes, emptyPages] = await Promise.all([
-      chrome.runtime.sendMessage({ action: 'findDuplicates' }),
-      chrome.runtime.sendMessage({ action: 'findEmptyPages' }),
+      sendOrThrow({ action: 'findDuplicates' }),
+      sendOrThrow({ action: 'findEmptyPages' }),
     ]);
     const dupeCount = dupes
       ? dupes.reduce((sum, g) => sum + g.tabs.length - 1, 0)
@@ -215,11 +227,11 @@ setInterval(checkDuplicates, 60000);
 // --- Listen for tab changes from service worker ---
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'tabsChanged') {
-    controllers.tabs.refresh();
-    refreshGlobalStats();
+    void refreshController(controllers.tabs, 'tabs');
+    void refreshGlobalStats();
   }
   void routePanelFocusMessage(message, focusPanel, {
-    loadFocusState: () => chrome.runtime.sendMessage({ action: 'getFocusState' }),
+    loadFocusState: () => sendOrThrow({ action: 'getFocusState' }),
     updateFocusBtnState,
     showFocusView,
     blink() {
@@ -249,7 +261,7 @@ function applyDefaultView(view) {
 // --- Load settings on startup ---
 async function initSettings() {
   try {
-    const settings = await chrome.runtime.sendMessage({ action: 'getSettings' });
+    const settings = await sendOrThrow({ action: 'getSettings' });
     if (settings) {
       applyTheme(settings.theme);
       applyDefaultView(settings.defaultView);
@@ -277,8 +289,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // --- Initial load ---
-controllers.tabs.refresh();
-refreshGlobalStats();
+void refreshController(controllers.tabs, 'tabs');
+void refreshGlobalStats();
 
 // --- Set version from manifest ---
 const manifest = chrome.runtime.getManifest();
@@ -289,7 +301,7 @@ document.querySelectorAll('.app-version').forEach(el => {
 // --- Toggle AI-dependent UI elements ---
 async function updateAIVisibility() {
   try {
-    const result = await chrome.runtime.sendMessage({ action: 'isAIAvailable' });
+    const result = await sendOrThrow({ action: 'isAIAvailable' });
     const available = result?.available || false;
 
     // Toggle body class so CSS can show/hide .ai-feature elements
@@ -311,7 +323,7 @@ async function updateAIVisibility() {
     const providerLabel = document.getElementById('ai-provider-label');
     if (providerLabel && available) {
       try {
-        const aiSettings = await chrome.runtime.sendMessage({ action: 'getAISettings' });
+        const aiSettings = await sendOrThrow({ action: 'getAISettings' });
         const providerNames = {
           openai: 'OpenAI',
           claude: 'Claude',
@@ -354,7 +366,7 @@ async function updateDriveStatusIcon() {
 
 async function updateAIStatusIcon() {
   try {
-    const result = await chrome.runtime.sendMessage({ action: 'isAIAvailable' });
+    const result = await sendOrThrow({ action: 'isAIAvailable' });
     const available = result?.available || false;
     aiStatusBtn.classList.toggle('connected', available);
     aiStatusBtn.classList.toggle('disconnected', !available);

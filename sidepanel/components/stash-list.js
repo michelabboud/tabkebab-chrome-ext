@@ -64,16 +64,19 @@ export class StashList {
     }
   }
 
-  async refresh() {
+  async refresh({ notifyFailure = true } = {}) {
     try {
       // Check Drive connection status
       const driveState = await Storage.get('driveSync');
-      this.driveConnected = driveState?.connected || false;
-
       const stashes = await this.send({ action: 'listStashes' });
+      this.driveConnected = driveState?.connected || false;
       this.render(stashes);
-    } catch {
-      showToast('Failed to load stashes', 'error');
+      this._lastRefreshError = null;
+      return true;
+    } catch (err) {
+      this._lastRefreshError = err;
+      if (notifyFailure) showToast('Failed to load stashes: ' + err.message, 'error');
+      return false;
     }
   }
 
@@ -267,34 +270,59 @@ export class StashList {
         stashId: id,
         options,
       });
-
       const feedback = formatRestoreFeedback(result, { source: 'stash' });
+
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (!refreshed) {
+        showToast(
+          `${feedback.message} View could not refresh: ${this._lastRefreshError?.message || 'unknown error'}.`,
+          'error',
+        );
+        return;
+      }
       showToast(feedback.message, feedback.type);
-      this.refresh();
     } catch (err) {
       showToast(`Restore failed: ${err.message}`, 'error');
     }
   }
 
   async deleteStash(stash) {
+    const undoOptions = {
+      label: 'Undo',
+      callback: async () => {
+        try {
+          await this.send({ action: 'undoDeleteStash', stash });
+        } catch (err) {
+          showToast('Undo failed: ' + err.message, 'error');
+          return;
+        }
+        const refreshed = await this.refresh({ notifyFailure: false });
+        if (!refreshed) {
+          showToast(`Restored "${stash.name}", but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`, 'error');
+          return;
+        }
+        showToast(`Restored "${stash.name}"`, 'success');
+      },
+    };
+
     try {
       await this.send({ action: 'deleteStash', stashId: stash.id });
-      this.refresh();
-      showToast(`Deleted "${stash.name}"`, 'success', 8000, {
-        label: 'Undo',
-        callback: async () => {
-          try {
-            await this.send({ action: 'undoDeleteStash', stash });
-            showToast(`Restored "${stash.name}"`, 'success');
-            this.refresh();
-          } catch {
-            showToast('Undo failed', 'error');
-          }
-        },
-      });
-    } catch {
-      showToast('Delete failed', 'error');
+    } catch (err) {
+      showToast('Delete failed: ' + err.message, 'error');
+      return;
     }
+
+    const refreshed = await this.refresh({ notifyFailure: false });
+    if (!refreshed) {
+      showToast(
+        `Deleted "${stash.name}", but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+        'error',
+        8000,
+        undoOptions,
+      );
+      return;
+    }
+    showToast(`Deleted "${stash.name}"`, 'success', 8000, undoOptions);
   }
 
   async exportSingleStash(stash) {
@@ -334,11 +362,18 @@ export class StashList {
     try {
       const document = await readPortableImportFile(file, ['stashes']);
       const result = await this.send({ action: 'importPortableData', document });
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (!refreshed) {
+        showToast(
+          `Stashes were imported, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+          'error',
+        );
+        return;
+      }
       showToast(
         formatPortableImportSummary(result, 'Stash import'),
         portableImportToastType(result),
       );
-      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
     } finally {

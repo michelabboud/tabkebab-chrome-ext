@@ -615,8 +615,8 @@ describe('panel mutation and checked-message boundaries', () => {
 
   test('Drive Sync panel delegates canonical sync only through sendOrThrow', async () => {
     const source = await Bun.file(new URL('../../sidepanel/components/drive-sync.js', import.meta.url)).text();
-    expect(source).toContain("send = sendOrThrow");
-    expect(source).toContain("this.sendMessage({ action: 'syncDriveState' })");
+    expect(source).toContain("this.send({ action: 'syncDriveState' })");
+    expect(source).not.toContain('sendMessage');
     expect(source).not.toMatch(/findSyncFile|readSyncFile|writeSyncFile/);
     expect(source).not.toMatch(/Storage\.set\('sessions'|Storage\.set\('manualGroups'/);
     const syncNowSource = source.slice(source.indexOf('async syncNow()'), source.indexOf('async disconnectDrive()'));
@@ -639,7 +639,6 @@ describe('panel mutation and checked-message boundaries', () => {
         const notices = [];
         const manager = Object.create(DriveSync.prototype);
         manager.syncBtn = { disabled: false, textContent: 'Sync Now' };
-        manager.sendMessage = sendOrThrow;
         manager.notify = (message, type) => notices.push({ message, type });
         manager.refresh = async () => { notices.push({ refresh: true }); };
 
@@ -661,13 +660,15 @@ describe('panel mutation and checked-message boundaries', () => {
     try {
       const { DriveSync } = await import(`../../sidepanel/components/drive-sync.js?task7-sync-refresh=${++importNonce}`);
       for (const [workerSucceeds, expectedResult] of [[true, true], [false, false]]) {
+        installChromeMock({
+          runtimeHandler: async () => {
+            if (!workerSucceeds) return { error: 'worker sync failed' };
+            return { sessions: 1, stashes: 0, bookmarks: 0 };
+          },
+        });
         const notices = [];
         const manager = Object.create(DriveSync.prototype);
         manager.syncBtn = { disabled: false, textContent: 'Sync Now' };
-        manager.sendMessage = async () => {
-          if (!workerSucceeds) throw new Error('worker sync failed');
-          return { sessions: 1, stashes: 0, bookmarks: 0 };
-        };
         manager.notify = (message, type) => notices.push({ message, type });
         manager.refresh = async () => { throw new Error('projection failed'); };
 
@@ -698,7 +699,6 @@ describe('panel mutation and checked-message boundaries', () => {
         runtimeHandler: async () => ({ error: 'settings rejected' }),
       });
       const manager = Object.create(DriveSync.prototype);
-      manager.sendMessage = sendOrThrow;
       await expect(manager.applyRemoteSettings({ theme: 'dark' })).rejects.toThrow('settings rejected');
       expect(harness.calls.storage.local.set).toEqual([]);
       expect(harness.snapshot().local).toEqual({ tabkebabSettings: { theme: 'light' } });
@@ -715,10 +715,10 @@ describe('panel mutation and checked-message boundaries', () => {
       const { DriveSync } = await import(`../../sidepanel/components/drive-sync.js?task7-undo-refresh=${++importNonce}`);
       installChromeMock({
         local: { tabkebabSettingsPrevious: { theme: 'light' } },
+        runtimeHandler: async () => ({ theme: 'light' }),
       });
       const notices = [];
       const manager = Object.create(DriveSync.prototype);
-      manager.sendMessage = async () => ({ theme: 'light' });
       manager.confirm = async () => true;
       manager.notify = (message, type) => notices.push({ message, type });
       manager.refresh = async () => { throw new Error('projection failed'); };
@@ -747,7 +747,7 @@ describe('panel mutation and checked-message boundaries', () => {
           return selector === '#new-group-name' ? nameInput : colorSelect;
         },
       };
-      manager.send = async () => { throw new Error('worker rejected mutation'); };
+      installChromeMock({ runtimeHandler: async () => ({ error: 'worker rejected mutation' }) });
       manager.notify = (message, type) => notices.push({ message, type });
       let refreshes = 0;
       manager.refresh = async () => { refreshes += 1; };
@@ -784,9 +784,11 @@ describe('panel mutation and checked-message boundaries', () => {
           return selector === '#new-group-name' ? nameInput : colorSelect;
         },
       };
-      manager.send = async ({ action }) => action === 'deleteManualGroup'
-        ? { deleted: true, tombstoneAt: 1 }
-        : { success: true };
+      installChromeMock({
+        runtimeHandler: async ({ action }) => action === 'deleteManualGroup'
+          ? { deleted: true, tombstoneAt: 1 }
+          : { success: true },
+      });
       manager.notify = (message, type) => notices.push({ message, type });
       manager.refresh = async () => { throw new Error('projection failed'); };
 
@@ -803,6 +805,55 @@ describe('panel mutation and checked-message boundaries', () => {
       expect(notices).toHaveLength(4);
       expect(notices.every(({ message }) => message.includes('but the view could not refresh'))).toBeTrue();
       expect(notices.some(({ message }) => /^Failed to (create|delete|add|move)/.test(message))).toBeFalse();
+    } finally {
+      if (originalDocument === undefined) delete globalThis.document;
+      else globalThis.document = originalDocument;
+    }
+  });
+
+  test('Chrome-group mutations retain committed outcomes when projection refresh fails', async () => {
+    const originalDocument = globalThis.document;
+    globalThis.document = { getElementById: () => null };
+    try {
+      const { GroupEditor } = await import(`../../sidepanel/components/group-editor.js?task11-committed=${++importNonce}`);
+      const methods = [
+        'discardChromeGroup',
+        'stashChromeGroup',
+        'ungroupChromeGroup',
+        'closeChromeGroup',
+        'setAllChromeGroupsCollapsed',
+      ];
+      for (const method of methods) expect(GroupEditor.prototype[method]).toBeFunction();
+      if (methods.some((method) => typeof GroupEditor.prototype[method] !== 'function')) return;
+
+      installChromeMock({
+        runtimeHandler: async ({ action }) => {
+          if (action === 'discardTabs') return { discarded: 2, skipped: 1 };
+          if (action === 'stashGroup') return { stash: { tabCount: 3 } };
+          return { success: true };
+        },
+      });
+      const notices = [];
+      const manager = Object.create(GroupEditor.prototype);
+      manager.notify = (message, type) => notices.push({ message, type });
+      manager.refresh = async () => { throw new Error('projection failed'); };
+      const group = {
+        id: 4,
+        title: 'Current Group',
+        collapsed: false,
+        tabs: [{ id: 10 }, { id: 11 }],
+      };
+
+      await expect(manager.discardChromeGroup(group)).resolves.toBeTrue();
+      await expect(manager.stashChromeGroup(group)).resolves.toBeTrue();
+      await expect(manager.ungroupChromeGroup(group)).resolves.toBeTrue();
+      await expect(manager.closeChromeGroup(group)).resolves.toBeTrue();
+      await expect(manager.setAllChromeGroupsCollapsed([group], true)).resolves.toBeTrue();
+
+      expect(notices).toHaveLength(5);
+      expect(notices.every(({ type }) => type === 'error')).toBeTrue();
+      expect(notices.every(({ message }) => message.includes('but the view could not refresh: projection failed'))).toBeTrue();
+      expect(notices.every(({ message }) => !/^(Kebab failed:|Stash failed:|Failed to ungroup|Failed to close|Failed to collapse)/.test(message))).toBeTrue();
     } finally {
       if (originalDocument === undefined) delete globalThis.document;
       else globalThis.document = originalDocument;

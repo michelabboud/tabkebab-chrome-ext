@@ -606,3 +606,163 @@ run must report all four cleanup counters true before the tag is created.
 This is a local portable-data proof, not a live Google Drive/OAuth proof. It
 requests no token, creates no Drive artifact, and does not replace the separately
 tracked authenticated Drive fixture.
+
+---
+
+Slice: Task 11, checked side-panel messaging and grouped global search
+
+Extension version: `1.2.13`
+
+## Task 11 deterministic and independent-review evidence
+
+Regression-first implementation preserved the original corrected RED state
+(`4 pass / 5 fail / 1 error / 15 assertions`) and three reviewer-driven RED
+runs (`78 pass / 13 fail / 480 assertions`, `91 pass / 20 fail / 555
+assertions`, and `113 pass / 2 fail / 644 assertions`). The frozen side-panel
+tree `c925bf65dfdabbb0358ab5a0d5570192a8eeafcc` passed those focused gates, but
+the later terminal full-suite run exposed an unowned two-second Focus badge
+reset (`529 pass / 0 fail / 1 error / 2916 assertions`). Focused timer
+regressions were RED at `52 pass / 2 fail / 151 assertions`; the narrower
+overlapping-reset race was RED at `0 pass / 1 fail / 2 assertions`. The final
+tracked tree passes:
+
+```text
+focused side-panel suites: 62 pass / 0 fail / 277 assertions
+affected five-file command: 115 pass / 0 fail / 656 assertions
+Focus lifecycle: 56 pass / 0 fail / 164 assertions
+full suite: 541 pass / 0 fail / 2966 assertions
+coverage suite: 541 pass / 0 fail / 2966 assertions
+coverage: 52.52% functions / 51.06% lines
+syntax: 2 pass / 0 fail / 100 assertions
+```
+
+The exact 15-file request inventory, raw-runtime boundary, direct Chrome and
+Storage promise audit, whitespace, version parity, bounded `core/focus.js`
+scope check, and zero package/lockfile delta all pass under Bun `1.3.11`. Two
+independent side-panel reviews report zero Critical, Important, or Minor
+findings, while independent timer analysis and a follow-up concurrency review
+drove the final queue-owned repair and regressions.
+
+## Task 11 preliminary real-Chrome side-panel boundary (superseded)
+
+The fail-closed harness uses the installed official Chrome for Testing build and
+the actual unpacked extension:
+
+```text
+Google Chrome for Testing 148.0.7778.96
+binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
+extension ID: igggfmpiljhefkagnphadfadollcimlh
+historical functional tree: 11afd6d6609f8c3b8b046ed2d5f43faef7ff6098
+```
+
+This run predates reviewer repairs and the tracked evidence refresh. It is
+retained as historical functional evidence only and must not be used as proof
+of the terminal Task 11 tree.
+
+In one clean disposable profile, the harness loads the production panel and
+service worker, seeds only synthetic local/IndexedDB records, and opens three
+synthetic tabs across two domains. It sets `driveSync.connected` to the exact
+affirmative state while deliberately omitting `driveProfileName`, then clicks
+the real manual-cleanup button and confirmation. Production profile validation
+therefore fails before OAuth or a Drive request, the worker returns its generic
+error-shaped response, and the panel must consume that response through the
+checked message boundary.
+
+The harness then opens production global search through the document's Ctrl+K
+keyboard-handler event. Chrome consumes a physical Ctrl+K as an omnibox
+accelerator when the panel document is hosted in a test tab, so the harness
+dispatches the same bubbling/cancelable `KeyboardEvent` with `key: 'k'` and
+`ctrlKey: true` that the side-panel document receives. This proves the extension
+handler and resulting UI, not Chrome's browser-level accelerator routing.
+
+All context HTTP(S) requests are aborted before network and the browser also maps
+non-local hosts to `NOTFOUND`. The redacted result reports only synthetic labels,
+counts, booleans, safe UI copy, browser/tree identity, and cleanup counters. It
+does not print storage payloads, browsing data, a token, a private URL, or a
+credential.
+
+## Task 11 preliminary redacted results (superseded)
+
+```text
+checked Drive-cleanup failure:
+  safe failure toasts: 1
+  safe text: Cleanup failed: Drive cleanup failed
+  success toasts: 0
+  optimistic panel/storage mutations: 0
+  unhandled rejections: 0
+  panel page errors: 0
+  controls restored: true
+
+worker grouped tabs:
+  synthetic-alpha: 2
+  synthetic-beta: 1
+  grouped order preserved in Ctrl+K results: true
+
+Ctrl+K sections:
+  Open Tabs: 5
+  Stashes: 1
+  Sessions: 1
+  synthetic stash present: true
+  synthetic session present: true
+  valid no-match text: No results found
+  unavailable alert shown for valid data: false
+
+external requests reaching network: 0
+```
+
+The real-Chrome no-match check uses a loaded valid profile and an unmatched
+query. The deterministic DOM-free regression separately supplies genuinely
+empty valid arrays for tabs, stashes, and sessions and proves that they render
+ordinary empty results, while rejection or every malformed grouped-tab shape
+renders exactly one `Search unavailable — try again.` alert. This split avoids
+claiming that the test-tab-hosted panel can make Chrome's own panel tab disappear
+from `chrome.tabs.query({})`.
+
+The terminal harness seeds stashes and sessions only through their current own
+`windows[].tabs` schema, searches a nested saved-tab title, and retains the same
+checked cleanup/no-network boundary. After the tracked evidence files froze,
+the controller reran the tree-hash-guarded harness and observed the same checked
+cleanup outcome plus both nested saved-record matches. The exact terminal tree,
+repeated redacted result, browser hash, network counter, and cleanup proof are
+recorded in the gitdir-local Task 11 closeout report so writing the hash cannot
+recursively change the tracked tree.
+
+## Task 11 terminal real-Chrome result
+
+```text
+Chrome for Testing: 148.0.7778.96
+checked cleanup failure toasts: 1
+checked cleanup success toasts: 0
+optimistic mutations: 0
+unhandled rejections: 0
+panel page errors: 0
+controls restored: true
+synthetic-alpha grouped tabs: 2
+synthetic-beta grouped tabs: 1
+grouped order preserved: true
+current nested stash match: true
+current nested session match: true
+valid no-match text: No results found
+unavailable alert for valid data: false
+external requests reaching network: 0
+profile removed: true
+matching Chrome processes after cleanup: 0
+Xvfb exited: true
+```
+
+This result contains only synthetic labels, safe UI text, counts, booleans, and
+public build identity. It contains no token, browsing payload, private URL,
+storage value, or credential.
+
+## Task 11 cleanup and scope
+
+The historical functional-tree run observed 315 disposable profile entries
+before teardown, then reported the profile removed, zero matching Chrome
+processes, and Xvfb exited. The harness itself remains under the gitdir-local
+`sdd/` evidence area and is not extension runtime content.
+
+This fixture is a checked local worker/UI proof, not a live Google Drive/OAuth
+proof. It deliberately fails before authentication and makes no Drive call or
+artifact. Even after the terminal rerun, it does not replace the separately
+tracked registered-identity and operator-authenticated two-profile Drive
+fixture.

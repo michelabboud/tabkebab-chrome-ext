@@ -1,6 +1,7 @@
 // ai-settings.js — AI settings UI component
 
 import { showToast } from './toast.js';
+import { sendOrThrow } from '../message-client.js';
 
 const PROVIDERS_WITH_KEY = ['openai', 'claude', 'gemini', 'custom'];
 
@@ -139,13 +140,13 @@ export class AISettings {
     }
 
     // Check Chrome AI availability
-    this.checkChromeAI();
+    await this.checkChromeAI();
 
     // Hide test result
     this.testResultEl.hidden = true;
 
     // Refresh keep-awake exception list
-    this.refreshKeepAwakeList();
+    await this.refreshKeepAwakeList();
   }
 
   /**
@@ -299,68 +300,87 @@ export class AISettings {
       return;
     }
 
-    // Build settings object
-    const currentSettings = await this.send({ action: 'getAISettings' });
-    const settings = {
-      ...currentSettings,
-      enabled,
-      providerId: providerId || null,
-      usePassphrase,
-    };
+    try {
+      // Build settings object
+      const currentSettings = await this.send({ action: 'getAISettings' });
+      const settings = {
+        ...currentSettings,
+        enabled,
+        providerId: providerId || null,
+        usePassphrase,
+      };
 
-    // Save model selections + custom config
-    if (!settings.providerConfigs) settings.providerConfigs = {};
+      // Save model selections + custom config
+      if (!settings.providerConfigs) settings.providerConfigs = {};
 
-    for (const pid of ['openai', 'claude', 'gemini', 'custom']) {
-      if (!settings.providerConfigs[pid]) settings.providerConfigs[pid] = {};
-      const modelSelect = this.root.querySelector(`#${pid}-model`);
-      if (modelSelect) settings.providerConfigs[pid].model = modelSelect.value;
-    }
-
-    // Custom base URL
-    const customBaseUrl = this.root.querySelector('#custom-base-url')?.value;
-    if (customBaseUrl) {
-      settings.providerConfigs.custom.baseUrl = customBaseUrl;
-    }
-
-    // Save the settings (without keys first)
-    await this.send({ action: 'saveAISettings', settings });
-
-    // Save API keys via encryption (only if a new key was entered)
-    for (const pid of PROVIDERS_WITH_KEY) {
-      const keyInput = this.root.querySelector(`#${pid}-api-key`);
-      const newKey = keyInput?.value;
-      if (newKey) {
-        await this.send({
-          action: 'setAIApiKey',
-          providerId: pid,
-          plainKey: newKey,
-          passphrase: passphrase || null,
-        });
+      for (const pid of ['openai', 'claude', 'gemini', 'custom']) {
+        if (!settings.providerConfigs[pid]) settings.providerConfigs[pid] = {};
+        const modelSelect = this.root.querySelector(`#${pid}-model`);
+        if (modelSelect) settings.providerConfigs[pid].model = modelSelect.value;
       }
+
+      // Custom base URL
+      const customBaseUrl = this.root.querySelector('#custom-base-url')?.value;
+      if (customBaseUrl) {
+        settings.providerConfigs.custom.baseUrl = customBaseUrl;
+      }
+
+      // Save the settings (without keys first)
+      await this.send({ action: 'saveAISettings', settings });
+
+      // Save API keys via encryption (only if a new key was entered)
+      for (const pid of PROVIDERS_WITH_KEY) {
+        const keyInput = this.root.querySelector(`#${pid}-api-key`);
+        const newKey = keyInput?.value;
+        if (newKey) {
+          await this.send({
+            action: 'setAIApiKey',
+            providerId: pid,
+            plainKey: newKey,
+            passphrase: passphrase || null,
+          });
+        }
+      }
+    } catch (err) {
+      showToast('Failed to save AI settings: ' + err.message, 'error');
+      return false;
     }
 
+    try {
+      await this.refresh();
+    } catch (err) {
+      showToast('AI settings were saved, but the view could not refresh: ' + err.message, 'error');
+      return true;
+    }
     showToast('AI settings saved', 'success');
-    this.refresh();
+    return true;
   }
 
   // ── Clear Cache ──
 
   async clearCache() {
-    await this.send({ action: 'clearAICache' });
-    showToast('AI cache cleared', 'success');
+    try {
+      await this.send({ action: 'clearAICache' });
+      showToast('AI cache cleared', 'success');
+      return true;
+    } catch (err) {
+      showToast('Failed to clear AI cache: ' + err.message, 'error');
+      return false;
+    }
   }
 
   // ── Keep Awake Exception List ──
 
   async refreshKeepAwakeList() {
-    if (!this.keepAwakeListEl) return;
+    if (!this.keepAwakeListEl) return null;
 
     try {
       const list = await this.send({ action: 'getKeepAwakeList' });
       this.renderKeepAwakeList(list || []);
-    } catch {
+      return null;
+    } catch (err) {
       this.keepAwakeListEl.innerHTML = '<div class="keep-awake-domain-list-empty">Failed to load</div>';
+      return err;
     }
   }
 
@@ -402,18 +422,16 @@ export class AISettings {
     }
 
     try {
-      const result = await this.send({ action: 'toggleKeepAwakeDomain', domain });
-      if (result.isKeepAwake) {
-        showToast(`Added ${domain}`, 'success');
-      } else {
-        // Domain was already in the list, toggling removed it — add it back
-        await this.send({ action: 'toggleKeepAwakeDomain', domain });
-        showToast(`${domain} already in list`, 'info');
-      }
+      await this.send({ action: 'setKeepAwake', scope: 'domain', domain, keepAwake: true });
       input.value = '';
-      this.refreshKeepAwakeList();
-    } catch {
-      showToast('Failed to add domain', 'error');
+      const refreshError = await this.refreshKeepAwakeList();
+      if (refreshError) {
+        showToast('Domain changed, but the list could not refresh: ' + refreshError.message, 'error');
+        return;
+      }
+      showToast(`Added ${domain}`, 'success');
+    } catch (err) {
+      showToast('Failed to add domain: ' + err.message, 'error');
     }
   }
 
@@ -422,10 +440,14 @@ export class AISettings {
       const list = await this.send({ action: 'getKeepAwakeList' });
       const filtered = (list || []).filter(d => d !== domain);
       await this.send({ action: 'saveKeepAwakeList', domains: filtered });
+      const refreshError = await this.refreshKeepAwakeList();
+      if (refreshError) {
+        showToast('Domain was removed, but the list could not refresh: ' + refreshError.message, 'error');
+        return;
+      }
       showToast(`Removed ${domain}`, 'success');
-      this.refreshKeepAwakeList();
-    } catch {
-      showToast('Failed to remove domain', 'error');
+    } catch (err) {
+      showToast('Failed to remove domain: ' + err.message, 'error');
     }
   }
 
@@ -434,10 +456,14 @@ export class AISettings {
       // Clear the storage key so getKeepAwakeList re-seeds defaults
       await this.send({ action: 'saveKeepAwakeList', domains: null });
       // Force re-seed by calling getKeepAwakeList (which seeds when null)
+      const refreshError = await this.refreshKeepAwakeList();
+      if (refreshError) {
+        showToast('Defaults were restored, but the list could not refresh: ' + refreshError.message, 'error');
+        return;
+      }
       showToast('Reset to defaults', 'success');
-      this.refreshKeepAwakeList();
-    } catch {
-      showToast('Failed to reset', 'error');
+    } catch (err) {
+      showToast('Failed to reset: ' + err.message, 'error');
     }
   }
 
@@ -542,11 +568,15 @@ export class AISettings {
         }
       }
       await this.send({ action: 'saveKeepAwakeList', domains: [...existing] });
+      const refreshError = await this.refreshKeepAwakeList();
+      if (refreshError) {
+        showToast('Suggestions were applied, but the list could not refresh: ' + refreshError.message, 'error');
+        return;
+      }
       showToast(`Added ${added} domain${added !== 1 ? 's' : ''} to keep-awake list`, 'success');
       this.keepAwakeSuggestionsEl.hidden = true;
-      this.refreshKeepAwakeList();
-    } catch {
-      showToast('Failed to apply suggestions', 'error');
+    } catch (err) {
+      showToast('Failed to apply suggestions: ' + err.message, 'error');
     }
   }
 
@@ -572,6 +602,6 @@ export class AISettings {
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 }

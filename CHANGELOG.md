@@ -4,6 +4,33 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.13] — 2026-07-19
+
+### Added
+
+- One import-safe checked messaging seam for every side-panel request/response component, with the same exact prototype adapter on every controller and the fixed injected sender retained only by Global Search.
+- Strict grouped-tab and current saved-record validation for global search, an order-preserving flattener for the worker's `{ domain, tabs }[]` contract, lifecycle ownership for overlapping loads/activations, and a distinct accessible unavailable state.
+- Regression coverage for helper success/error/null/transport behavior, DOM-free imports, a non-vacuous 15-file promise audit, direct Chrome and Storage calls, checked effect ordering, committed-state recovery, destructive-command generations, current nested stash/session data, accessible failure rendering, and queue-owned Focus badge-reset timers.
+
+### Changed
+
+- Side-panel request/response calls now delegate to `sendOrThrow()`. Checked promises are awaited, returned, or explicitly caught; runtime broadcasts, worker progress events, and long-lived Chrome-AI ports remain outside this command boundary.
+- Success toasts, local committed-state projections, and refreshes that imply success now occur only after the worker response resolves. Post-commit refresh failures retain recovery actions and are reported separately from rejected mutations, while intentional background projections carry explicit best-effort handling.
+- Ctrl+K search now flattens ordered domain groups and validates current `windows[].tabs` stash/session records before cache commit. A valid empty result remains `No results found`; unavailable data clears all caches and renders exactly one alert, and stale async work cannot mutate a reopened overlay.
+
+### Fixed
+
+- Prevented background `{ error }` responses and rejected direct Chrome/Storage operations from becoming false success, optimistic cache/UI mutation, stale destructive-command UI, lost Undo recovery, or unhandled rejection across settings, Drive, Focus, grouping, tabs, windows, sessions, stashes, duplicates, and command actions.
+- Restored open tabs to global-search results after the worker changed from the obsolete object wrapper to a grouped array, while rejecting malformed data instead of misreporting it as an empty profile.
+- Deferred toast-container lookup until display time so every request/response component can be imported in the non-DOM test runtime.
+- Made the delayed Focus distraction-badge reset a single queue-owned operation. Authoritative repaint cancels it only after current-state reconciliation, repeated distractions re-arm it atomically, an already-fired stale callback cannot overtake the newer owner, and missing-context/API rejection produces one generic warning instead of an unhandled rejection.
+
+### Verification note
+
+- Regression-first work preserved the original corrected RED (`4 pass / 5 fail / 1 error / 15 assertions`) plus reviewer-repair RED runs at `78 pass / 13 fail / 480 assertions`, `91 pass / 20 fail / 555 assertions`, and `113 pass / 2 fail / 644 assertions`. The release gate then exposed the timer leak at `529 pass / 0 fail / 1 error / 2916 assertions`; its focused regressions were RED at `52 pass / 2 fail / 151 assertions`, and the overlapping-reset race was RED at `0 pass / 1 fail / 2 assertions`. Final verification reports `62 pass / 0 fail / 277 assertions` for the side-panel focus, `115 pass / 0 fail / 656 assertions` for the affected command, `56 pass / 0 fail / 164 assertions` for Focus lifecycle, `541 pass / 0 fail / 2966 assertions` for both full and coverage runs, and `2 pass / 0 fail / 100 assertions` for syntax. Coverage is `52.52%` functions and `51.06%` lines without a repository-wide threshold.
+- Two independent terminal reviews reported zero Critical, Important, or Minor findings at exact pre-documentation side-panel tree `c925bf65dfdabbb0358ab5a0d5570192a8eeafcc`. Independent timer analysis reproduced the final-gate failure, and follow-up review found the narrower queue race before release; both now have deterministic regressions. The raw-runtime, 15-file request, direct-Chrome, Storage-wrapper, whitespace, version-parity, bounded `core/focus.js` scope, and zero package/lockfile gates pass under Bun `1.3.11`.
+- Chrome for Testing `148.0.7778.96` passes the tree-hash-guarded production panel/worker fixture after tracked evidence freeze: one natural Drive-cleanup error yields one safe failure toast, no success/optimistic/unhandled effect, and restored controls; ordered synthetic domain groups and current nested stash/session tabs appear in Ctrl+K; valid no-match remains distinct from unavailable; zero request reaches the network; and every disposable profile/browser/display resource is removed. The exact terminal tree/browser hash and counters live in the gitdir-local Task 11 report so recording them cannot recursively change the tracked tree. This checkpoint adds no package manifest, lockfile, or runtime dependency.
+
 ## [1.2.12] — 2026-07-19
 
 ### Added

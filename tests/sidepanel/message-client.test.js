@@ -3,19 +3,26 @@ import { expect, test } from 'bun:test';
 import { sendOrThrow } from '../../sidepanel/message-client.js';
 import { installChromeMock } from '../helpers/chrome-mock.js';
 
-test('returns a successful response unchanged', async () => {
-  const response = { ok: true, tabs: [1, 2] };
-  const harness = installChromeMock({ runtimeHandler: () => response });
-  const message = { type: 'getTabs' };
+test('returns every valid successful response unchanged', async () => {
+  const responses = [{ ok: true, tabs: [1, 2] }, false, 0, [], {}];
 
-  await expect(sendOrThrow(message)).resolves.toEqual(response);
-  expect(harness.calls.runtime.sendMessage).toEqual([[message]]);
+  for (const response of responses) {
+    const calls = [];
+    chrome.runtime.sendMessage = async (message) => {
+      calls.push(message);
+      return response;
+    };
+    const message = { type: 'getTabs' };
+
+    await expect(sendOrThrow(message)).resolves.toBe(response);
+    expect(calls).toEqual([message]);
+  }
 });
 
-test('rejects an error-shaped response', async () => {
-  installChromeMock({ runtimeHandler: () => ({ error: 'restore failed' }) });
+test('rejects an error-shaped response with the exact background message', async () => {
+  installChromeMock({ runtimeHandler: () => ({ error: 'Close failed' }) });
 
-  await expect(sendOrThrow({ type: 'restoreStash' })).rejects.toThrow('restore failed');
+  await expect(sendOrThrow({ type: 'closeTabs' })).rejects.toEqual(new Error('Close failed'));
 });
 
 test('preserves a native runtime rejection', async () => {

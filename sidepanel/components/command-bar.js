@@ -1,6 +1,7 @@
 // command-bar.js — Natural language command input bar
 
 import { showToast } from './toast.js';
+import { sendOrThrow } from '../message-client.js';
 
 export class CommandBar {
   constructor(rootEl) {
@@ -8,6 +9,7 @@ export class CommandBar {
     this.inputEl = rootEl.querySelector('#ai-command-input');
     this.resultsEl = rootEl.querySelector('#command-results');
     this.pending = false;
+    this._confirmationGeneration = 0;
 
     this.inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !this.pending) {
@@ -25,6 +27,7 @@ export class CommandBar {
     const command = this.inputEl.value.trim();
     if (!command) return;
 
+    this._confirmationGeneration += 1;
     this.pending = true;
     this.inputEl.disabled = true;
     this.resultsEl.innerHTML = '<p class="loading-text">Thinking...</p>';
@@ -57,6 +60,7 @@ export class CommandBar {
   // ── Find Results ──
 
   showFindResults(result) {
+    this._beginResultRender();
     this.resultsEl.innerHTML = '';
 
     const tabs = result.matchedTabs;
@@ -110,8 +114,12 @@ export class CommandBar {
     for (const tab of tabs) {
       const row = document.createElement('div');
       row.className = 'find-result-item';
-      row.addEventListener('click', () => {
-        this.send({ action: 'focusTab', tabId: tab.id });
+      row.addEventListener('click', async () => {
+        try {
+          await this.send({ action: 'focusTab', tabId: tab.id });
+        } catch (err) {
+          showToast('Failed to focus tab: ' + err.message, 'error');
+        }
       });
 
       const favicon = document.createElement('img');
@@ -139,6 +147,7 @@ export class CommandBar {
   }
 
   showCloseConfirmation(tabs) {
+    this._beginResultRender();
     const tabIds = tabs.map(t => t.id);
     this.resultsEl.innerHTML = '';
 
@@ -154,10 +163,10 @@ export class CommandBar {
         await this.send({ action: 'closeTabs', tabIds });
         showToast(`Closed ${tabs.length} tabs`, 'success');
         this.inputEl.value = '';
+        this.resultsEl.innerHTML = '';
       } catch (err) {
         showToast('Failed to close: ' + err.message, 'error');
       }
-      this.resultsEl.innerHTML = '';
     });
 
     const cancelBtn = document.createElement('button');
@@ -179,6 +188,7 @@ export class CommandBar {
   // ── Destructive Action Confirmation ──
 
   showConfirmation(result) {
+    const generation = this._beginResultRender();
     this.resultsEl.innerHTML = '';
 
     const msg = document.createElement('p');
@@ -189,18 +199,29 @@ export class CommandBar {
     confirmBtn.className = 'action-btn';
     confirmBtn.textContent = 'Confirm';
     confirmBtn.addEventListener('click', async () => {
+      if (this._confirmationGeneration !== generation) return false;
+      this._setConfirmationBusy(true);
       this.resultsEl.innerHTML = '<p class="loading-text">Executing...</p>';
       try {
         const execResult = await this.send({
           action: 'confirmNLCommand',
           parsedCommand: result.parsedCommand,
         });
+        if (this._confirmationGeneration !== generation) return false;
         showToast(execResult.message || 'Done', 'success');
         this.inputEl.value = '';
+        this.resultsEl.innerHTML = '';
+        return true;
       } catch (err) {
-        showToast('Execution failed', 'error');
+        if (this._confirmationGeneration !== generation) return false;
+        showToast('Execution failed: ' + err.message, 'error');
+        this.showConfirmation(result);
+        return false;
+      } finally {
+        if (this._confirmationGeneration === generation) {
+          this._setConfirmationBusy(false);
+        }
       }
-      this.resultsEl.innerHTML = '';
     });
 
     const cancelBtn = document.createElement('button');
@@ -219,7 +240,18 @@ export class CommandBar {
     this.resultsEl.appendChild(btns);
   }
 
+  _beginResultRender() {
+    this._confirmationGeneration = (this._confirmationGeneration || 0) + 1;
+    this._setConfirmationBusy(false);
+    return this._confirmationGeneration;
+  }
+
+  _setConfirmationBusy(busy) {
+    this.pending = busy;
+    this.inputEl.disabled = busy;
+  }
+
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 }

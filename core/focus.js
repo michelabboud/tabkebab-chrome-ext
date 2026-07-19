@@ -32,6 +32,7 @@ let _lifecycleQueue = Promise.resolve();
 const _endFlights = new Map();
 let _focusStateMutationQueue = Promise.resolve();
 let _badgeWriteQueue = Promise.resolve();
+let _distractionBadgeReset = null;
 let _focusStateGeneration = 0;
 
 function isRuntimeFocusState(state) {
@@ -409,6 +410,28 @@ function withBadgeWrite(operation) {
   return pending;
 }
 
+function cancelDistractionBadgeReset() {
+  const pendingReset = _distractionBadgeReset;
+  if (!pendingReset) return;
+  _distractionBadgeReset = null;
+  if (pendingReset.timerId !== null) clearTimeout(pendingReset.timerId);
+}
+
+function scheduleDistractionBadgeReset(runId) {
+  cancelDistractionBadgeReset();
+  const pendingReset = { runId, timerId: null };
+  _distractionBadgeReset = pendingReset;
+  pendingReset.timerId = setTimeout(() => {
+    void withBadgeWrite(async () => {
+      if (_distractionBadgeReset !== pendingReset) return;
+      _distractionBadgeReset = null;
+      await reconcileBadgeUnlocked({ expectedRunId: runId });
+    }).catch(() => {
+      console.warn('[TabKebab] Focus badge reset failed.');
+    });
+  }, 2000);
+}
+
 function getBadgePresentation(state, { distractionRunId = null } = {}) {
   if (state?.status === FocusStatus.ACTIVE &&
       distractionRunId && state.runId === distractionRunId) {
@@ -450,26 +473,36 @@ async function reconcileBadgeUnlocked({ expectedRunId = null, distraction = fals
 
     return {
       ...presentation,
+      authorityRunId: hasRunId(state) ? state.runId : null,
       expectedRunIsCurrent: !expectedRunId || presentation.runId === expectedRunId,
     };
   }
 }
 
 export async function updateBadge(state, expectedRunId = state?.runId ?? null) {
-  const result = await withBadgeWrite(() => reconcileBadgeUnlocked({ expectedRunId }));
-  return result.expectedRunIsCurrent;
+  return withBadgeWrite(async () => {
+    const result = await reconcileBadgeUnlocked({ expectedRunId });
+    const pendingReset = _distractionBadgeReset;
+    if (pendingReset && (
+      result.expectedRunIsCurrent ||
+      (pendingReset.runId === expectedRunId && result.authorityRunId === expectedRunId)
+    )) {
+      cancelDistractionBadgeReset();
+    }
+    return result.expectedRunIsCurrent;
+  });
 }
 
 export async function flashBadgeDistraction(runId) {
-  const result = await withBadgeWrite(() => reconcileBadgeUnlocked({
-    expectedRunId: runId,
-    distraction: true,
-  }));
-  if (!result.expectedRunIsCurrent || !result.distraction) return false;
-  setTimeout(async () => {
-    await updateBadge(null, runId);
-  }, 2000);
-  return true;
+  return withBadgeWrite(async () => {
+    const result = await reconcileBadgeUnlocked({
+      expectedRunId: runId,
+      distraction: true,
+    });
+    if (!result.expectedRunIsCurrent || !result.distraction) return false;
+    scheduleDistractionBadgeReset(runId);
+    return true;
+  });
 }
 
 // ── Start focus ──

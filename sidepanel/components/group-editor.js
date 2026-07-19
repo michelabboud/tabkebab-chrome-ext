@@ -75,20 +75,14 @@ export class GroupEditor {
     collapseAllBtn.className = 'action-btn secondary';
     collapseAllBtn.textContent = 'Collapse All';
     collapseAllBtn.addEventListener('click', async () => {
-      for (const g of groups) {
-        await this.send({ action: 'setGroupCollapsed', groupId: g.id, collapsed: true });
-      }
-      this.refresh();
+      await this.setAllChromeGroupsCollapsed(groups, true);
     });
 
     const expandAllBtn = document.createElement('button');
     expandAllBtn.className = 'action-btn secondary';
     expandAllBtn.textContent = 'Expand All';
     expandAllBtn.addEventListener('click', async () => {
-      for (const g of groups) {
-        await this.send({ action: 'setGroupCollapsed', groupId: g.id, collapsed: false });
-      }
-      this.refresh();
+      await this.setAllChromeGroupsCollapsed(groups, false);
     });
 
     const kebabAllBtn = document.createElement('button');
@@ -96,18 +90,11 @@ export class GroupEditor {
     kebabAllBtn.textContent = 'Kebab All';
     kebabAllBtn.addEventListener('click', async () => {
       kebabAllBtn.disabled = true;
-      let totalDiscarded = 0;
-      let totalSkipped = 0;
-      for (const g of groups) {
-        try {
-          const result = await this.send({ action: 'discardTabs', scope: 'group', groupId: g.id });
-          totalDiscarded += result.discarded;
-          totalSkipped += result.skipped;
-        } catch { /* ignore */ }
+      try {
+        await this.discardAllChromeGroups(groups);
+      } finally {
+        kebabAllBtn.disabled = false;
       }
-      showToast(`Kebab'd ${totalDiscarded} tabs (${totalSkipped} skipped)`, 'success');
-      kebabAllBtn.disabled = false;
-      this.refresh();
     });
 
     toolbar.appendChild(kebabAllBtn);
@@ -160,11 +147,7 @@ export class GroupEditor {
         e.stopPropagation();
         kebabGroupBtn.disabled = true;
         try {
-          const result = await this.send({ action: 'discardTabs', scope: 'group', groupId: group.id });
-          showToast(`Kebab'd ${result.discarded} tabs (${result.skipped} skipped)`, 'success');
-          this.refresh();
-        } catch {
-          showToast('Kebab failed', 'error');
+          await this.discardChromeGroup(group);
         } finally {
           kebabGroupBtn.disabled = false;
         }
@@ -179,8 +162,8 @@ export class GroupEditor {
         try {
           await this.send({ action: 'setKeepAwake', scope: 'group', groupId: group.id, keepAwake: true });
           showToast(`"${group.title}" tabs set to keep awake`, 'success');
-        } catch {
-          showToast('Failed to set keep awake', 'error');
+        } catch (err) {
+          showToast('Failed to set keep awake: ' + err.message, 'error');
         }
       });
 
@@ -193,11 +176,7 @@ export class GroupEditor {
         stashGroupBtn.disabled = true;
         stashGroupBtn.textContent = 'Stashing...';
         try {
-          const result = await this.send({ action: 'stashGroup', groupId: group.id });
-          showToast(`Stashed ${result.stash.tabCount} tabs from "${group.title}"`, 'success');
-          this.refresh();
-        } catch {
-          showToast('Stash failed', 'error');
+          await this.stashChromeGroup(group);
         } finally {
           stashGroupBtn.disabled = false;
           stashGroupBtn.textContent = 'Stash';
@@ -211,9 +190,13 @@ export class GroupEditor {
       collapseBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const newState = !group.collapsed;
-        await this.send({ action: 'setGroupCollapsed', groupId: group.id, collapsed: newState });
-        group.collapsed = newState;
-        collapseBtn.textContent = newState ? 'Expand' : 'Collapse';
+        try {
+          await this.send({ action: 'setGroupCollapsed', groupId: group.id, collapsed: newState });
+          group.collapsed = newState;
+          collapseBtn.textContent = newState ? 'Expand' : 'Collapse';
+        } catch (err) {
+          showToast('Failed to update group: ' + err.message, 'error');
+        }
       });
 
       const ungroupBtn = document.createElement('button');
@@ -222,10 +205,7 @@ export class GroupEditor {
       ungroupBtn.style.fontSize = '11px';
       ungroupBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const tabIds = group.tabs.map(t => t.id);
-        await this.send({ action: 'ungroupTabs', tabIds });
-        showToast(`Ungrouped "${group.title}"`, 'success');
-        this.refresh();
+        await this.ungroupChromeGroup(group);
       });
 
       const closeBtn = document.createElement('button');
@@ -242,9 +222,7 @@ export class GroupEditor {
           danger: true,
         });
         if (!ok) return;
-        await this.send({ action: 'closeTabs', tabIds });
-        showToast(`Closed ${tabIds.length} tabs from "${group.title}"`, 'success');
-        this.refresh();
+        await this.closeChromeGroup(group);
       });
 
       actions.appendChild(stashGroupBtn);
@@ -262,8 +240,12 @@ export class GroupEditor {
       for (const tab of group.tabs) {
         const row = document.createElement('div');
         row.className = 'chrome-group-tab';
-        row.addEventListener('click', () => {
-          this.send({ action: 'focusTab', tabId: tab.id });
+        row.addEventListener('click', async () => {
+          try {
+            await this.send({ action: 'focusTab', tabId: tab.id });
+          } catch (err) {
+            showToast('Failed to focus tab: ' + err.message, 'error');
+          }
         });
 
         const favicon = document.createElement('img');
@@ -644,17 +626,128 @@ export class GroupEditor {
     try {
       await this.refresh();
       return true;
-    } catch {
-      this.notify(`${committedMessage}, but the view could not refresh`, 'error');
+    } catch (err) {
+      this.notify(`${committedMessage}, but the view could not refresh: ${err.message}`, 'error');
       return false;
     }
+  }
+
+  async discardChromeGroup(group) {
+    let result;
+    try {
+      result = await this.send({ action: 'discardTabs', scope: 'group', groupId: group.id });
+    } catch (err) {
+      this.notify('Kebab failed: ' + err.message, 'error');
+      return false;
+    }
+    const message = `Kebab'd ${result.discarded} tabs (${result.skipped} skipped)`;
+    const refreshed = await this.refreshCommittedState(message);
+    if (refreshed) this.notify(message, 'success');
+    return true;
+  }
+
+  async discardAllChromeGroups(groups) {
+    let totalDiscarded = 0;
+    let totalSkipped = 0;
+    let committed = 0;
+    const failures = [];
+    for (const group of groups) {
+      try {
+        const result = await this.send({ action: 'discardTabs', scope: 'group', groupId: group.id });
+        totalDiscarded += result.discarded;
+        totalSkipped += result.skipped;
+        committed += 1;
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+
+    const message = `Kebab'd ${totalDiscarded} tabs (${totalSkipped} skipped)`;
+    const refreshed = committed > 0 ? await this.refreshCommittedState(message) : false;
+    if (failures.length > 0) {
+      this.notify(
+        `Kebab All incomplete — ${failures.length} group${failures.length === 1 ? '' : 's'} failed: ${failures[0].message}`,
+        'error',
+      );
+      return false;
+    }
+    if (refreshed) this.notify(message, 'success');
+    return true;
+  }
+
+  async stashChromeGroup(group) {
+    let result;
+    try {
+      result = await this.send({ action: 'stashGroup', groupId: group.id });
+    } catch (err) {
+      this.notify('Stash failed: ' + err.message, 'error');
+      return false;
+    }
+    const message = `Stashed ${result.stash.tabCount} tabs from "${group.title}"`;
+    const refreshed = await this.refreshCommittedState(message);
+    if (refreshed) this.notify(message, 'success');
+    return true;
+  }
+
+  async ungroupChromeGroup(group) {
+    const tabIds = group.tabs.map((tab) => tab.id);
+    try {
+      await this.send({ action: 'ungroupTabs', tabIds });
+    } catch (err) {
+      this.notify('Failed to ungroup tabs: ' + err.message, 'error');
+      return false;
+    }
+    const message = `Ungrouped "${group.title}"`;
+    const refreshed = await this.refreshCommittedState(message);
+    if (refreshed) this.notify(message, 'success');
+    return true;
+  }
+
+  async closeChromeGroup(group) {
+    const tabIds = group.tabs.map((tab) => tab.id);
+    try {
+      await this.send({ action: 'closeTabs', tabIds });
+    } catch (err) {
+      this.notify('Failed to close tabs: ' + err.message, 'error');
+      return false;
+    }
+    const message = `Closed ${tabIds.length} tabs from "${group.title}"`;
+    const refreshed = await this.refreshCommittedState(message);
+    if (refreshed) this.notify(message, 'success');
+    return true;
+  }
+
+  async setAllChromeGroupsCollapsed(groups, collapsed) {
+    const failures = [];
+    let committed = 0;
+    for (const group of groups) {
+      try {
+        await this.send({ action: 'setGroupCollapsed', groupId: group.id, collapsed });
+        committed += 1;
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+
+    const verb = collapsed ? 'Collapsed' : 'Expanded';
+    const message = `${verb} ${committed} group${committed === 1 ? '' : 's'}`;
+    const refreshed = committed > 0 ? await this.refreshCommittedState(message) : false;
+    if (failures.length > 0) {
+      this.notify(
+        `${verb} groups incomplete — ${failures.length} group${failures.length === 1 ? '' : 's'} failed: ${failures[0].message}`,
+        'error',
+      );
+      return false;
+    }
+    if (refreshed) this.notify(message, 'success');
+    return true;
   }
 
   async moveDroppedTab(tabUrl, targetGroupId) {
     try {
       await this.moveTabToGroup(tabUrl, targetGroupId);
-    } catch {
-      this.notify('Failed to move tab', 'error');
+    } catch (err) {
+      this.notify('Failed to move tab: ' + err.message, 'error');
       return false;
     }
     await this.refreshCommittedState('Tab moved');
@@ -664,8 +757,8 @@ export class GroupEditor {
   async addTabToGroup(tabUrl, targetGroupId, successMessage) {
     try {
       await this.moveTabToGroup(tabUrl, targetGroupId);
-    } catch {
-      this.notify('Failed to add tab to group', 'error');
+    } catch (err) {
+      this.notify('Failed to add tab to group: ' + err.message, 'error');
       return false;
     }
     const refreshed = await this.refreshCommittedState(successMessage);
@@ -686,8 +779,8 @@ export class GroupEditor {
 
     try {
       await this.send({ action: 'createManualGroup', name, color: colorSelect.value });
-    } catch {
-      this.notify('Failed to create group', 'error');
+    } catch (err) {
+      this.notify('Failed to create group: ' + err.message, 'error');
       return false;
     }
     nameInput.value = '';
@@ -704,8 +797,8 @@ export class GroupEditor {
         this.notify('Group was not deleted because it no longer exists', 'error');
         return false;
       }
-    } catch {
-      this.notify('Failed to delete group', 'error');
+    } catch (err) {
+      this.notify('Failed to delete group: ' + err.message, 'error');
       return false;
     }
     const successMessage = `Group "${name}" deleted`;
@@ -715,27 +808,27 @@ export class GroupEditor {
   }
 
   async applyToChrome(groupId) {
-    const groups = await this.getManualGroups();
-    const group = groups[groupId];
-    if (!group || group.tabUrls.length === 0) {
-      showToast('No tabs in this group', 'error');
-      return;
-    }
-
-    const allTabs = await this.send({ action: 'getTabs' });
-    const urls = new Set(group.tabUrls);
-    const tabIds = allTabs.filter(t => urls.has(t.url)).map(t => t.id);
-
-    if (tabIds.length === 0) {
-      showToast('No matching open tabs found', 'error');
-      return;
-    }
-
     try {
+      const groups = await this.getManualGroups();
+      const group = groups[groupId];
+      if (!group || group.tabUrls.length === 0) {
+        showToast('No tabs in this group', 'error');
+        return;
+      }
+
+      const allTabs = await this.send({ action: 'getTabs' });
+      const urls = new Set(group.tabUrls);
+      const tabIds = allTabs.filter(t => urls.has(t.url)).map(t => t.id);
+
+      if (tabIds.length === 0) {
+        showToast('No matching open tabs found', 'error');
+        return;
+      }
+
       await this.send({ action: 'createTabGroup', tabIds, title: group.name, color: group.color });
       showToast(`Applied "${group.name}" to Chrome`, 'success');
-    } catch {
-      showToast('Failed to apply group', 'error');
+    } catch (err) {
+      showToast('Failed to apply group: ' + err.message, 'error');
     }
   }
 

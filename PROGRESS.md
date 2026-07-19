@@ -2,13 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.12`
+- Repository version: `1.2.13`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–10 implemented; every portable export/import UI path now uses the bounded version-2 schema through one worker-owned FIFO lock, with transactional local/IndexedDB apply, exact rollback, effective defaults, and secret-free files
+- Implementation status: Tasks 1–11 implemented and independently code-reviewed; portable data remains bounded and transactional, every side-panel request/response command crosses one checked rejection boundary, direct promise-returning Chrome/Storage calls are owned, Ctrl+K validates grouped tabs plus current nested saved records with stale-work protection, and delayed Focus badge resets are queue-owned
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
-- Phase 2 status: `v1.2.11` is tagged with exact-commit CI green; Task 10 implementation, independent review, real-Chrome proof, documentation, and local deterministic gates are complete at `1.2.12`, while this task's commit/tag/push and exact-commit CI checkpoint remain
+- Phase 2 status: Tasks 7–11 implementation is complete at `1.2.13`; Task 10 is tagged and pushed at `v1.2.12`, while Task 11 code, independent review, regression evidence, documentation, deterministic gates, and documentation-updated terminal Chrome proof are complete. The `v1.2.13` commit/tag/push, exact-commit CI, and GitHub release remain
 
 ## Completed implementation slices
 
@@ -102,6 +102,16 @@
 - Focused verification is `79 pass / 0 fail / 576 assertions`; full and coverage runs are `478 pass / 0 fail / 2663 assertions`; syntax, whitespace, version, and dependency gates pass under Bun `1.3.11`. Coverage is `53.40%` functions and `53.94%` lines without a repository-wide threshold. Independent adversarial and worker/lock reviews report no remaining production findings.
 - Chrome 148 exercised the production panel download and physical-file import against synthetic data, restored all eight local sections plus IndexedDB, found zero forbidden export keys, preserved unrelated state, reached no external network, and removed all disposable resources. The exact terminal tracked tree is recorded in the gitdir-local Task 10 report after tracked documentation/version files are frozen.
 
+### Task 11 — Checked side-panel messaging and grouped global search (`1.2.13`)
+
+- Routed every side-panel request/response command through `sendOrThrow()`, which rejects background `{ error }` responses with their exact safe message, preserves native transport rejection, and accepts successful values including `null`. Runtime broadcasts, worker progress events, and long-lived Chrome-AI ports remain separate event boundaries.
+- Added import-safe exact prototype adapters across all request/response component classes; only Global Search retains its fixed sender injection. Toast lookup is lazy, so all controller modules load without a document.
+- Audited the exact 15-file side-panel inventory, including runtime, Storage-wrapper, and direct promise-returning Chrome calls. Success feedback and optimistic changes follow checked resolution; committed refresh failures preserve recovery actions; destructive commands and search loads/activations use generation ownership so stale settlements cannot replace newer UI.
+- Restored open-tab search by validating and flattening the worker's ordered `{ domain, tabs }[]` response and validating current stash/session `windows[].tabs` records before cache commit. Rejected, obsolete, or malformed shapes clear all result caches and render one `role="alert"` unavailable row; valid empty/no-match data remains `No results found`.
+- The terminal full-suite gate exposed a two-second Focus distraction-reset callback escaping its Chrome context. The reset is now identity-owned inside the badge queue: current authoritative repaint cancels it, rapid distractions atomically re-arm it, a fired stale callback revalidates after queue entry, and reset rejection is caught with generic logging. Focused RED was `52 pass / 2 fail / 151 assertions`; the queue-race regression was RED at `0 pass / 1 fail / 2 assertions`.
+- Final evidence is `62 pass / 0 fail / 277 assertions` side-panel focused, `115 pass / 0 fail / 656 assertions` affected, `56 pass / 0 fail / 164 assertions` Focus lifecycle, `541 pass / 0 fail / 2966 assertions` in both full and coverage runs, and `2 pass / 0 fail / 100 assertions` for syntax. Coverage is `52.52%` functions and `51.06%` lines; raw-runtime, 15-file request, direct-Chrome, Storage, whitespace, version, bounded Focus-core scope, and zero-dependency gates pass under Bun `1.3.11`.
+- Two independent side-panel reviews found no Critical, Important, or Minor issue at pre-documentation tree `c925bf65dfdabbb0358ab5a0d5570192a8eeafcc`; independent timer analysis and follow-up concurrency review drove the final bounded repair. Chrome 148 then passed the tree-hash-guarded production panel/worker fixture after tracked evidence freeze: one natural cleanup error produced one safe failure and no success/optimistic/unhandled effect; ordered grouped tabs and current nested stash/session matches rendered in Ctrl+K; valid no-match stayed distinct from unavailable; no request reached the network; and every disposable resource was removed. Exact terminal tree/hash counters live in the gitdir-local report.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -130,4 +140,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Commit Task 10, annotate `v1.2.12`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 11 starts. Task 10 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Freeze and independently review the Task 11 tree, commit it, annotate `v1.2.13`, atomically push `main` plus the task tag, verify exact-commit GitHub Actions, and create the Phase 2 GitHub release with Drive v2, deletion convergence, portable data, checked messaging, and grouped-search notes. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

@@ -2,6 +2,7 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { sendOrThrow } from '../message-client.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -119,31 +120,35 @@ export class TabList {
 
   // ── Collapse / Expand ──
 
-  collapseAll() {
+  async collapseAll() {
     for (const key of this.allKeys) {
       this.collapsed.add(key);
     }
-    this.render(this.lastGroups);
+    try {
+      await this.render(this.lastGroups);
+    } catch (err) {
+      showToast('Failed to collapse tab groups: ' + err.message, 'error');
+    }
   }
 
-  expandAll() {
+  async expandAll() {
     this.collapsed.clear();
-    this.render(this.lastGroups);
+    try {
+      await this.render(this.lastGroups);
+    } catch (err) {
+      showToast('Failed to expand tab groups: ' + err.message, 'error');
+    }
   }
 
   // ── Tab list rendering ──
 
   async refresh() {
-    try {
-      const [groups, keepAwakeList] = await Promise.all([
-        this.send({ action: 'getGroupedTabs' }),
-        this.send({ action: 'getKeepAwakeList' }),
-      ]);
-      this.keepAwakeDomains = new Set(keepAwakeList || []);
-      this.render(groups);
-    } catch (err) {
-      showToast('Failed to load tabs', 'error');
-    }
+    const [groups, keepAwakeList] = await Promise.all([
+      this.send({ action: 'getGroupedTabs' }),
+      this.send({ action: 'getKeepAwakeList' }),
+    ]);
+    this.keepAwakeDomains = new Set(keepAwakeList || []);
+    await this.render(groups);
   }
 
   async render(groups) {
@@ -281,10 +286,10 @@ export class TabList {
         stashBtn.textContent = 'Stashing...';
         try {
           const result = await this.send({ action: 'stashDomain', domain: group.domain });
+          if (!await this.refreshCommittedState('Tabs were stashed')) return;
           showToast(`Stashed ${result.stash.tabCount} tabs from ${group.domain}`, 'success');
-          this.refresh();
-        } catch {
-          showToast('Stash failed', 'error');
+        } catch (err) {
+          showToast('Stash failed: ' + err.message, 'error');
         } finally {
           stashBtn.disabled = false;
           stashBtn.textContent = 'Stash';
@@ -321,10 +326,10 @@ export class TabList {
         closeBtn.disabled = true;
         try {
           await this.send({ action: 'closeTabs', tabIds });
+          if (!await this.refreshCommittedState('Domain tabs were closed')) return;
           showToast(`Closed ${tabIds.length} tabs from ${group.domain}`, 'success');
-          this.refresh();
-        } catch {
-          showToast('Close failed', 'error');
+        } catch (err) {
+          showToast('Close failed: ' + err.message, 'error');
           closeBtn.disabled = false;
         }
       });
@@ -430,8 +435,12 @@ export class TabList {
     closeBtn.title = 'Close tab';
     closeBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await this.send({ action: 'closeTabs', tabIds: [tab.id] });
-      this.refresh();
+      try {
+        await this.send({ action: 'closeTabs', tabIds: [tab.id] });
+        await this.refreshCommittedState('Tab was closed');
+      } catch (err) {
+        showToast('Failed to close tab: ' + err.message, 'error');
+      }
     });
 
     item.appendChild(favicon);
@@ -447,8 +456,12 @@ export class TabList {
 
     item.appendChild(closeBtn);
 
-    item.addEventListener('click', () => {
-      this.send({ action: 'focusTab', tabId: tab.id });
+    item.addEventListener('click', async () => {
+      try {
+        await this.send({ action: 'focusTab', tabId: tab.id });
+      } catch (err) {
+        showToast('Failed to focus tab: ' + err.message, 'error');
+      }
     });
 
     return item;
@@ -461,6 +474,13 @@ export class TabList {
 
     try {
       const result = await this.send({ action: 'applyDomainGroups' });
+      try {
+        await this.refresh();
+      } catch (err) {
+        this.hideProgress();
+        showToast('Tabs were grouped, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
 
       if (result && result.alreadyOrganized) {
         this.showDone('Already organized — no moves needed');
@@ -477,10 +497,9 @@ export class TabList {
         showToast('Tabs grouped by domain', 'success');
       }
 
-      this.refresh();
-    } catch {
+    } catch (err) {
       this.hideProgress();
-      showToast('Failed to group tabs', 'error');
+      showToast('Failed to group tabs: ' + err.message, 'error');
     } finally {
       this.groupBtn.disabled = false;
       this.ungroupBtn.disabled = false;
@@ -495,6 +514,13 @@ export class TabList {
 
     try {
       const result = await this.send({ action: 'applySmartGroups' });
+      try {
+        await this.refresh();
+      } catch (err) {
+        this.hideProgress();
+        showToast('Tabs were smart-grouped, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
 
       if (result && result.alreadyOrganized) {
         this.showDone('Already organized — no moves needed');
@@ -511,10 +537,9 @@ export class TabList {
         showToast('Tabs smart-grouped by AI', 'success');
       }
 
-      this.refresh();
-    } catch {
+    } catch (err) {
       this.hideProgress();
-      showToast('Smart grouping failed', 'error');
+      showToast('Smart grouping failed: ' + err.message, 'error');
     } finally {
       if (this.smartGroupBtn) this.smartGroupBtn.disabled = false;
       this.groupBtn.disabled = false;
@@ -550,8 +575,8 @@ export class TabList {
           }
         }
       }
-    } catch {
-      showToast('Failed to summarize tabs', 'error');
+    } catch (err) {
+      showToast('Failed to summarize tabs: ' + err.message, 'error');
     } finally {
       if (btn) {
         btn.textContent = '\u2139'; // info icon
@@ -564,12 +589,17 @@ export class TabList {
     if (this.kebabAllBtn) this.kebabAllBtn.disabled = true;
     try {
       const result = await this.send({ action: 'discardTabs', scope: 'all' });
+      try {
+        await this.refresh();
+      } catch (err) {
+        showToast('Tabs were kebabed, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
       const msg = `Kebab'd ${result.discarded} tab${result.discarded !== 1 ? 's' : ''}`;
       const extra = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
       showToast(msg + extra, 'success');
-      this.refresh();
-    } catch {
-      showToast('Kebab failed', 'error');
+    } catch (err) {
+      showToast('Kebab failed: ' + err.message, 'error');
     } finally {
       if (this.kebabAllBtn) this.kebabAllBtn.disabled = false;
     }
@@ -578,12 +608,17 @@ export class TabList {
   async kebabDomain(domain) {
     try {
       const result = await this.send({ action: 'discardTabs', scope: 'domain', domain });
+      try {
+        await this.refresh();
+      } catch (err) {
+        showToast('Domain tabs were kebabed, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
       const msg = `Kebab'd ${result.discarded} tab${result.discarded !== 1 ? 's' : ''} from ${domain}`;
       const extra = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
       showToast(msg + extra, 'success');
-      this.refresh();
-    } catch {
-      showToast('Kebab failed', 'error');
+    } catch (err) {
+      showToast('Kebab failed: ' + err.message, 'error');
     }
   }
 
@@ -592,14 +627,18 @@ export class TabList {
       await this.send({ action: 'setKeepAwake', scope: 'domain', domain, keepAwake });
       if (keepAwake) {
         this.keepAwakeDomains.add(domain);
-        showToast(`${domain} will stay awake`, 'success');
       } else {
         this.keepAwakeDomains.delete(domain);
-        showToast(`${domain} can now sleep`, 'success');
       }
-      this.render(this.lastGroups);
-    } catch {
-      showToast('Failed to update keep-awake', 'error');
+      try {
+        await this.render(this.lastGroups);
+      } catch (err) {
+        showToast('Keep-awake changed, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
+      showToast(keepAwake ? `${domain} will stay awake` : `${domain} can now sleep`, 'success');
+    } catch (err) {
+      showToast('Failed to update keep-awake: ' + err.message, 'error');
     }
   }
 
@@ -610,15 +649,25 @@ export class TabList {
       if (grouped.length > 0) {
         await this.send({ action: 'ungroupTabs', tabIds: grouped.map(t => t.id) });
       }
+      if (!await this.refreshCommittedState('Tabs were ungrouped')) return;
       showToast('All tabs ungrouped', 'success');
-      this.refresh();
-    } catch {
-      showToast('Failed to ungroup tabs', 'error');
+    } catch (err) {
+      showToast('Failed to ungroup tabs: ' + err.message, 'error');
+    }
+  }
+
+  async refreshCommittedState(committedMessage) {
+    try {
+      await this.refresh();
+      return true;
+    } catch (err) {
+      showToast(`${committedMessage}, but the view could not refresh: ${err.message}`, 'error');
+      return false;
     }
   }
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 
   escapeHtml(str) {

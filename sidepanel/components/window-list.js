@@ -2,6 +2,7 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { sendOrThrow } from '../message-client.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -100,21 +101,20 @@ export class WindowList {
   // ── Data fetching ──
 
   async refresh() {
+    // Threshold settings are an intentional best-effort enhancement; window
+    // data remains useful with the existing defaults.
     try {
-      // Fetch settings for tab limit thresholds
-      try {
-        const settings = await this.send({ action: 'getSettings' });
-        if (settings) {
-          this.maxTabs = settings.maxTabsPerWindow || 50;
-          this.recommendedTabs = settings.recommendedTabsPerWindow || 20;
-        }
-      } catch (e) { console.warn('[TabKebab] settings fetch for tab limits failed:', e); }
-
-      const data = await this.send({ action: 'getWindowStats' });
-      this.renderWindows(data.windows);
+      const settings = await this.send({ action: 'getSettings' });
+      if (settings) {
+        this.maxTabs = settings.maxTabsPerWindow || 50;
+        this.recommendedTabs = settings.recommendedTabsPerWindow || 20;
+      }
     } catch (err) {
-      showToast('Failed to load windows', 'error');
+      console.warn('[TabKebab] settings fetch for tab limits failed:', err);
     }
+
+    const data = await this.send({ action: 'getWindowStats' });
+    this.renderWindows(data.windows);
   }
 
   // ── Collapse / Expand ──
@@ -244,10 +244,10 @@ export class WindowList {
       stashBtn.textContent = 'Stashing...';
       try {
         const result = await this.send({ action: 'stashWindow', windowId: win.windowId, windowNumber: win.windowNumber });
+        if (!await this.refreshCommittedState('Window tabs were stashed')) return;
         showToast(`Stashed ${result.stash.tabCount} tabs from Window ${win.windowNumber}`, 'success');
-        this.refresh();
-      } catch {
-        showToast('Stash failed', 'error');
+      } catch (err) {
+        showToast('Stash failed: ' + err.message, 'error');
       } finally {
         stashBtn.disabled = false;
         stashBtn.textContent = 'Stash';
@@ -265,10 +265,10 @@ export class WindowList {
       kebabBtn.disabled = true;
       try {
         const result = await this.send({ action: 'discardTabs', scope: 'window', windowId: win.windowId });
+        if (!await this.refreshCommittedState('Window tabs were kebabed')) return;
         showToast(`Kebab'd ${result.discarded} tabs (${result.skipped} skipped)`, 'success');
-        this.refresh();
-      } catch {
-        showToast('Kebab failed', 'error');
+      } catch (err) {
+        showToast('Kebab failed: ' + err.message, 'error');
       } finally {
         kebabBtn.disabled = false;
       }
@@ -293,10 +293,10 @@ export class WindowList {
         closeBtn.disabled = true;
         try {
           await chrome.windows.remove(win.windowId);
+          if (!await this.refreshCommittedState('Window was closed')) return;
           showToast(`Closed Window ${win.windowNumber}`, 'success');
-          this.refresh();
-        } catch {
-          showToast('Close failed', 'error');
+        } catch (err) {
+          showToast('Close failed: ' + err.message, 'error');
           closeBtn.disabled = false;
         }
       });
@@ -393,15 +393,25 @@ export class WindowList {
     const focusBtn = document.createElement('button');
     focusBtn.className = 'window-focus-btn';
     focusBtn.textContent = 'Bring to Front';
-    focusBtn.addEventListener('click', (e) => {
+    focusBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      chrome.windows.update(win.windowId, { focused: true });
+      await this.bringWindowToFront(win.windowId);
     });
     body.appendChild(focusBtn);
 
     card.appendChild(header);
     card.appendChild(body);
     return card;
+  }
+
+  async bringWindowToFront(windowId) {
+    try {
+      await chrome.windows.update(windowId, { focused: true });
+      return true;
+    } catch {
+      showToast('Could not bring window to front — try again.', 'error');
+      return false;
+    }
   }
 
   createGroupSection(windowId, group) {
@@ -536,8 +546,12 @@ export class WindowList {
     item.appendChild(favicon);
     item.appendChild(title);
 
-    item.addEventListener('click', () => {
-      this.send({ action: 'focusTab', tabId: tab.id });
+    item.addEventListener('click', async () => {
+      try {
+        await this.send({ action: 'focusTab', tabId: tab.id });
+      } catch (err) {
+        showToast('Failed to focus tab: ' + err.message, 'error');
+      }
     });
 
     return item;
@@ -551,6 +565,13 @@ export class WindowList {
 
     try {
       const result = await this.send({ action: 'consolidateWindows' });
+      try {
+        await this.refresh();
+      } catch (err) {
+        this.hideProgress();
+        showToast('Windows were consolidated, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
 
       if (result && result.tabsMoved === 0 && result.windowsConsolidated === 0) {
         this.showDone('No under-utilized windows to consolidate');
@@ -566,16 +587,25 @@ export class WindowList {
         this.hideProgress();
       }
 
-      this.refresh();
-    } catch {
+    } catch (err) {
       this.hideProgress();
-      showToast('Failed to consolidate windows', 'error');
+      showToast('Failed to consolidate windows: ' + err.message, 'error');
     } finally {
       this.consolidateBtn.disabled = false;
     }
   }
 
+  async refreshCommittedState(committedMessage) {
+    try {
+      await this.refresh();
+      return true;
+    } catch (err) {
+      showToast(`${committedMessage}, but the view could not refresh: ${err.message}`, 'error');
+      return false;
+    }
+  }
+
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 }

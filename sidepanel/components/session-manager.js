@@ -106,9 +106,11 @@ export class SessionManager {
     try {
       const sessions = await this.send({ action: 'listSessions' });
       this.render(sessions);
+      this._lastRefreshError = null;
       return true;
-    } catch {
-      if (notifyFailure) this.notify('Failed to load sessions', 'error');
+    } catch (err) {
+      this._lastRefreshError = err;
+      if (notifyFailure) this.notify('Failed to load sessions: ' + err.message, 'error');
       return false;
     }
   }
@@ -336,11 +338,15 @@ export class SessionManager {
 
     try {
       await this.send({ action: 'saveSession', name });
-      showToast(`Session "${name}" saved`, 'success');
       input.value = '';
-      this.refresh();
-    } catch {
-      showToast('Failed to save session', 'error');
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (!refreshed) {
+        showToast(`Session "${name}" was saved, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`, 'error');
+        return;
+      }
+      showToast(`Session "${name}" saved`, 'success');
+    } catch (err) {
+      showToast('Failed to save session: ' + err.message, 'error');
     }
   }
 
@@ -361,11 +367,18 @@ export class SessionManager {
     try {
       const document = await readPortableImportFile(file, ['full', 'sessions']);
       const result = await this.send({ action: 'importPortableData', document });
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (!refreshed) {
+        showToast(
+          `Data was imported, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+          'error',
+        );
+        return;
+      }
       showToast(
         formatPortableImportSummary(result, 'Data import'),
         portableImportToastType(result),
       );
-      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
     } finally {

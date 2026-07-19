@@ -1,13 +1,80 @@
 // global-search.js — Global search overlay across tabs, stashes, and sessions
 
+import { sendOrThrow } from '../message-client.js';
+
+export const SEARCH_UNAVAILABLE_MESSAGE = 'Search unavailable — try again.';
+const TAB_ACTIVATION_FAILURE_MESSAGE = 'Could not open tab — try again.';
+
+function tabsFromWindows(record) {
+  if (!Array.isArray(record?.windows)) return [];
+  return record.windows.flatMap((window) => Array.isArray(window?.tabs) ? window.tabs : []);
+}
+
+function tabMatches(tab, query) {
+  return (tab?.title && tab.title.toLowerCase().includes(query)) ||
+    (tab?.url && tab.url.toLowerCase().includes(query));
+}
+
+function validateCurrentWindowRecords(records) {
+  if (!Array.isArray(records)) throw new Error('Saved search records are unavailable');
+  for (const record of records) {
+    if (
+      record === null ||
+      typeof record !== 'object' ||
+      Array.isArray(record) ||
+      !Object.hasOwn(record, 'windows') ||
+      !Array.isArray(record.windows)
+    ) {
+      throw new Error('Saved search records are unavailable');
+    }
+    for (const window of record.windows) {
+      if (
+        window === null ||
+        typeof window !== 'object' ||
+        Array.isArray(window) ||
+        !Object.hasOwn(window, 'tabs') ||
+        !Array.isArray(window.tabs)
+      ) {
+        throw new Error('Saved search records are unavailable');
+      }
+    }
+  }
+  return records;
+}
+
+export function flattenGroupedTabs(groupedTabs) {
+  if (!Array.isArray(groupedTabs) || Object.hasOwn(groupedTabs, 'error')) {
+    throw new Error('Grouped tabs are unavailable');
+  }
+
+  const tabs = [];
+  for (const group of groupedTabs) {
+    if (
+      group === null ||
+      typeof group !== 'object' ||
+      Array.isArray(group) ||
+      !Object.hasOwn(group, 'tabs') ||
+      !Array.isArray(group.tabs)
+    ) {
+      throw new Error('Grouped tabs are unavailable');
+    }
+    tabs.push(...group.tabs);
+  }
+  return tabs;
+}
+
 export class GlobalSearch {
-  constructor() {
+  constructor({ send = sendOrThrow } = {}) {
+    this.send = send;
     this.overlay = null;
     this.input = null;
     this.resultsEl = null;
     this.activeIndex = -1;
     this.flatItems = [];
     this._debounceTimer = null;
+    this._loadState = 'idle';
+    this._lifecycleGeneration = 0;
+    this._fetchGeneration = 0;
 
     // Cached data from parallel fetches
     this._tabs = [];
@@ -25,6 +92,7 @@ export class GlobalSearch {
 
   open() {
     if (this.overlay) return;
+    this._lifecycleGeneration += 1;
 
     this.overlay = document.createElement('div');
     this.overlay.id = 'search-overlay';
@@ -54,11 +122,12 @@ export class GlobalSearch {
     });
 
     this.input.focus();
-    this._fetchAll();
+    void this._fetchAll(this._lifecycleGeneration);
   }
 
   close() {
     if (!this.overlay) return;
+    this._lifecycleGeneration += 1;
     this.overlay.remove();
     this.overlay = null;
     this.input = null;
@@ -68,45 +137,69 @@ export class GlobalSearch {
     this._tabs = [];
     this._stashes = [];
     this._sessions = [];
+    this._loadState = 'idle';
     clearTimeout(this._debounceTimer);
   }
 
-  async _fetchAll() {
+  async _fetchAll(lifecycleGeneration = this._lifecycleGeneration) {
+    const fetchGeneration = ++this._fetchGeneration;
+    const overlay = this.overlay;
+    const ownsView = () =>
+      this._lifecycleGeneration === lifecycleGeneration &&
+      this._fetchGeneration === fetchGeneration &&
+      this.overlay === overlay;
+    this._loadState = 'loading';
     try {
       const [tabData, stashes, sessions] = await Promise.all([
-        chrome.runtime.sendMessage({ action: 'getGroupedTabs' }),
-        chrome.runtime.sendMessage({ action: 'listStashes' }),
-        chrome.runtime.sendMessage({ action: 'listSessions' }),
+        this.send({ action: 'getGroupedTabs' }),
+        this.send({ action: 'listStashes' }),
+        this.send({ action: 'listSessions' }),
       ]);
 
-      // Flatten grouped tabs
-      this._tabs = [];
-      if (tabData?.groups) {
-        for (const group of tabData.groups) {
-          if (group.tabs) {
-            this._tabs.push(...group.tabs);
-          }
-        }
-      }
-
-      this._stashes = stashes || [];
-      this._sessions = sessions || [];
+      const tabs = flattenGroupedTabs(tabData);
+      const validStashes = validateCurrentWindowRecords(stashes);
+      const validSessions = validateCurrentWindowRecords(sessions);
+      if (!ownsView()) return false;
+      this._tabs = tabs;
+      this._stashes = validStashes;
+      this._sessions = validSessions;
+      this._loadState = 'ready';
 
       // Render initial state (empty query shows all)
       this._search(this.input?.value || '');
+      return true;
     } catch {
-      // Data not available yet
+      if (!ownsView()) return false;
+      this._tabs = [];
+      this._stashes = [];
+      this._sessions = [];
+      this.flatItems = [];
+      this.activeIndex = -1;
+      this._loadState = 'unavailable';
+      this.renderUnavailable(SEARCH_UNAVAILABLE_MESSAGE);
+      return false;
     }
+  }
+
+  renderUnavailable(message) {
+    if (!this.resultsEl) return;
+    const empty = document.createElement('div');
+    empty.className = 'search-empty';
+    empty.setAttribute('role', 'alert');
+    empty.textContent = message;
+    this.resultsEl.replaceChildren(empty);
   }
 
   _onInput() {
     clearTimeout(this._debounceTimer);
+    if (this._loadState !== 'ready') return;
     this._debounceTimer = setTimeout(() => {
       this._search(this.input?.value || '');
     }, 150);
   }
 
   _search(query) {
+    if (this._loadState !== 'ready') return;
     const q = query.trim().toLowerCase();
 
     // Filter open tabs
@@ -117,41 +210,26 @@ export class GlobalSearch {
     );
 
     // Filter stashes — match if any tab inside matches, or the stash name matches
-    const matchedStashes = this._stashes.filter(s => {
+    const matchedStashes = this._stashes.map((stash) => {
+      const allTabs = tabsFromWindows(stash);
+      const matchCount = q ? allTabs.filter((tab) => tabMatches(tab, q)).length : allTabs.length;
+      const totalTabs = Number.isInteger(stash?.tabCount) && stash.tabCount >= 0
+        ? stash.tabCount
+        : allTabs.length;
+      return { ...stash, _matchCount: matchCount, _totalTabs: totalTabs };
+    }).filter((stash) => {
       if (!q) return true;
-      if (s.name && s.name.toLowerCase().includes(q)) return true;
-      return (s.tabs || []).some(t =>
-        (t.title && t.title.toLowerCase().includes(q)) ||
-        (t.url && t.url.toLowerCase().includes(q))
-      );
-    }).map(s => {
-      const matchCount = q
-        ? (s.tabs || []).filter(t =>
-            (t.title && t.title.toLowerCase().includes(q)) ||
-            (t.url && t.url.toLowerCase().includes(q))
-          ).length
-        : s.tabs?.length || 0;
-      return { ...s, _matchCount: matchCount };
+      return (stash.name && stash.name.toLowerCase().includes(q)) || stash._matchCount > 0;
     });
 
     // Filter sessions — match if any tab inside matches, or the session name matches
-    const matchedSessions = this._sessions.filter(s => {
+    const matchedSessions = this._sessions.map((session) => {
+      const allTabs = tabsFromWindows(session);
+      const matchCount = q ? allTabs.filter((tab) => tabMatches(tab, q)).length : allTabs.length;
+      return { ...session, _matchCount: matchCount, _totalTabs: allTabs.length };
+    }).filter((session) => {
       if (!q) return true;
-      if (s.name && s.name.toLowerCase().includes(q)) return true;
-      const allTabs = (s.windows || []).flatMap(w => w.tabs || []);
-      return allTabs.some(t =>
-        (t.title && t.title.toLowerCase().includes(q)) ||
-        (t.url && t.url.toLowerCase().includes(q))
-      );
-    }).map(s => {
-      const allTabs = (s.windows || []).flatMap(w => w.tabs || []);
-      const matchCount = q
-        ? allTabs.filter(t =>
-            (t.title && t.title.toLowerCase().includes(q)) ||
-            (t.url && t.url.toLowerCase().includes(q))
-          ).length
-        : allTabs.length;
-      return { ...s, _matchCount: matchCount, _totalTabs: allTabs.length };
+      return (session.name && session.name.toLowerCase().includes(q)) || session._matchCount > 0;
     });
 
     this._renderResults(matchedTabs, matchedStashes, matchedSessions);
@@ -225,13 +303,13 @@ export class GlobalSearch {
 
         const meta = document.createElement('span');
         meta.className = 'search-item-url';
-        const tabCount = stash.tabs?.length || 0;
+        const tabCount = stash._totalTabs || 0;
         const parts = [`${tabCount} tab${tabCount !== 1 ? 's' : ''}`];
         if (stash._matchCount && stash._matchCount !== tabCount) {
           parts.push(`${stash._matchCount} matched`);
         }
-        if (stash.date) {
-          parts.push(this._formatDate(stash.date));
+        if (stash.createdAt) {
+          parts.push(this._formatDate(stash.createdAt));
         }
         meta.textContent = parts.join(' \u00B7 ');
 
@@ -263,8 +341,8 @@ export class GlobalSearch {
         if (session._matchCount && session._matchCount !== totalTabs) {
           parts.push(`${session._matchCount} matched`);
         }
-        if (session.date) {
-          parts.push(this._formatDate(session.date));
+        if (session.createdAt) {
+          parts.push(this._formatDate(session.createdAt));
         }
         meta.textContent = parts.join(' \u00B7 ');
 
@@ -275,7 +353,7 @@ export class GlobalSearch {
 
     // Attach click handlers to all items
     for (const item of this.flatItems) {
-      item.addEventListener('click', () => this._activateResult(item));
+      item.addEventListener('click', () => { void this._activateResult(item); });
     }
   }
 
@@ -308,24 +386,51 @@ export class GlobalSearch {
     }
   }
 
-  _activateResult(item) {
+  renderActionFailure(message) {
+    if (!this.resultsEl) return;
+    let error = this.resultsEl.querySelector('.search-action-error');
+    if (!error) {
+      error = document.createElement('div');
+      error.className = 'search-action-error';
+      error.setAttribute('role', 'alert');
+      this.resultsEl.prepend(error);
+    }
+    error.textContent = message;
+  }
+
+  async _activateResult(item) {
     const type = item.dataset.type;
+    const lifecycleGeneration = this._lifecycleGeneration;
+    const overlay = this.overlay;
+    const ownsView = () =>
+      this._lifecycleGeneration === lifecycleGeneration && this.overlay === overlay;
 
     if (type === 'tab') {
       const tabId = parseInt(item.dataset.tabId, 10);
       const windowId = parseInt(item.dataset.windowId, 10);
-      chrome.tabs.update(tabId, { active: true });
-      chrome.windows.update(windowId, { focused: true });
-      this.close();
+      try {
+        await chrome.tabs.update(tabId, { active: true });
+        if (!ownsView()) return false;
+        await chrome.windows.update(windowId, { focused: true });
+        if (!ownsView()) return false;
+        this.close();
+        return true;
+      } catch {
+        if (ownsView()) this.renderActionFailure(TAB_ACTIVATION_FAILURE_MESSAGE);
+        return false;
+      }
     } else if (type === 'stash') {
       this.close();
       const btn = document.querySelector('.tab-nav [data-view="stash"]');
       if (btn) btn.click();
+      return true;
     } else if (type === 'session') {
       this.close();
       const btn = document.querySelector('.tab-nav [data-view="sessions"]');
       if (btn) btn.click();
+      return true;
     }
+    return false;
   }
 
   _onKeydown(e) {
@@ -351,7 +456,7 @@ export class GlobalSearch {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (this.activeIndex >= 0 && this.activeIndex < this.flatItems.length) {
-        this._activateResult(this.flatItems[this.activeIndex]);
+        void this._activateResult(this.flatItems[this.activeIndex]);
       }
       return;
     }

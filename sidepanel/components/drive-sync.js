@@ -7,9 +7,8 @@ import { Storage } from '../../core/storage.js';
 import { sendOrThrow } from '../message-client.js';
 
 export class DriveSync {
-  constructor(rootEl, { send = sendOrThrow, notify = showToast, confirm = showConfirm } = {}) {
+  constructor(rootEl, { notify = showToast, confirm = showConfirm } = {}) {
     this.root = rootEl;
-    this.sendMessage = send;
     this.notify = notify;
     this.confirm = confirm;
     this.statusEl = rootEl.querySelector('#drive-status');
@@ -82,8 +81,13 @@ export class DriveSync {
       }
 
       await Storage.set('driveSync', { connected: true, lastSyncedAt: null, driveFileId: null });
+      try {
+        await this.refresh();
+      } catch (err) {
+        this.notify('Connected to Google Drive, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
       this.notify(`Connected to Google Drive (profile: ${profileName})`, 'success');
-      this.refresh();
       await this.promptLoadSettings();
     } catch (err) {
       this.notify('Failed to connect: ' + err.message, 'error');
@@ -97,7 +101,7 @@ export class DriveSync {
     let successMessage = '';
 
     try {
-      const syncResult = await this.sendMessage({ action: 'syncDriveState' });
+      const syncResult = await this.send({ action: 'syncDriveState' });
       const parts = [];
       if (syncResult.sessions > 0) parts.push(`${syncResult.sessions} sessions`);
       if (syncResult.stashes > 0) parts.push(`${syncResult.stashes} stashes`);
@@ -131,8 +135,13 @@ export class DriveSync {
     try {
       await disconnect();
       await Storage.set('driveSync', { connected: false, lastSyncedAt: null, driveFileId: null });
+      try {
+        await this.refresh();
+      } catch (err) {
+        this.notify('Disconnected from Google Drive, but the view could not refresh: ' + err.message, 'error');
+        return;
+      }
       this.notify('Disconnected from Google Drive', 'success');
-      this.refresh();
     } catch (err) {
       this.notify('Failed to disconnect: ' + err.message, 'error');
     }
@@ -157,8 +166,13 @@ export class DriveSync {
           });
           if (ok) {
             await this.applyRemoteSettings(remoteData.settings);
+            try {
+              await this.refresh();
+            } catch (err) {
+              this.notify('Settings loaded from Drive, but the view could not refresh: ' + err.message, 'error');
+              return;
+            }
             this.notify('Settings loaded from Drive. Use "Undo Last Settings Import" to revert.', 'success');
-            this.refresh();
           }
           return;
         }
@@ -184,38 +198,49 @@ export class DriveSync {
           });
           if (ok) {
             await this.applyRemoteSettings(data.settings);
+            try {
+              await this.refresh();
+            } catch (err) {
+              this.notify(`Settings imported from "${profile.name}", but the view could not refresh: ${err.message}`, 'error');
+              return;
+            }
             this.notify(`Settings imported from "${profile.name}". Use "Undo Last Settings Import" to revert.`, 'success');
-            this.refresh();
           }
           return;
         }
       }
-    } catch (e) {
-      console.warn('[TabKebab] post-connect settings sync failed:', e);
+    } catch (err) {
+      this.notify('Drive settings check failed: ' + err.message, 'error');
     }
   }
 
   async applyRemoteSettings(settings) {
-    return this.sendMessage({ action: 'importDriveSettings', settings });
+    return this.send({ action: 'importDriveSettings', settings });
   }
 
   async undoSettingsLoad() {
-    const prev = await Storage.get('tabkebabSettingsPrevious');
-    if (!prev) {
-      this.notify('No previous settings to restore', 'error');
+    let ok;
+    try {
+      const prev = await Storage.get('tabkebabSettingsPrevious');
+      if (!prev) {
+        this.notify('No previous settings to restore', 'error');
+        return false;
+      }
+
+      ok = await this.confirm({
+        title: 'Undo Settings Import',
+        message: 'Restore your previous settings?',
+        confirmLabel: 'Restore',
+        cancelLabel: 'Cancel',
+      });
+    } catch {
+      this.notify('Settings restore failed — try again.', 'error');
       return false;
     }
-
-    const ok = await this.confirm({
-      title: 'Undo Settings Import',
-      message: 'Restore your previous settings?',
-      confirmLabel: 'Restore',
-      cancelLabel: 'Cancel',
-    });
     if (!ok) return false;
 
     try {
-      await this.sendMessage({ action: 'undoDriveSettings' });
+      await this.send({ action: 'undoDriveSettings' });
     } catch (error) {
       this.notify(`Settings restore failed: ${error.message}`, 'error');
       return false;
@@ -229,5 +254,9 @@ export class DriveSync {
     }
     this.notify('Previous settings restored', 'success');
     return true;
+  }
+
+  send(msg) {
+    return sendOrThrow(msg);
   }
 }

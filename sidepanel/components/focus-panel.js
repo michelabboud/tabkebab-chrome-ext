@@ -3,6 +3,7 @@
 import { showToast } from './toast.js';
 import { createAllowlistEntry, normalizeAllowlistPreferences } from '../../core/focus-policy.js';
 import { createFocusRunCommand, handleFocusPanelMessage } from '../focus-events.js';
+import { sendOrThrow } from '../message-client.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
 
@@ -161,9 +162,9 @@ export class FocusPanel {
     this._renderAllowlistTags();
     this._renderDomainTags();
     this._renderCategoryChips();
-    this._checkAIAvailability();
+    await this._checkAIAvailability();
     this._wireSetupEvents();
-    this._loadHistory();
+    await this._loadHistory();
   }
 
   async _loadChromeGroups() {
@@ -235,12 +236,12 @@ export class FocusPanel {
       duration: parseInt(this.container.querySelector('#focus-duration')?.value) || 25,
       tabAction: this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none',
     };
-    this._profilePrefs[profileId] = prefs;
     await this.send({
       action: 'saveFocusProfilePrefs',
       profileId,
       preferences: prefs,
     });
+    this._profilePrefs = { ...this._profilePrefs, [profileId]: prefs };
   }
 
   _renderAllowlistTags() {
@@ -470,10 +471,9 @@ export class FocusPanel {
     this._strictMode = this.container.querySelector('#focus-strict-mode')?.checked || false;
     this._aiBlocking = this.container.querySelector('#focus-ai-blocking')?.checked || false;
 
-    // Save preferences for this profile
-    await this._saveProfilePrefs(this._selectedProfile.id);
-
     try {
+      // Save preferences for this profile before starting the run.
+      await this._saveProfilePrefs(this._selectedProfile.id);
       this.state = await this.send({
         action: 'startFocus',
         profileId: this._selectedProfile.id,
@@ -487,8 +487,8 @@ export class FocusPanel {
       });
       this._renderHUD();
       showToast(`Focus started: ${this._selectedProfile.name}`, 'success');
-    } catch (e) {
-      showToast('Failed to start focus session', 'error');
+    } catch (err) {
+      showToast('Failed to start focus session: ' + err.message, 'error');
     }
   }
 
@@ -555,37 +555,49 @@ export class FocusPanel {
 
   _wireHUDEvents() {
     this.container.querySelector('#btn-pause-focus')?.addEventListener('click', async () => {
-      const action = this.state?.status === 'paused' ? 'resumeFocus' : 'pauseFocus';
-      const nextState = await this.send(createFocusRunCommand(action, this.state));
-      if (!nextState) {
-        await this.refresh();
-        return;
+      try {
+        const action = this.state?.status === 'paused' ? 'resumeFocus' : 'pauseFocus';
+        const nextState = await this.send(createFocusRunCommand(action, this.state));
+        if (!nextState) {
+          await this.refresh();
+          return;
+        }
+        this.state = nextState;
+        this._renderHUD();
+      } catch (err) {
+        showToast('Failed to update focus session: ' + err.message, 'error');
       }
-      this.state = nextState;
-      this._renderHUD();
     });
 
     this.container.querySelector('#btn-extend-focus')?.addEventListener('click', async () => {
-      const nextState = await this.send(createFocusRunCommand(
-        'extendFocus',
-        this.state,
-        { minutes: 5 },
-      ));
-      if (!nextState) {
-        await this.refresh();
-        return;
+      try {
+        const nextState = await this.send(createFocusRunCommand(
+          'extendFocus',
+          this.state,
+          { minutes: 5 },
+        ));
+        if (!nextState) {
+          await this.refresh();
+          return;
+        }
+        this.state = nextState;
+        showToast('Extended by 5 minutes', 'success');
+      } catch (err) {
+        showToast('Failed to extend focus session: ' + err.message, 'error');
       }
-      this.state = nextState;
-      showToast('Extended by 5 minutes', 'success');
     });
 
     const endHandler = async () => {
-      const record = await this.send(createFocusRunCommand('endFocus', this.state));
-      if (record) {
-        this.state = null;
-        this._showReport(record);
-      } else {
-        await this.refresh();
+      try {
+        const record = await this.send(createFocusRunCommand('endFocus', this.state));
+        if (record) {
+          this.state = null;
+          this._showReport(record);
+        } else {
+          await this.refresh();
+        }
+      } catch (err) {
+        showToast('Failed to end focus session: ' + err.message, 'error');
       }
     };
 
@@ -661,7 +673,12 @@ export class FocusPanel {
 
   _showReport(record) {
     this._stopTimer();
-    if (!record) { this.refresh(); return; }
+    if (!record) {
+      void this.refresh().catch((err) => {
+        showToast('Failed to load Focus Mode: ' + err.message, 'error');
+      });
+      return;
+    }
 
     const durationMin = Math.round(record.actualDurationMs / 60000);
 
@@ -693,7 +710,13 @@ export class FocusPanel {
       </div>
     `;
 
-    this.container.querySelector('#btn-focus-another')?.addEventListener('click', () => this.refresh());
+    this.container.querySelector('#btn-focus-another')?.addEventListener('click', async () => {
+      try {
+        await this.refresh();
+      } catch (err) {
+        showToast('Failed to load Focus Mode: ' + err.message, 'error');
+      }
+    });
     this.container.querySelector('#btn-focus-close')?.addEventListener('click', () => {
       // Return to tabs view
       const tabsBtn = document.querySelector('.tab-nav [data-view="tabs"]');
@@ -704,34 +727,38 @@ export class FocusPanel {
   // ── History ──
 
   async _loadHistory() {
-    const history = await this.send({ action: 'getFocusHistory' });
-    const listEl = this.container.querySelector('#focus-history-list');
-    if (!listEl || !history || history.length === 0) {
-      const toggle = this.container.querySelector('#focus-history-toggle');
-      if (toggle) toggle.style.display = 'none';
-      return;
-    }
+    try {
+      const history = await this.send({ action: 'getFocusHistory' });
+      const listEl = this.container.querySelector('#focus-history-list');
+      if (!listEl || !history || history.length === 0) {
+        const toggle = this.container.querySelector('#focus-history-toggle');
+        if (toggle) toggle.style.display = 'none';
+        return;
+      }
 
-    listEl.innerHTML = history.slice(0, 20).map(h => {
-      const dur = Math.round(h.actualDurationMs / 60000);
-      const date = new Date(h.startedAt);
-      const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      return `
-        <div class="focus-history-item">
-          <span class="focus-history-profile">${this._esc(h.profileName)}</span>
-          <span class="focus-history-dur">${dur}m</span>
-          <span class="focus-history-distractions">${h.distractionsBlocked} blocked</span>
-          <span class="focus-history-date">${dateStr} ${timeStr}</span>
-        </div>
-      `;
-    }).join('');
+      listEl.innerHTML = history.slice(0, 20).map(h => {
+        const dur = Math.round(h.actualDurationMs / 60000);
+        const date = new Date(h.startedAt);
+        const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        return `
+          <div class="focus-history-item">
+            <span class="focus-history-profile">${this._esc(h.profileName)}</span>
+            <span class="focus-history-dur">${dur}m</span>
+            <span class="focus-history-distractions">${h.distractionsBlocked} blocked</span>
+            <span class="focus-history-date">${dateStr} ${timeStr}</span>
+          </div>
+        `;
+      }).join('');
+    } catch (err) {
+      showToast('Failed to load focus history: ' + err.message, 'error');
+    }
   }
 
   // ── Helpers ──
 
   send(msg) {
-    return chrome.runtime.sendMessage(msg);
+    return sendOrThrow(msg);
   }
 
   _esc(str) {

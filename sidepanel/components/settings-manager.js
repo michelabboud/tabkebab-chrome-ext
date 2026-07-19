@@ -13,12 +13,10 @@ import {
 
 export class SettingsManager {
   constructor(rootEl, {
-    send = sendOrThrow,
     confirm = showConfirm,
     notify = showToast,
   } = {}) {
     this.root = rootEl;
-    this.sendMessage = send;
     this.confirm = confirm;
     this.notify = notify;
 
@@ -61,18 +59,22 @@ export class SettingsManager {
     }
   }
 
-  async refresh() {
+  async refresh({ notifyFailure = true } = {}) {
     try {
       const settings = await this.send({ action: 'getSettings' });
+      const driveState = await Storage.get('driveSync');
       this.renderSettings(settings);
 
       // Show/hide Drive connected settings
-      const driveState = await Storage.get('driveSync');
       const driveConnected = driveState?.connected || false;
       const connectedSection = this.root.querySelector('#drive-settings-connected');
       if (connectedSection) connectedSection.hidden = !driveConnected;
-    } catch {
-      // Settings not available — use defaults
+      this._lastRefreshError = null;
+      return true;
+    } catch (err) {
+      this._lastRefreshError = err;
+      if (notifyFailure) this.notify('Failed to load settings: ' + err.message, 'error');
+      return false;
     }
   }
 
@@ -129,8 +131,8 @@ export class SettingsManager {
 
     try {
       await this.send({ action: 'saveSettings', settings });
-    } catch {
-      showToast('Failed to save settings', 'error');
+    } catch (err) {
+      this.notify('Failed to save settings: ' + err.message, 'error');
     }
   }
 
@@ -222,11 +224,18 @@ export class SettingsManager {
     try {
       const document = await readPortableImportFile(file, ['settings']);
       const result = await this.send({ action: 'importPortableData', document });
+      const refreshed = await this.refresh({ notifyFailure: false });
+      if (!refreshed) {
+        this.notify(
+          `Settings were imported, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+          'error',
+        );
+        return;
+      }
       showToast(
         formatPortableImportSummary(result, 'Settings import'),
         portableImportToastType(result),
       );
-      await this.refresh();
     } catch (err) {
       showToast('Import failed: ' + err.message, 'error');
     } finally {
@@ -235,6 +244,6 @@ export class SettingsManager {
   }
 
   send(msg) {
-    return (this.sendMessage || sendOrThrow)(msg);
+    return sendOrThrow(msg);
   }
 }

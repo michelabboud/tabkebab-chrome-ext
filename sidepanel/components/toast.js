@@ -1,7 +1,5 @@
 // toast.js — Lightweight notification toasts
 
-const container = document.getElementById('toast-container');
-
 /**
  * Show a toast notification.
  * @param {string} message - The message to display
@@ -10,6 +8,7 @@ const container = document.getElementById('toast-container');
  * @param {Object} [action] - Optional action button { label, callback }
  */
 export function showToast(message, type = 'info', duration = 3000, action = null) {
+  const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
 

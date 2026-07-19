@@ -1029,12 +1029,194 @@ describe('stale lifecycle continuations', () => {
         }),
       });
 
-      await callbacks[0]();
+      callbacks[0]();
+      await waitFor(
+        () => harness.snapshot().action.badgeText === '||',
+        'delayed badge reset did not reconcile the replacement state',
+      );
 
       expect(harness.snapshot().action.badgeText).toBe('||');
       expect(harness.snapshot().action.badgeBackgroundColor).toBe('#f59e0b');
     } finally {
       globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  test('an authoritative badge repaint cancels its pending distraction reset', async () => {
+    const callbacks = [];
+    const cleared = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = (callback) => {
+      callbacks.push(callback);
+      return 17;
+    };
+    globalThis.clearTimeout = (timerId) => cleared.push(timerId);
+    try {
+      const { focus, harness } = await loadFocus({
+        local: { focusState: activeState() },
+      });
+      await focus.flashBadgeDistraction('run-a');
+      await focus.pauseFocus('run-a');
+
+      expect(cleared).toEqual([17]);
+      const callsBeforeCancelledCallback = harness.calls.action.setBadgeText.length;
+      callbacks[0]();
+      await Bun.sleep(1);
+
+      expect(harness.calls.action.setBadgeText).toHaveLength(callsBeforeCancelledCallback);
+      expect(harness.snapshot().action.badgeText).toBe('||');
+      expect(harness.snapshot().action.badgeBackgroundColor).toBe('#f59e0b');
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  test('a repeated distraction re-arms only the newest badge reset', async () => {
+    const callbacks = [];
+    const cleared = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let nextTimerId = 30;
+    globalThis.setTimeout = (callback) => {
+      const timerId = ++nextTimerId;
+      callbacks.push({ callback, timerId });
+      return timerId;
+    };
+    globalThis.clearTimeout = (timerId) => cleared.push(timerId);
+    try {
+      const { focus, harness } = await loadFocus({
+        local: { focusState: activeState() },
+      });
+      await focus.flashBadgeDistraction('run-a');
+      await focus.flashBadgeDistraction('run-a');
+
+      expect(callbacks.map(({ timerId }) => timerId)).toEqual([31, 32]);
+      expect(cleared).toEqual([31]);
+      const callsBeforeResets = harness.calls.action.setBadgeText.length;
+
+      callbacks[0].callback();
+      await Bun.sleep(1);
+      expect(harness.calls.action.setBadgeText).toHaveLength(callsBeforeResets);
+
+      callbacks[1].callback();
+      await waitFor(
+        () => harness.calls.action.setBadgeText.length > callsBeforeResets,
+        'newest distraction timer did not reset the badge',
+      );
+      expect(harness.snapshot().action.badgeText).not.toBe('!');
+      expect(harness.snapshot().action.badgeBackgroundColor).toBe('#2563eb');
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  test('a firing old reset cannot overtake a newer distraction repaint', async () => {
+    const callbacks = [];
+    const cleared = [];
+    const secondBadgeEntered = deferred();
+    const releaseSecondBadge = deferred();
+    const releaseStaleRead = deferred();
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    let nextTimerId = 40;
+    let delayNextFocusRead = false;
+    globalThis.setTimeout = (callback) => {
+      const timerId = ++nextTimerId;
+      callbacks.push({ callback, timerId });
+      return timerId;
+    };
+    globalThis.clearTimeout = (timerId) => cleared.push(timerId);
+    try {
+      const { focus, harness } = await loadFocus({
+        local: { focusState: activeState() },
+      });
+      await focus.flashBadgeDistraction('run-a');
+
+      const setBadgeText = chrome.action.setBadgeText.bind(chrome.action);
+      let holdNextDistraction = true;
+      chrome.action.setBadgeText = async (details) => {
+        if (holdNextDistraction && details?.text === '!') {
+          holdNextDistraction = false;
+          secondBadgeEntered.resolve();
+          await releaseSecondBadge.promise;
+        }
+        return setBadgeText(details);
+      };
+      const get = chrome.storage.local.get.bind(chrome.storage.local);
+      chrome.storage.local.get = async (...args) => {
+        if (delayNextFocusRead && args[0] === 'focusState') {
+          delayNextFocusRead = false;
+          await releaseStaleRead.promise;
+        }
+        return get(...args);
+      };
+
+      const newerFlash = focus.flashBadgeDistraction('run-a');
+      await secondBadgeEntered.promise;
+      delayNextFocusRead = true;
+      callbacks[0].callback();
+      releaseSecondBadge.resolve();
+      await newerFlash;
+
+      expect(callbacks.map(({ timerId }) => timerId)).toEqual([41, 42]);
+      expect(cleared).toEqual([41]);
+      releaseStaleRead.resolve();
+      delayNextFocusRead = false;
+      await Bun.sleep(1);
+      expect(harness.snapshot().action.badgeText).toBe('!');
+
+      callbacks[1].callback();
+      await waitFor(
+        () => harness.snapshot().action.badgeText !== '!',
+        'newest distraction timer did not own the eventual reset',
+      );
+      expect(harness.snapshot().action.badgeBackgroundColor).toBe('#2563eb');
+    } finally {
+      delayNextFocusRead = false;
+      releaseSecondBadge.resolve();
+      releaseStaleRead.resolve();
+      await Bun.sleep(1);
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  test('a delayed distraction reset owns a missing Chrome context', async () => {
+    const callbacks = [];
+    const warnings = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalWarn = console.warn;
+    let installedChrome;
+    globalThis.setTimeout = (callback) => {
+      callbacks.push(callback);
+      return 23;
+    };
+    console.warn = (...args) => warnings.push(args);
+    try {
+      const { focus } = await loadFocus({
+        local: { focusState: activeState() },
+      });
+      await focus.flashBadgeDistraction('run-a');
+      installedChrome = globalThis.chrome;
+      delete globalThis.chrome;
+
+      const callbackResult = callbacks[0]();
+      const ownedLegacyRejection = callbackResult?.catch?.(() => {});
+      expect(callbackResult).toBeUndefined();
+      await ownedLegacyRejection;
+      await waitFor(
+        () => warnings.length === 1,
+        'delayed badge reset rejection was not reported',
+      );
+
+      expect(warnings).toEqual([['[TabKebab] Focus badge reset failed.']]);
+    } finally {
+      if (installedChrome) globalThis.chrome = installedChrome;
+      globalThis.setTimeout = originalSetTimeout;
+      console.warn = originalWarn;
     }
   });
 });
