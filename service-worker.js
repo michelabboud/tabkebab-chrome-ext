@@ -669,6 +669,7 @@ async function createBookmarks(options = {}) {
   const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
   const bookmarkData = {
+    id: crypto.randomUUID(),
     date: dateStr,
     time: timeStr,
     createdAt: Date.now(),

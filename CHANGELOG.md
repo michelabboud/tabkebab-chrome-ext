@@ -4,6 +4,32 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.11] — 2026-07-19
+
+### Added
+
+- A pure portable-export version 2 schema for complete backups and named session, stash, or settings exports, with deterministic null-prototype normalization and version-1 compatibility in memory.
+- Fixed, cumulative resource ceilings for imported records, tabs/URLs, strings, nesting, and total in-memory traversal cost, plus direct stash-section revalidation for the later transactional IndexedDB boundary.
+- Stable UUIDs on newly created bookmark snapshots before either local or Drive persistence, with the legacy date/time tuple retained only as an import identity fallback.
+- Regression coverage for every v2 section, partial and legacy envelopes, hostile object shapes, resource exhaustion, deterministic local-wins merging, explicit tombstone recovery, secret-free AI export, and bookmark persistence ordering.
+
+### Changed
+
+- Portable general settings now derive from the exact frozen `SETTINGS_DEFAULTS` allowlist instead of accepting arbitrary storage keys.
+- Explicit import merge semantics retain local records on stable-ID collisions, union keep-awake domains, overlay only allowlisted imported settings, and revive imported sessions or manual groups strictly above retained deletion tombstones.
+- AI export is constructed from only the enabled/provider/model/custom-base-URL fields; import merge can update those safe fields while preserving existing encrypted keys and passphrase metadata.
+
+### Fixed
+
+- Rejected unsupported or malformed export envelopes, accessors, cycles, sparse arrays, non-JSON values, prototype-pollution keys, secrets, caches, and over-budget documents before merge or storage access.
+- Prevented portable backup creation from copying API keys, tokens, credentials, install identifiers, Drive connection state, active Focus state, or cache fields.
+
+### Verification note
+
+- Regression-first work began with a genuine missing-module/bookmark-ID failure (`0 pass / 2 fail / 1 error / 2 assertions`). Controller and independent-review RED/GREEN cycles then covered production Focus-history identity, legacy Drive envelopes, IndexedDB stash ordering, structured-clone `undefined` fields, literal AI-metadata preservation, delimiter-safe bookmark identity, tombstone ceilings, narrowed secret exceptions, mutable-validator re-entry, and single-pass traversal. The final focused run reports `33 pass / 0 fail / 186 assertions`; full and coverage runs each report `440 pass / 0 fail / 2289 assertions`; syntax reports `2 pass / 0 fail / 93 assertions`; coverage is `49.18%` functions and `50.09%` lines with no repository-wide threshold. Whitespace, version `1.2.11`, and the no-dependency-change audit pass under Bun `1.3.11`.
+- Independent final review found no remaining Critical, Important, or Minor findings after every reported boundary issue received a regression and repair.
+- This checkpoint defines and tests the pure schema/merge foundation. Task 10 wires every user-facing export/import path, pre-parse file-size gate, worker lock, storage transaction, rollback, and real-Chrome import/export proof.
+
 ## [1.2.10] — 2026-07-19
 
 ### Added

@@ -2,13 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.10`
+- Repository version: `1.2.11`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–8 implemented; deterministic Drive sync v2 now records transactional session/manual-group deletion and strictly newer session Undo state
+- Implementation status: Tasks 1–9 implemented; the complete, bounded portable-export v2 schema now provides secret-free construction, version-1 normalization, deterministic section merges, and explicit import recovery above retained tombstones
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
-- Phase 2 status: `v1.2.9` is published; Task 8 implementation, independent review, deterministic gates, and the final functional-tree Chrome boundary are complete, while the `v1.2.10` commit/tag/push and exact-commit CI checkpoint remain
+- Phase 2 status: `v1.2.10` is published with exact-commit CI green; Task 9 implementation, independent review, documentation, and deterministic gates are complete at `1.2.11`, while the commit/tag/push and exact-commit CI checkpoint remain
 
 ## Completed implementation slices
 
@@ -82,6 +82,16 @@
 - Final evidence reports `36 pass / 0 fail / 340 assertions` focused, `407 pass / 0 fail / 2100 assertions` in both full and coverage runs, `27 pass / 0 fail / 149 assertions` for the mutation lock, and `2 pass / 0 fail / 90 assertions` for syntax. Whitespace, version parity, and the no-dependency-change audit pass under Bun `1.3.11`; coverage is recorded without a repository-wide threshold (`45.75%` functions, `47.33%` lines).
 - Chrome 148 exercised completed functional tree `7e1ab1c081a1bc3f4128903b1e924e803c5427a8` and proved one checked session Delete, exactly one newer Undo with the tombstone unchanged, and one checked manual-group Delete through the production panel/worker/storage boundary. It made zero HTTP(S) requests and cleaned every disposable resource. The controller reruns after this evidence-only prose delta without further tracked edits. Live Drive remains blocked and unpassed for the registered-client/authenticated-profile reasons above.
 
+### Task 9 — Portable export v2 schema and secret-free merge (`1.2.11`)
+
+- Added one pure schema boundary for complete version-2 documents and named session, stash, or settings documents. Full exports require sessions, stashes, manual groups, keep-awake domains, bookmarks, general settings, Focus profile preferences/history, and sanitized AI settings; version-1 full/partial files, legacy Drive `savedAt` settings, and unversioned dated Drive session/stash backups normalize in memory before use.
+- Canonicalization reads only enumerable own data properties, produces null-prototype records with stable key order, and rejects accessors, cycles, symbols, sparse arrays, non-JSON values, prototype-pollution keys, secret/cache fields, invalid records, and unsupported envelopes before merge or storage access. Export creation omits structured-clone `undefined` object fields once, matching legacy JSON behavior, while imported documents remain strict.
+- Enforced one cumulative 25 MiB traversal budget plus fixed 10,000-record, 10,000-tab-per-record, 100,000-total-tab/URL, 16,384-character, and depth-12 limits without an unbounded stringify size check. The exported stash validator is the same function used by document parsing.
+- Added deterministic local-wins merge rules, imported allowlisted-settings overlay, legacy bookmark tuple compatibility, and direct-user-import recovery that writes revived session/group timestamps strictly above retained tombstones without deleting those tombstones.
+- Constructed portable AI settings from safe fields only, while merge preserves existing encrypted API-key and passphrase metadata byte-for-byte and overlays only enabled/provider/model/custom-base-URL choices. The exception applies only to existing `aiSettings`; secrets elsewhere reject. New bookmark snapshots receive a UUID before their local or Drive write.
+- Current Focus history merges by `runId`; published pre-`runId` history remains compatible through a separate legacy `id` namespace. Stash transaction validation requires the IndexedDB `createdAt` index key and always revalidates mutable caller data rather than trusting a persistent brand.
+- Initial RED evidence was `0 pass / 2 fail / 1 error / 2 assertions`; subsequent controller/reviewer RED/GREEN cycles closed every production-shape, compatibility, resource, and revalidation gap. Final evidence is `33 pass / 0 fail / 186 assertions` focused, `440 pass / 0 fail / 2289 assertions` full and coverage, and `2 pass / 0 fail / 93 assertions` syntax. Coverage is `49.18%` functions and `50.09%` lines; whitespace/version/no-dependency gates pass under Bun `1.3.11`. Independent review reports no remaining findings.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
@@ -110,4 +120,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Commit, annotate `v1.2.10`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 9 starts. Task 8 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Complete Task 9's independent review and deterministic closeout gates, then commit, annotate `v1.2.11`, atomically push `main` plus the task tag, and verify the exact-commit GitHub Actions run before Task 10 starts. Task 9 is a task tag only: the Phase 2 GitHub release remains scheduled for Task 11. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

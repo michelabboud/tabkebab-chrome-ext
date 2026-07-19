@@ -44,6 +44,8 @@ export const SETTINGS_DEFAULTS = {
   neverDeleteFromDrive: false,
 };
 
+export const PORTABLE_SETTINGS_KEYS = Object.freeze(Object.keys(SETTINGS_DEFAULTS));
+
 export const SETTINGS_CONSTRAINTS = Object.freeze({
   removeStashAfterRestore: { type: 'boolean' },
   defaultView: { enum: ['tabs', 'windows', 'stash', 'sessions'] },
@@ -72,7 +74,7 @@ export const SETTINGS_CONSTRAINTS = Object.freeze({
   neverDeleteFromDrive: { type: 'boolean' },
 });
 
-const SETTINGS_KEYS = Object.freeze(Object.keys(SETTINGS_DEFAULTS));
+const SETTINGS_KEYS = PORTABLE_SETTINGS_KEYS;
 const SETTINGS_KEY_SET = new Set(SETTINGS_KEYS);
 const SETTINGS_ENVELOPE_KEYS = new Set(['settings', 'savedAt', 'version']);
 
