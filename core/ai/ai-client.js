@@ -8,7 +8,7 @@ import { encryptApiKey, decryptApiKey } from './crypto.js';
 import { OpenAIProvider } from './provider-openai.js';
 import { ClaudeProvider } from './provider-claude.js';
 import { GeminiProvider } from './provider-gemini.js';
-import { ChromeAIProvider } from './provider-chrome.js';
+import { chromeAIBrokerClient } from './chrome-ai-broker-client.js';
 import { CustomProvider } from './provider-custom.js';
 import {
   ProviderId,
@@ -28,7 +28,7 @@ const PROVIDERS = Object.freeze({
   [ProviderId.OPENAI]: OpenAIProvider,
   [ProviderId.CLAUDE]: ClaudeProvider,
   [ProviderId.GEMINI]: GeminiProvider,
-  [ProviderId.CHROME_AI]: ChromeAIProvider,
+  [ProviderId.CHROME_AI]: chromeAIBrokerClient,
   [ProviderId.CUSTOM]: CustomProvider,
 });
 

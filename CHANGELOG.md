@@ -4,6 +4,35 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.16] — 2026-07-19
+
+### Added
+
+- A single named side-panel broker for Chrome Built-in AI, with one worker-side singleton, per-request panel providers/controllers, generation-safe reconnects, ordered live-panel standby failover, and foreground-required behavior when every panel is absent.
+- A strict JSON-only Chrome AI protocol with canonical UUID correlation, exact request fields, bounded prompts/options, typed safe errors, depth-12 parsed JSON, and a 2 MiB canonical UTF-8 result ceiling.
+- An extension-origin exclusive Web Lock around provider construction through settlement, preventing Prompt-session overlap across side-panel documents and failing closed before construction if coordination is unavailable.
+- ADR 0005 records the multi-panel owner/standby and Web Locks concurrency decision, its fail-closed boundary, trade-offs, and rejected alternatives.
+- Protocol, client, panel, timeout-composition, import-graph, service-worker routing, and background Focus regressions.
+
+### Changed
+
+- Chrome Prompt API execution now occurs only in the side-panel document. The Manifest V3 worker never imports or evaluates the Prompt API executor and communicates only through `tabkebab:chrome-ai`.
+- The panel reconnects after worker suspension/restart at 100 ms, 500 ms, then 1000 ms capped. Terminal panel teardown cancels the reconnect timer and all active model work.
+- Chrome AI requires an open side panel for uncached work and an already available on-device model; TabKebab does not silently start a model download.
+
+### Fixed
+
+- Worker timeout/cancellation now sends one panel cancel and waits for provider/session cleanup before Task 13 exposes its first abort cause, preventing cross-context retries from overlapping old Prompt API work.
+- Port replacement now cancels and settles old work before activating the candidate generation. Port-loss failover promotes the newest still-live standby without discarding older open panels, while the origin lock holds new provider work behind old-document cleanup. Stale events, cancel/result races, and malformed terminal traffic cannot settle a newer generation, overlap providers, or strand a pending request.
+- Duplicate valid or malformed traffic carrying an active request ID now marks that correlation malformed, aborts once, waits for cleanup, and emits exactly one `AI_MALFORMED_RESULT`; an earlier cancellation remains the first terminal cause.
+- Uncached background Focus classification safely skips when the panel is closed, without tab, counter, state, cache, or UI mutation; valid cached decisions still pass the live Focus guard.
+
+### Verification note
+
+- Regression-first failures covered the missing broker modules, lifecycle behavior, canonical UUID/error boundaries, oversized/repeated JSON structures, cancel/result races, reconnect-timer teardown, duplicate correlation, stranded standbys, and combined disconnect/replacement overlap. Current focused verification is `85 pass / 0 fail / 620 assertions`; full and coverage runs are `854 pass / 0 fail / 4804 assertions`; syntax is `2 pass / 0 fail / 116 assertions`; coverage is `71.07%` functions and `67.55%` lines under Bun `1.3.11`.
+- Independent protocol and broker reviews were followed by final cross-boundary and Web Locks reviews that reproduced duplicate-correlation, provider-overlap, stranded-panel, and test-lock-ordering gaps. Every finding now has RED/GREEN coverage, and both terminal runtime reviews are clean at `85/0/620`. The protocol review additionally accepted 2,000 randomized conforming JSON values and rejected the former shared-DAG resource case at bounded memory.
+- Chrome for Testing `148.0.7778.96` passed the exact-tree gate at `df1a7569b67a14c1e3bffc22ecbdb12c767fcf3e`: real Web Locks were available and idle; the named broker reconnected after synthetic port loss; the newest of two panels owned work; the older panel resumed after it closed; closed-panel execution returned foreground-required; background Focus preserved its tab, run, counter, and cache; reopen worked; zero external requests/runtime errors occurred; and all disposable resources were removed. The real Prompt API existed but reported `unavailable`, so completion and close-during-active-completion remain explicitly unpassed rather than simulated.
+
 ## [1.2.15] — 2026-07-19
 
 ### Added

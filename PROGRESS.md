@@ -2,14 +2,14 @@
 
 ## Current state
 
-- Repository version: `1.2.15`
+- Repository version: `1.2.16`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
-- Implementation status: Tasks 1–13 implemented and independently code-reviewed; every AI attempt owns one abort signal, timeout/cancellation waits for provider cleanup, retries are typed and bounded, and late timed-out results cannot overlap or enter the response cache
+- Implementation status: Tasks 1–14 implemented and independently code-reviewed; Chrome Built-in AI now executes only in the side-panel document through a bounded named-port protocol while preserving Task 13 cleanup-before-settlement
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
 - Phase 2 release status: `v1.2.13` is committed, tagged, pushed, exact-commit CI-green, and published as a GitHub release
-- Phase 3 status: Task 12 is released as exact-commit CI-green `v1.2.14`. Task 13 tracked implementation, review, deterministic gates, documentation, and preliminary real-Chrome timeout proof are complete at `1.2.15`; terminal Chrome, commit/tag/push, and exact-commit CI remain closeout gates whose outcomes belong in the non-recursive gitdir report and GitHub
+- Phase 3 status: Task 12 is released as exact-commit CI-green `v1.2.14`; Task 13 is released as exact-commit CI-green `v1.2.15`; Task 14 implementation, independent review, deterministic verification, and the available Chrome 148 browser subcases are complete at `1.2.16`, with commit/tag/push/CI closeout in progress; the installed Prompt model reports unavailable, so real completion remains an explicit Task 15 blocker
 
 ## Completed implementation slices
 
@@ -129,7 +129,20 @@
 - Threaded the same signal through every OpenAI, Claude, Gemini, Custom, and Chrome Prompt API path, including lazy body reads. Chrome sessions are destroyed before settlement; missing/download-required/unknown Chrome model states are non-retryable unavailable failures.
 - Restricted automatic retry to `AINetworkError` and `AIRateLimitError`, with three total attempts by default and no overlap between attempts. AIClient creates a new lifecycle inside each queued closure and caches only settled success; test connection and model listing preserve `false`/`[]` only after cleanup.
 - Reviewer-driven RED/GREEN coverage includes pre-abort no-work, raw and custom abort reasons, synchronous cleanup, first-cause races, non-cooperative providers, late-result cache rejection, typed retry boundaries, and maximum-active ordering. Focused verification is `129 pass / 0 fail / 458 assertions`; full and coverage runs are `769 pass / 0 fail / 4177 assertions`; syntax is `2 pass / 0 fail / 109 assertions`; coverage is `69.93%` functions and `66.11%` lines. Two independent immutable reviews are clean at functional tree `e95cb671ffb6c60a18f34a354e04b97012bf287a`.
-- Chrome 148 passed the preliminary exact-tree hanging-provider fixture at `c073b4e2f4fd542f39a26a0302fbb19e7cfa821b`: the unchanged production boundary settled at `120.078s`, the observed request remained active for `119.913s`, timeout returned the exact safe false fallback, explicit retry produced one distinct request, final metrics were two starts/two aborts/zero completions/zero active/maximum active one, no request reached an external network, and all disposable resources were removed. Release closeout will keep the documentation-frozen terminal result in the gitdir-local report to avoid changing the tested tree.
+- Chrome 148 passed the terminal hanging-provider fixture at exact tree `be3cc89c6216a97b8b5ec975b6fe8e88487795bd`: the unchanged production boundary settled at `120.070s`, the request remained active for `119.899s`, timeout returned the exact safe false fallback, explicit retry produced one distinct request, final metrics were two starts/two aborts/zero completions/zero active/maximum active one, no request reached an external network, and all disposable resources were removed. Commit `14d19008872984306235805efe85f4dd8a66ad1b` is tagged `v1.2.15`; exact-commit CI run `29689191599` passed.
+
+### Task 14 — Side-panel Chrome AI broker (`1.2.16`)
+
+- Moved Prompt API execution out of the Manifest V3 worker. `AIClient` and the worker share one broker-client singleton, the worker accepts only `tabkebab:chrome-ai`, and the panel starts one document executor for its lifetime.
+- Added exact JSON-only request/result/error validators with canonical version-4 UUIDs, fixed prompt/option bounds, safe typed errors, fresh own-property copies, depth-12 parsed JSON, a 2 MiB canonical UTF-8 result ceiling, and fail-fast rejection of hostile/repeated structures.
+- Correlated concurrent requests by exact live-port generation; cancellation sends one cancel and waits for panel provider/session settlement. Ordinary replacement holds the candidate inactive until old cleanup, active-port loss rejects that generation and promotes a live standby behind the origin lock, and stale/malformed terminal events cannot affect a newer generation.
+- Added one provider/controller per accepted panel request and bounded 100/500/1000 ms reconnect. Panel teardown physically cancels its pending timer, aborts work, suppresses late results, and permanently stops reconnect.
+- Retained every live named panel in an ordered owner/standby registry. Closing the newest owner promotes a still-open panel, while an extension-origin exclusive Web Lock keeps provider construction and settlement serialized across panel documents and fails closed when unavailable.
+- Added ADR 0005 for the cross-document ownership/serialization decision and its rejected realm-local, forced-reconnect, terminal-message-only, and extra-protocol alternatives.
+- Duplicate valid or malformed active IDs now abort the original correlation, preserve first-cause cancellation, wait for provider cleanup, and emit one typed malformed result instead of terminating early or silently ignoring malformed traffic.
+- Uncached background Focus with no panel safely skips without tab, counter, state, cache, or UI mutation; a valid cached classification can still reach the existing live run/tab/URL guard.
+- Current focused verification is `85 pass / 0 fail / 620 assertions`; full and coverage runs are `854 pass / 0 fail / 4804 assertions`; syntax is `2 pass / 0 fail / 116 assertions`; coverage is `71.07%` functions and `67.55%` lines. Independent protocol/broker reviews passed; final cross-boundary and Web Locks reviews exposed duplicate-correlation, stranded-standby, combined port-loss/cleanup, and test-lock-ordering gaps that now have direct RED/GREEN repairs. Both terminal runtime reviews are clean; the documentation-frozen real-Chrome result remains the release gate.
+- Chrome for Testing `148.0.7778.96` passed the exact functional tree `df1a7569b67a14c1e3bffc22ecbdb12c767fcf3e` for real Web Locks, named-port reconnect, newest-owner routing, standby promotion, foreground-required closed-panel behavior, background Focus no-mutation, reopen, network isolation, and complete cleanup. Prompt API status was exactly `unavailable`; no model download occurred, and real completion plus close-during-active-completion remain unpassed for Task 15.
 
 ## Confirmed remediation scope
 
@@ -159,4 +172,4 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
 
 ## Next gate
 
-Begin Task 14 only after the gitdir report confirms Task 13's terminal Chrome gate on the exact `1.2.15` tracked tree and GitHub reports exact-commit CI green for `v1.2.15`. Task 14 brokers Chrome Built-in AI through the side-panel document while preserving Task 13's signal and cleanup contract. The credential-safe real-Drive fixture remains an explicit validation item and may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.
+Publish exact-commit CI-green `v1.2.16`, then begin Task 15's reproducible real-Chrome matrix and final `v1.2.17` phase release. The installed Chrome Prompt model is unavailable, and the credential-safe real-Drive fixture remains an explicit validation item; those two real-service rows must pass before the final phase release. Drive may run only in an approved registered identity/client environment with an operator-authenticated disposable Google test-user session, never by transmitting a token.

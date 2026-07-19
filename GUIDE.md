@@ -612,7 +612,7 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 | **OpenAI** | GPT-4.1, GPT-5, o4-mini | Yes | Most popular option |
 | **Anthropic Claude** | Haiku, Sonnet, Opus | Yes | Strong reasoning |
 | **Google Gemini** | 2.5 Flash, 2.5 Pro, 3.0 | Yes | Google's models |
-| **Chrome Built-in AI** | Gemini Nano | No | Runs on-device, requires Chrome flags |
+| **Chrome Built-in AI** | Gemini Nano | No | Runs on-device in a supported Chrome side panel |
 | **Custom Endpoint** | Any | Depends | OpenAI-compatible API (Ollama, LM Studio, etc.) |
 
 ### API Key Security
@@ -640,13 +640,35 @@ Only transient network and rate-limit failures retry automatically, with at most
 
 ### Chrome Built-in AI
 
-To use Gemini Nano (on-device, no API key):
+[Chrome Built-in AI](https://developer.chrome.com/docs/ai/built-in-apis) uses
+Chrome's on-device Prompt API and requires a supported Chrome/device
+configuration. Extension use is supported from Chrome 138. The model must
+already report `available`; TabKebab does not silently start a model download
+when Chrome reports `downloadable` or `downloading`.
 
-1. You need Chrome 127+ with specific flags enabled
-2. Go to `chrome://flags/#optimization-guide-on-device-model` → Enable
-3. Go to `chrome://flags/#prompt-api-for-gemini-nano` → Enable
-4. Restart Chrome
-5. Select "Chrome Built-in AI" as your provider in TabKebab
+The Prompt API is a document-only capability, so keep the TabKebab side panel
+open while testing the connection or starting uncached Chrome AI work. TabKebab
+automatically reconnects a live panel after a Manifest V3 worker restart. When
+multiple browser windows have TabKebab panels open, the newest connection owns
+requests and older connections remain available as standbys. Provider work is
+serialized across those documents with an extension-origin Web Lock, including
+cleanup during failover. Closing a panel aborts its in-flight work and suppresses
+late results; Chrome then tears down that panel document. Another open standby
+can resume after cleanup, otherwise the worker reports that foreground access
+is required.
+
+Background Focus Mode never opens the panel by itself. With Chrome AI selected
+and the panel closed, a new uncached classification is skipped safely: the tab,
+Focus counter, Focus state, and AI cache are left unchanged. A previously cached
+classification may still proceed through the normal live run/tab/URL guard.
+
+To use it:
+
+1. Confirm the Prompt API and on-device model are supported and already
+   available in Chrome.
+2. Open the TabKebab side panel.
+3. Select **Chrome Built-in AI** and save the AI settings.
+4. Use **Test Connection** before relying on it for interactive commands.
 
 ### Response Caching
 

@@ -902,14 +902,92 @@ other external requests: 0
 runtime errors: 0
 ```
 
+The terminal run repeated this proof against documentation-frozen tree
+`be3cc89c6216a97b8b5ec975b6fe8e88487795bd`. The production action settled in
+`120.070s`, its first request remained active for `119.899s`, and the same two
+starts/two aborts/zero completions/zero active/maximum active one counters held.
 The disposable profile contained 347 entries before teardown and was removed;
-matching Chrome processes were zero, and Xvfb plus the fixture exited. The
-terminal release gate repeats this tree-hash-guarded harness after tracked
-documentation and version freeze. Its exact tree, counters, and cleanup proof
-live in the gitdir-local Task 13 report so recording them cannot recursively
-change the source under test.
+matching Chrome processes were zero, and Xvfb plus the fixture exited. Commit
+`14d19008872984306235805efe85f4dd8a66ad1b` was tagged `v1.2.15`, pushed, and
+passed exact-commit GitHub Actions run `29689191599`.
 
 This is a real extension/panel/worker/HTTP cancellation proof against a local
 synthetic provider. It does not validate an external provider account,
 authentication, model quality, or availability, and it preserves no private
 browsing payload or credential.
+
+---
+
+Slice: Task 14, side-panel Chrome AI broker
+
+Extension version: `1.2.16`
+
+## Task 14 deterministic and independent-review evidence
+
+Regression-first work began with the missing worker client (`0 pass / 2 fail`)
+and missing protocol/panel modules. Boundary RED cases then exposed permissive
+UUID/error handling, repeated-reference resource expansion, an abort/result
+crossing race, a malformed-result cancellation hang, a reconnect timer that
+was not physically cancelled, and unsafe same-ID duplicate correlation.
+
+The current focused suite passes `85 tests / 0 failures / 620 assertions`. It
+covers protocol field/type/size/depth/UTF-8 limits; fresh canonical copies;
+concurrent and stale port generations; typed error rehydration; one-cancel
+cleanup barriers; per-request providers/controllers; 100/500/1000 ms bounded
+reconnect; ordered owner/standby failover; origin-wide provider locking; exact
+singleton/worker routing; Task 13 timeout composition; and uncached/cached
+background Focus behavior. Full and coverage suites pass `854 tests / 0
+failures / 4804 assertions`; syntax passes `2 / 0 / 116`; coverage is `71.07%`
+functions and `67.55%` lines under Bun `1.3.11`.
+
+Independent protocol and broker reviews passed. A later cross-boundary review
+then reproduced three missed lifecycle defects: duplicate active IDs could
+terminate the original worker promise while its provider remained live,
+combined port loss/replacement could activate later work before old provider
+cleanup, and replacing a panel could strand another still-open document. The
+repairs abort duplicate correlations and wait before their one malformed
+terminal result, retain live panels as ordered standbys, and serialize provider
+construction through settlement with one extension-origin exclusive Web Lock.
+New end-to-end cases keep maximum active providers at one across both candidate
+and standby failover. Final cross-boundary and Web Locks rereviews are clean at
+`85/0/620`; the latter also drove Chrome-accurate release-before-result ordering
+in the shared lock double and append-only ADR 0005. The protocol
+review also accepted 2,000 randomized conforming JSON values and rejected the
+former 12-level shared-DAG case in `0.01s` at approximately 39 MiB RSS.
+
+## Task 14 real-Chrome Prompt API gate
+
+Chrome for Testing `148.0.7778.96` with binary SHA-256
+`adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f`
+loaded the unpacked extension at exact tree
+`df1a7569b67a14c1e3bffc22ecbdb12c767fcf3e`. The disposable profile used no
+private URL, cloud provider, API key, or production failure hook. All outbound
+HTTP(S) except the loopback fixture was blocked.
+
+The real panel document exposed Web Locks; the named
+`tabkebab:chrome-ai-provider` lock began with zero held and zero pending
+requests. The Prompt API object existed but returned exact status
+`unavailable`. Production connection checks returned `false`, matching that
+status, without starting a model download. Therefore real completion and
+close-during-active-completion were not attempted and remain unpassed; no
+completion/session-destruction claim is made.
+
+The supported broker and Focus subcases passed:
+
+- one named panel connection was observed, followed by a second connection
+  after a CDP-synthetic port-loss event through the production reconnect path;
+- with two real extension documents open, only the newest panel received the
+  production availability request; after it closed, the older still-open panel
+  received and settled the next request with zero pending work;
+- after every panel closed, an uncached production AI command returned exactly
+  `AI requires an open side panel`;
+- closed-panel background Focus preserved the destination URL, active run ID,
+  status, distraction count, and empty AI cache, and opened no panel;
+- reopening a panel restored production availability without restarting
+  Chrome, again matching the real `unavailable` model status.
+
+Redacted terminal counters were two loopback page requests, zero other external
+requests, zero runtime errors, zero final panel-pending requests, and no final
+Focus state. The disposable profile contained 345 entries before removal; the
+profile was removed, remaining matching Chrome processes were zero, Xvfb
+exited, and the loopback server stopped.

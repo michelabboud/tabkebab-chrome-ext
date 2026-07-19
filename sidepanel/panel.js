@@ -15,6 +15,12 @@ import { FocusPanel } from './components/focus-panel.js';
 import { showToast } from './components/toast.js';
 import { routePanelFocusMessage } from './focus-events.js';
 import { sendOrThrow } from './message-client.js';
+import { startChromeAIBroker } from './chrome-ai-broker.js';
+
+// Chrome's Prompt API is document-only. Keep one named broker alive for this
+// panel document and permanently stop reconnecting when the document exits.
+const chromeAIBroker = startChromeAIBroker();
+window.addEventListener('pagehide', () => chromeAIBroker.disconnect(), { once: true });
 
 async function refreshController(controller, label) {
   try {

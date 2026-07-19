@@ -1,5 +1,5 @@
 // core/ai/provider-chrome.js — Chrome built-in Prompt API provider
-// Uses the LanguageModel global (Chrome 138+ origin trial)
+// Uses the LanguageModel global (Chrome 138+ for extensions)
 // Falls back to self.ai.languageModel for older Chrome versions
 
 import { AIAbortError, AIUnavailableError } from './provider.js';
@@ -48,9 +48,22 @@ async function requireAvailable(api, signal) {
   throw new AIUnavailableError('Chrome AI model is not available on this device.');
 }
 
-export const ChromeAIProvider = {
-  id: 'chrome-ai',
-  name: 'Chrome Built-in AI (Experimental)',
+export class ChromeAIProvider {
+  static id = 'chrome-ai';
+  static name = 'Chrome Built-in AI (Experimental)';
+
+  id = ChromeAIProvider.id;
+  name = ChromeAIProvider.name;
+
+  // Keep the Task 13 object-style entry points compatible while the side-panel
+  // broker creates a fresh executor instance for each accepted request.
+  static testConnection(config, signal) {
+    return new ChromeAIProvider().testConnection(config, signal);
+  }
+
+  static complete(request, config, signal) {
+    return new ChromeAIProvider().complete(request, config, signal);
+  }
 
   async testConnection(_config, signal) {
     ensureNotAborted(signal);
@@ -64,7 +77,7 @@ export const ChromeAIProvider = {
       rethrowAbort(error, signal);
       return false;
     }
-  },
+  }
 
   async complete(request, _config, signal) {
     ensureNotAborted(signal);
@@ -120,5 +133,5 @@ export const ChromeAIProvider = {
         try { await session.destroy(); } catch { /* best-effort cleanup */ }
       }
     }
-  },
-};
+  }
+}

@@ -84,6 +84,51 @@ Every HTTP provider threads that exact signal through `fetch()` and lazy respons
 
 The manual Chrome boundary uses `tests/fixtures/hanging-ai-server.js`, a loopback-only CORS endpoint that holds completion requests until disconnect and exposes only redacted lifecycle counters. The tree-hash-guarded browser harness uses the unchanged 120-second production timeout, requires maximum active one, proves no automatic retry, then starts one explicit later retry and verifies complete process, display, fixture, and profile cleanup.
 
+### Chrome AI document broker
+
+Chrome's Prompt API is unavailable in Web Workers, so `provider-chrome.js` is
+constructed only by the side-panel document. `AIClient` instead uses the one
+exported `chromeAIBrokerClient` singleton. The service worker attaches that
+same instance only to the named `tabkebab:chrome-ai` runtime port; unrelated
+ports are ignored and no worker import graph evaluates `LanguageModel`.
+
+Both sides accept only canonical JSON-only envelopes through
+`chrome-ai-protocol.js`. Request IDs are lowercase RFC 4122 version-4 UUIDs.
+Completion requests bound prompts, tokens, temperature, and response format;
+completion results are fresh own-property values with JSON depth at most 12
+and canonical UTF-8 size at most 2 MiB. Repeated references, cycles, accessors,
+sparse arrays, non-JSON values, dangerous or unknown keys, raw errors, signals,
+configuration, and Chrome objects are rejected before provider work or promise
+resolution. Only the fixed safe typed error code/message pair crosses the port.
+
+The worker client correlates concurrent requests by ID, live port record, and
+port generation. It retains every connected named panel, makes the newest one
+the owner, and keeps older panels as ordered standbys. Replacing an owner with
+pending work first cancels that work and holds the candidate inactive until
+matching terminal cleanup; calls during the handoff fail foreground-required.
+If the owner transport disappears, its pending promises reject and the newest
+still-live standby becomes owner. Stale results and disconnects cannot affect a
+newer generation. A Task 13 signal abort sends exactly one cancel message and
+keeps the pending entry as a cleanup barrier until matching terminal traffic
+from the panel proves the provider settled; Task 13 then exposes its own first
+timeout or cancellation cause before any retry can begin.
+
+The panel owns one fresh provider, controller, and Prompt API session for each
+accepted request. Provider construction through settlement holds one
+extension-origin exclusive Web Lock, so two side-panel documents cannot overlap
+Prompt sessions; queued cancellation starts no provider, and missing Web Locks
+fails closed before construction. Cancel or a duplicate active request ID
+aborts the controller and sends its single typed terminal result only after
+provider cleanup. Port loss aborts all work and suppresses late results. A
+promoted standby may accept work immediately, but its provider remains queued
+behind the old document's lock until cleanup releases it. Unexpected Manifest
+V3 worker disconnects reconnect after 100 ms, 500 ms, then 1000 ms capped, with
+one timer at a time and reset after success. Terminal panel teardown cancels
+that timer, aborts local work, and permanently disconnects; document termination
+releases its Web Lock. With no panel, uncached background Focus classification receives
+`AI_FOREGROUND_REQUIRED` and safely skips without tab, counter, state, cache, or
+UI mutation; a cached decision still passes the existing live Focus guard.
+
 ## Persistence
 
 - `chrome.storage.local`: sessions, settings, manual groups, Focus Mode preferences/history, Drive state, AI configuration, and sync metadata.

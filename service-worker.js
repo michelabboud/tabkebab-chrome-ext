@@ -5,6 +5,8 @@ import { findDuplicates, findEmptyPages } from './core/duplicates.js';
 import { saveSession, restoreSession, listSessions, deleteSession, deleteSessions, restoreDeletedSession } from './core/sessions.js';
 import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
+import { chromeAIBrokerClient } from './core/ai/chrome-ai-broker-client.js';
+import { CHROME_AI_PORT_NAME } from './core/ai/chrome-ai-protocol.js';
 import { ProviderId } from './core/ai/provider.js';
 import { Prompts } from './core/ai/prompts.js';
 import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
@@ -887,6 +889,16 @@ async function saveToChromeBoomarks(bookmarkData, dateStr) {
 
 // ── Lifecycle Events ──
 
+export function attachChromeAIPort(port, client = chromeAIBrokerClient) {
+  if (port?.name !== CHROME_AI_PORT_NAME) return false;
+  client.attachPort(port);
+  return true;
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  attachChromeAIPort(port);
+});
+
 // Auto-save on browser startup
 chrome.runtime.onStartup.addListener(() => {
   setTimeout(async () => {
@@ -1035,6 +1047,7 @@ Distracting categories: social media, gaming, video streaming, entertainment, ne
 Productive categories: work tools, documentation, education, development, communication (work).
 Respond with JSON only: {"distraction": true/false, "category": "category name", "confidence": 0.0-1.0}`,
         userPrompt: `Is "${hostname}" a distracting website? The user is in focus mode for: ${profileName}`,
+        maxTokens: 512,
         responseFormat: 'json',
         temperature: 0.1,
       },

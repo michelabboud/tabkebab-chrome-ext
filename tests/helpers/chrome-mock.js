@@ -101,6 +101,149 @@ export function createRuntimePortPair(name = 'test-port') {
   return pair;
 }
 
+/**
+ * Install a deterministic exclusive-only Web Locks implementation for tests.
+ * The returned manager is shared by every broker started in the test realm,
+ * matching the extension-origin coordination used by real side-panel pages.
+ */
+export function installWebLocksMock() {
+  const navigatorObject = globalThis.navigator;
+  const previousDescriptor = Object.getOwnPropertyDescriptor(navigatorObject, 'locks');
+  const queues = new Map();
+  const held = new Map();
+  let active = 0;
+  let maxActive = 0;
+
+  function abortError() {
+    if (typeof DOMException === 'function') {
+      return new DOMException('The operation was aborted.', 'AbortError');
+    }
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function drain(name) {
+    if (held.has(name)) return;
+    const queue = queues.get(name);
+    const entry = queue?.shift();
+    if (!entry) {
+      queues.delete(name);
+      return;
+    }
+
+    if (entry.signal?.aborted) {
+      entry.reject(abortError());
+      drain(name);
+      return;
+    }
+
+    if (entry.signal && entry.onAbort) {
+      entry.signal.removeEventListener('abort', entry.onAbort);
+    }
+    held.set(name, entry);
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+
+    function release() {
+      if (held.get(name) !== entry) return;
+      active -= 1;
+      held.delete(name);
+      drain(name);
+    }
+
+    Promise.resolve()
+      .then(() => entry.callback({ name, mode: 'exclusive' }))
+      .then((value) => {
+        // Web Locks releases the lock before settling request(). Preserve that
+        // ordering so terminal-result tests see Chrome-accurate interleavings.
+        release();
+        entry.resolve(value);
+      }, (error) => {
+        release();
+        entry.reject(error);
+      })
+      .catch(() => {
+        // Native promise capabilities cannot throw. This terminal catch keeps
+        // an unexpected test-double bookkeeping failure from going unhandled.
+      });
+  }
+
+  const manager = {
+    request(name, options, callback) {
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      if (typeof callback !== 'function' || options?.mode !== 'exclusive') {
+        return Promise.reject(new TypeError('Test Web Locks require an exclusive callback'));
+      }
+
+      return new Promise((resolve, reject) => {
+        const entry = {
+          callback,
+          resolve,
+          reject,
+          signal: options.signal,
+          onAbort: null,
+        };
+        if (entry.signal?.aborted) {
+          reject(abortError());
+          return;
+        }
+        if (entry.signal) {
+          entry.onAbort = () => {
+            const queue = queues.get(name);
+            const index = queue?.indexOf(entry) ?? -1;
+            if (index < 0) return;
+            queue.splice(index, 1);
+            entry.signal.removeEventListener('abort', entry.onAbort);
+            reject(abortError());
+          };
+          entry.signal.addEventListener('abort', entry.onAbort, { once: true });
+        }
+        const queue = queues.get(name) ?? [];
+        queue.push(entry);
+        queues.set(name, queue);
+        drain(name);
+      });
+    },
+
+    async query() {
+      return {
+        held: [...held.keys()].map((name) => ({ name, mode: 'exclusive' })),
+        pending: [...queues.entries()].flatMap(([name, queue]) =>
+          queue.map(() => ({ name, mode: 'exclusive' }))),
+      };
+    },
+
+    get active() {
+      return active;
+    },
+
+    get maxActive() {
+      return maxActive;
+    },
+  };
+
+  Object.defineProperty(navigatorObject, 'locks', {
+    configurable: true,
+    enumerable: true,
+    value: manager,
+  });
+
+  return {
+    manager,
+    restore() {
+      if (previousDescriptor) {
+        Object.defineProperty(navigatorObject, 'locks', previousDescriptor);
+      } else {
+        delete navigatorObject.locks;
+      }
+    },
+  };
+}
+
 function discardActiveHarness() {
   if (!activeHarness) return;
 
