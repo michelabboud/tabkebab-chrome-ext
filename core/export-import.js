@@ -11,6 +11,10 @@ import { Storage } from './storage.js';
 import { getAllStashes, replaceAllStashes } from './stash-db.js';
 import { createDefaultKeepAwakeDomains } from './keep-awake-defaults.js';
 import { SETTINGS_DEFAULTS, validateSettingsPatch } from './settings.js';
+import {
+  canonicalizeLocalSessions,
+  localSessionsNeedWriteBack,
+} from './drive-sync.js';
 
 const frozenSections = (sections) => Object.freeze(sections);
 
@@ -175,6 +179,13 @@ export async function buildPortableExportPayload(kind, {
     const snapshot = requireRepositorySnapshot(await storage.getMany(keys));
     for (const section of localSections) {
       sections[section] = sectionValue(snapshot, section, { forExport: true });
+    }
+    if (localSections.includes('sessions')) {
+      const canonicalSessions = canonicalizeLocalSessions(sections.sessions);
+      if (localSessionsNeedWriteBack(sections.sessions, canonicalSessions)) {
+        await storage.setMany({ sessions: canonicalSessions });
+      }
+      sections.sessions = canonicalSessions;
     }
   }
 

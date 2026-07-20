@@ -1,6 +1,10 @@
 // core/drive-sync.js — bounded Drive sync v2 migration and deterministic merge
 
 import { Storage } from './storage.js';
+import {
+  MAX_CAPTURED_GROUP_TITLE_LENGTH,
+  MAX_CAPTURED_TEXT_LENGTH,
+} from './capture-limits.js';
 
 export const DRIVE_SYNC_VERSION = 2;
 export const DRIVE_TOMBSTONES_KEY = 'driveSyncTombstones';
@@ -130,6 +134,14 @@ function canonicalClone(value) {
     output[key] = canonicalClone(value[key]);
   }
   return output;
+}
+
+function canonicalValuesEqual(left, right) {
+  try {
+    return JSON.stringify(canonicalClone(left)) === JSON.stringify(canonicalClone(right));
+  } catch {
+    return false;
+  }
 }
 
 function sortedNullMap(entries) {
@@ -412,6 +424,94 @@ export function migrateDriveSyncDocument(input) {
   return { version: DRIVE_SYNC_VERSION, sessions, manualGroups, tombstones };
 }
 
+function sanitizeLegacySessionTimestamps(value) {
+  assertBoundedDriveJsonValue(value);
+  if (!isPlainRecord(value)) throw new TypeError('Session must be a plain object');
+  const output = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if ((key === 'createdAt' || key === 'modifiedAt') && !isEntityTimestamp(entry)) continue;
+    output[key] = entry;
+  }
+  return output;
+}
+
+function healCapturedTab(tab) {
+  if (!isPlainRecord(tab)) return tab;
+  if (typeof tab.url === 'string' && tab.url.length > MAX_DRIVE_STRING_LENGTH) return null;
+  let healed = tab;
+  if (typeof tab.title === 'string' && tab.title.length > MAX_DRIVE_STRING_LENGTH) {
+    healed = { ...healed, title: tab.title.slice(0, MAX_CAPTURED_TEXT_LENGTH) };
+  }
+  if (typeof tab.favIconUrl === 'string' && tab.favIconUrl.length > MAX_DRIVE_STRING_LENGTH) {
+    healed = healed === tab ? { ...tab } : healed;
+    healed.favIconUrl = '';
+  }
+  return healed;
+}
+
+function healCapturedTabList(tabs) {
+  const healed = [];
+  for (const tab of tabs) {
+    const captured = healCapturedTab(tab);
+    if (captured !== null) healed.push(captured);
+  }
+  return healed;
+}
+
+function healCapturedGroupList(groups) {
+  return groups.map((group) => (
+    isPlainRecord(group) &&
+    typeof group.title === 'string' &&
+    group.title.length > MAX_DRIVE_STRING_LENGTH
+      ? { ...group, title: group.title.slice(0, MAX_CAPTURED_GROUP_TITLE_LENGTH) }
+      : group
+  ));
+}
+
+function healCapturedSessionStrings(session) {
+  if (!isPlainRecord(session)) return session;
+  const healed = { ...session };
+  if (typeof healed.name === 'string' && healed.name.length > MAX_DRIVE_STRING_LENGTH) {
+    healed.name = healed.name.slice(0, MAX_CAPTURED_TEXT_LENGTH);
+  }
+  if (Array.isArray(healed.tabs)) healed.tabs = healCapturedTabList(healed.tabs);
+  if (Array.isArray(healed.windows)) {
+    healed.windows = healed.windows.map((window) => {
+      if (!isPlainRecord(window)) return window;
+      const healedWindow = { ...window };
+      if (Array.isArray(healedWindow.tabs)) {
+        healedWindow.tabs = healCapturedTabList(healedWindow.tabs);
+        healedWindow.tabCount = healedWindow.tabs.length;
+      }
+      if (Array.isArray(healedWindow.groups)) {
+        healedWindow.groups = healCapturedGroupList(healedWindow.groups);
+      }
+      return healedWindow;
+    });
+  }
+  return healed;
+}
+
+/**
+ * Heal and canonicalize stored sessions through one shared read-path policy.
+ * Session deletion, Drive sync, and portable export all call this boundary so
+ * legacy poisoned records cannot diverge between consumers.
+ */
+export function canonicalizeLocalSessions(value) {
+  if (!Array.isArray(value)) throw new TypeError('Stored sessions must be an array');
+  return migrateDriveSyncDocument({
+    version: 1,
+    sessions: value.map((session) => sanitizeLegacySessionTimestamps(
+      healCapturedSessionStrings(session),
+    )),
+    manualGroups: {},
+  }).sessions;
+}
+
+export function localSessionsNeedWriteBack(stored, canonical) {
+  return !canonicalValuesEqual(stored, canonical);
+}
+
 function canonicalEntityString(entity) {
   return JSON.stringify(canonicalClone(entity));
 }
@@ -522,9 +622,7 @@ export function canonicalizeLocalDriveSyncDocument(input) {
   const rawSessions = Object.hasOwn(input, 'sessions') ? input.sessions : undefined;
   const rawManualGroups = Object.hasOwn(input, 'manualGroups') ? input.manualGroups : undefined;
   const rawTombstones = Object.hasOwn(input, 'tombstones') ? input.tombstones : undefined;
-  const sessions = Array.isArray(rawSessions)
-    ? rawSessions.map(normalizeLocalEntity)
-    : rawSessions ?? [];
+  const sessions = canonicalizeLocalSessions(rawSessions ?? []);
   const manualGroups = isPlainRecord(rawManualGroups)
     ? sortedNullMap(Object.entries(rawManualGroups).map(
       ([id, entity]) => [id, normalizeLocalEntity(entity)],
@@ -540,11 +638,15 @@ export function canonicalizeLocalDriveSyncDocument(input) {
 
 export async function readLocalDriveSyncDocument() {
   const values = await Storage.getMany(['sessions', 'manualGroups', DRIVE_TOMBSTONES_KEY]);
-  return canonicalizeLocalDriveSyncDocument({
-    sessions: values.sessions,
+  const canonical = canonicalizeLocalDriveSyncDocument({
+    sessions: values.sessions ?? [],
     manualGroups: values.manualGroups,
     tombstones: values[DRIVE_TOMBSTONES_KEY],
   });
+  if (localSessionsNeedWriteBack(values.sessions ?? [], canonical.sessions)) {
+    await Storage.setMany({ sessions: canonical.sessions });
+  }
+  return canonical;
 }
 
 export async function writeLocalDriveSyncDocument(document) {

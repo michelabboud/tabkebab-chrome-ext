@@ -16,7 +16,7 @@ const SAFE_FAVICON_SCHEMES = new Set(['http', 'https', 'chrome', 'data']);
 
 // Render only favicon URLs that satisfy the capture-time policy; stored
 // records may predate capture sanitization or arrive through portable import.
-function safeFaviconUrl(value) {
+export function safeFaviconUrl(value) {
   if (
     typeof value !== 'string' ||
     value.length === 0 ||

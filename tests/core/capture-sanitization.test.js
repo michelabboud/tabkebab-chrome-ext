@@ -95,6 +95,18 @@ describe('capture-time sanitization (F10 regression)', () => {
     const session = await saveSession(OVERSIZED);
     expect(session.name).toHaveLength(500);
   });
+
+  test('a session with no representable tabs returns the stash-style error and writes nothing', async () => {
+    installChromeMock({
+      windows: [{ id: 1, focused: true }],
+      tabs: [liveTab(1, { url: `https://capture.test/?q=${OVERSIZED}` })],
+    });
+
+    await expect(saveSession('nothing representable')).resolves.toEqual({
+      error: 'No stashable tabs in session',
+    });
+    expect(storedSessions()).toBeUndefined();
+  });
 });
 
 describe('pre-existing poisoned sessions heal on canonicalization', () => {
@@ -174,6 +186,38 @@ describe('pre-existing poisoned sessions heal on canonicalization', () => {
     });
     const [healed] = storedSessions();
     expect(healed.windows[0].tabs).toEqual([]);
+    expect(healed.windows[0].tabCount).toBe(0);
+  });
+
+  test('sync-only reads heal poisoned sessions and persist the corrected tab count', async () => {
+    installChromeMock({
+      local: {
+        sessions: [poisonedStoredSession('poisoned-id', {
+          url: `https://poison.test/?q=${OVERSIZED}`,
+        })],
+      },
+    });
+
+    await expect(readLocalDriveSyncDocument()).resolves.toMatchObject({
+      version: 2,
+      sessions: [{ id: 'poisoned-id', windows: [{ tabCount: 0, tabs: [] }] }],
+    });
+    expect(storedSessions()[0].windows[0]).toMatchObject({ tabCount: 0, tabs: [] });
+  });
+
+  test('session-only exports heal poisoned sessions and persist the corrected shape', async () => {
+    installChromeMock({
+      local: { sessions: [poisonedStoredSession('poisoned-id')] },
+    });
+
+    await expect(buildPortableExportPayload('sessions')).resolves.toMatchObject({
+      kind: 'sessions',
+      sessions: [{ id: 'poisoned-id' }],
+    });
+    const [healed] = storedSessions();
+    expect(healed.windows[0].tabCount).toBe(1);
+    expect(healed.windows[0].tabs[0].title).toHaveLength(500);
+    expect(healed.windows[0].tabs[0].favIconUrl).toBe('');
   });
 
   test('legal legacy values between the capture and canonical bounds stay untouched', async () => {
