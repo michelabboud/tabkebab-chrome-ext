@@ -4,6 +4,33 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.18] — 2026-07-20
+
+### Added
+
+- Archived the complete reliability-hardening SDD evidence set under
+  `docs/reports/reliability-hardening-sdd/`: all Task 1–15 briefs and reports,
+  browser-smoke harnesses, review diffs, progress state, and historical release
+  notes.
+- Added archive provenance, snapshot identity, byte count, aggregate digest,
+  and guidance distinguishing historical task evidence from the canonical
+  consolidated report and exact-package matrix.
+
+### Verification note
+
+- All 47 source files (1,212,720 bytes) were copied from the merged
+  `codex/reliability-hardening` worktree's private SDD directory and verified
+  byte-for-byte with `diff -qr` plus aggregate SHA-256
+  `1d2d222539aa705fd291119ce7272808288f81a78e1bafb9537b8e2d04239e91`.
+- A high-confidence secret scan found zero private-key, OpenAI, AWS, GitHub,
+  JWT, or Google API-key signatures in the archived files. The original
+  worktree-local evidence remains intact pending separate cleanup approval.
+- Full and coverage runs pass `854 tests / 0 failures / 4813 assertions`;
+  syntax passes `2 / 0 / 125`; coverage remains `71.07%` functions and
+  `67.55%` lines. The archive source comparison, canonical Markdown links,
+  workflow YAML, matrix fences/scripts, version parity, dependency-metadata,
+  whitespace, and secret gates pass.
+
 ## [1.2.17] — 2026-07-19
 
 ### Added

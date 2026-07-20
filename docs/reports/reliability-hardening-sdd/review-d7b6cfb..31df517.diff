@@ -1,0 +1,2157 @@
+# Review package: d7b6cfb..31df51772cc7ae06e599b5c5f1f8aadc4c28bd37
+
+## Commits
+31df517 fix: harden Chrome mock isolation
+ff44e76 test: establish Bun regression boundary
+
+## Files changed
+ .github/workflows/ci.yml                           |   29 +
+ .gitignore                                         |    1 +
+ ARCHITECTURE.md                                    |   14 +-
+ CHANGELOG.md                                       |   18 +
+ CONTRIBUTING.md                                    |   22 +-
+ PROGRESS.md                                        |   16 +-
+ README.md                                          |   18 +
+ VERSION                                            |    2 +-
+ bunfig.toml                                        |    3 +
+ .../2026-07-14-tabkebab-reliability-hardening.md   |   27 +-
+ manifest.json                                      |    2 +-
+ sidepanel/message-client.js                        |    5 +
+ tests/harness.test.js                              |  329 +++++
+ tests/helpers/chrome-mock.js                       | 1293 ++++++++++++++++++++
+ tests/setup.js                                     |    6 +
+ tests/sidepanel/message-client.test.js             |   36 +
+ tests/syntax.test.js                               |   26 +
+ 17 files changed, 1822 insertions(+), 25 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..aaaa438
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,29 @@
++name: CI
++
++on:
++  pull_request:
++  workflow_dispatch:
++  push:
++    branches:
++      - main
++
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v4
++
++      - name: Set up pinned Bun
++        uses: oven-sh/setup-bun@v2
++        with:
++          bun-version-file: .bun-version
++
++      - name: Run test suite
++        run: bun test
++
++      - name: Run coverage
++        run: bun test --coverage
++
++      - name: Verify JavaScript and manifest syntax
++        run: bun test tests/syntax.test.js
+diff --git a/.gitignore b/.gitignore
+index 4804b57..2fa0e1c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,9 +1,10 @@
+ .DS_Store
+ Thumbs.db
+ *.crx
+ *.pem
+ *.zip
+ node_modules/
+ .env
+ dist/
+ .worktrees/
++coverage/
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 1c000c1..fdc2147 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -35,18 +35,30 @@ Credentials, decrypted keys, OAuth tokens, caches, and active Focus Mode state a
+ 
+ ## External boundaries
+ 
+ - Chrome tabs, windows, groups, storage, alarms, identity, side panel, and bookmarks APIs.
+ - Google Drive REST API.
+ - OpenAI, Anthropic, Gemini, and user-configured OpenAI-compatible HTTP endpoints.
+ - Chrome Prompt API in the side-panel document only.
+ 
+ ## Verification architecture
+ 
+-Bun `1.3.11` is the pinned test runtime. `bun:test` covers pure policies, data merges, response contracts, retry behavior, and mocked Chrome API orchestration without adding packages. Bun does not supply IndexedDB or a browser DOM; those integrations are verified in an unpacked-extension Chrome smoke matrix.
++Bun `1.3.11` is the pinned test runtime. `bun:test` covers pure policies, data merges, response contracts, retry behavior, and mocked Chrome API orchestration without adding packages. `bunfig.toml` preloads a fresh repository-owned Chrome double before every test and resets it afterward.
++
++The mock keeps `storage.local` and `storage.session` separate, emits Chrome-shaped storage changes, models mutable tabs/windows/groups, supplies resettable Chrome events and peer-only runtime ports, records API calls, and supports one-shot failure injection. This is a deterministic orchestration seam, not evidence that browser integration works. No DOM or IndexedDB shim is installed; DOM rendering, IndexedDB CRUD, extension lifecycle, OAuth, and Prompt API behavior stay in the unpacked-extension Chrome smoke matrix.
++
++The required local and CI gate is:
++
++```bash
++bun test
++bun test --coverage
++bun test tests/syntax.test.js
++```
++
++The final command parses every tracked or unignored JavaScript file and verifies that `manifest.json` remains Manifest V3 and mirrors `VERSION`. GitHub Actions runs this sequence for pull requests, manual dispatches, and pushes to `main`, excluding tag pushes. Chrome still loads the source tree directly; testing adds no production dependency, package manifest, build, or generated runtime code.
+ 
+ See:
+ 
+ - [Reliability hardening design](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md)
+ - [Reliability hardening implementation plan](docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md)
+ - [Architecture decision records](docs/adr/README.md)
+ - [Current progress](PROGRESS.md)
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bf11923..5864ab2 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,16 +1,34 @@
+ # Changelog
+ 
+ All notable changes to TabKebab are documented in this file.
+ 
+ ---
+ 
++## [1.2.3] — 2026-07-14
++
++### Added
++
++- Dependency-free Bun regression harness with isolated Chrome storage, events, tab/window/group state, runtime ports, call recording, and one-shot failure injection.
++- Repository-wide JavaScript parse and Manifest V3/version consistency checks.
++- Checked side-panel `sendOrThrow()` message boundary covering successful, error-shaped, rejected, and null responses.
++- GitHub Actions test gate for pull requests, manual runs, and pushes to `main` using pinned Bun `1.3.11`.
++
++### Changed
++
++- Documented the automated commands and the boundary between mocked orchestration and mandatory real-Chrome verification.
++- Ignored generated Bun coverage output while retaining test evidence reports.
++
++### Fixed
++
++- Made Chrome-mock replacement teardown deterministic, bound controls to their owning harness, cloned runtime-handler messages in both directions, and preserved original tab indexes in move events.
++
+ ## [1.2.2] — 2026-07-14
+ 
+ ### Added
+ 
+ - Detailed 15-task, three-phase TDD implementation plan mapping all thirteen reliability findings to named regression tests, real-Chrome evidence, and release checkpoints.
+ - Explicit worker serialization, Drive/input resource bounds, rollback, secret-sanitization, checked-message, AI cancellation, packaging, and exact-commit release gates.
+ 
+ ### Changed
+ 
+ - Marked the reliability-hardening written specification approved.
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 6f18135..8308f43 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -11,42 +11,54 @@ Thanks for your interest in contributing to TabKebab!
+    ```
+ 3. Create a branch from `dev`:
+    ```
+    git checkout dev
+    git checkout -b your-feature-name
+    ```
+ 4. Load the extension in Chrome:
+    - Open `chrome://extensions`
+    - Enable **Developer Mode**
+    - Click **Load unpacked** and select the project folder
++5. Install Bun `1.3.11`, the exact version pinned in `.bun-version`
++
++No package installation is required. TabKebab has no runtime or test dependencies and Chrome loads its source files directly.
+ 
+ ## Branch Strategy
+ 
+ - **`main`** — production, matches the published Chrome Web Store version
+ - **`dev`** — active development, all PRs target this branch
+ 
+ **Do not submit PRs directly to `main`.**
+ 
+ ## Submitting Changes
+ 
+ 1. Make your changes on your feature branch
+-2. Test thoroughly in Chrome
+-3. Push to your fork
+-4. Open a Pull Request targeting the **`dev`** branch
+-5. Describe what you changed and why
++2. Run the complete automated gate from the repository root:
++   ```bash
++   bun test
++   bun test --coverage
++   bun test tests/syntax.test.js
++   ```
++3. Test browser-only behavior thoroughly in unpacked Chrome
++4. Push to your fork
++5. Open a Pull Request targeting the **`dev`** branch
++6. Describe what you changed and why
++
++GitHub Actions repeats the three Bun commands, in order, for pull requests, manual dispatches, and pushes to `main`; tag pushes are excluded.
+ 
+ ## Guidelines
+ 
+ - **No frameworks, no build tools** — this project is vanilla HTML, CSS, and JS
+ - **No external dependencies** — keep it zero-dependency
+ - **Match the existing code style** — follow the patterns you see in the codebase
+-- **Test your changes** — load the extension and verify everything works
++- **Test success and failure paths** — start behavior changes with a failing regression, then run the full gate
++- **Respect the test boundary** — the Chrome mock verifies policy and API orchestration, not DOM, IndexedDB, extension lifecycle, OAuth, or Prompt API behavior; verify those in real Chrome
+ - **Keep PRs focused** — one feature or fix per PR
+ 
+ ## Reporting Bugs
+ 
+ Open an issue at [GitHub Issues](https://github.com/michelabboud/tabkebab-chrome-ext/issues) with:
+ - What you expected to happen
+ - What actually happened
+ - Steps to reproduce
+ - Chrome version and OS
+ 
+diff --git a/PROGRESS.md b/PROGRESS.md
+index 11d20b1..d8501ef 100644
+--- a/PROGRESS.md
++++ b/PROGRESS.md
+@@ -1,19 +1,27 @@
+ # TabKebab Progress
+ 
+ ## Current state
+ 
+-- Repository version: `1.2.2`
++- Repository version: `1.2.3`
+ - Active initiative: reliability and data-safety hardening
+ - Design status: architecture and written specification approved on 2026-07-14
+-- Plan status: detailed 15-task TDD implementation plan ready for approval
+-- Implementation status: not started
++- Plan status: approved 15-task TDD implementation plan in progress
++- Implementation status: Task 1 complete; Bun regression and CI boundary established
++
++## Completed implementation slices
++
++### Task 1 — Bun regression and CI boundary (`1.2.3`)
++
++- Added the pinned Bun preload, isolated Chrome API mock, syntax/version checks, and checked side-panel message client.
++- Added the three-command GitHub Actions gate for pull requests, manual dispatches, and `main` pushes while excluding tag pushes.
++- Kept the runtime dependency-free and directly loadable by Chrome; browser-only DOM, IndexedDB, lifecycle, OAuth, and Prompt API behavior remain real-Chrome gates.
+ 
+ ## Confirmed remediation scope
+ 
+ The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
+ 
+ 1. Preserve stashes after incomplete restores.
+ 2. Preserve canonical Google Drive sync and settings files during retention cleanup.
+ 3. Cancel stale Focus Mode actions and make teardown non-blocking.
+ 4. Apply URL, domain, and Chrome-group allowlists consistently, including strict-empty behavior.
+ 5. Match natural-language domain filters by exact host or subdomain.
+@@ -29,11 +37,11 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
+ ## Approved technical direction
+ 
+ - Deliver narrow, independently testable hardening slices instead of a large rewrite.
+ - Use Bun `1.3.11` and `bun:test` for zero-package unit and integration tests.
+ - Use explicit Chrome API test doubles for non-browser tests.
+ - Keep IndexedDB, DOM, extension-context messaging, and Prompt API verification in the real-Chrome smoke matrix.
+ - Preserve backward compatibility for existing local data, Drive sync version 1, and export version 1.
+ 
+ ## Next gate
+ 
+-Michel reviews and explicitly approves `docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md`. After approval, execution starts with Task 1's Bun regression/CI boundary and proceeds through the plan's task and phase release checkpoints.
++Task 2 makes session and stash restoration complete-or-recoverable, with exact restore outcomes, source retention after partial failure, and mute/discard/unmute regression coverage.
+diff --git a/README.md b/README.md
+index 2f49308..2a20912 100644
+--- a/README.md
++++ b/README.md
+@@ -184,26 +184,44 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
+ 
+ See [Google Drive Setup Guide](store/google-drive-setup.md) for OAuth configuration.
+ 
+ ### Setting up AI features (optional)
+ 
+ 1. Open Settings in the side panel
+ 2. Scroll to the AI section (visible after connecting a provider)
+ 3. Select a provider, enter your API key, and choose a model
+ 4. The AI command bar and smart grouping features will activate
+ 
++## Development and verification
++
++The extension remains dependency-free and Chrome loads this repository directly; there is no package install, bundler, or generated runtime output. Automated tests use Bun `1.3.11`, pinned in [`.bun-version`](.bun-version). Install that exact Bun version and verify it with `bun --version` before running the gate.
++
++Run the same commands required by CI from the repository root:
++
++```bash
++bun test
++bun test --coverage
++bun test tests/syntax.test.js
++```
++
++The repository-owned Chrome mock resets local/session storage, listeners, tab/window/group state, runtime ports, failures, and call records between tests. It is intentionally an orchestration boundary, not a browser emulator: DOM, IndexedDB, extension lifecycle, OAuth, and Chrome Prompt API behavior still require the unpacked-extension Chrome smoke matrix.
++
++GitHub Actions runs all three commands, in that order, for pull requests, manual dispatches, and pushes to `main`. Tag pushes do not trigger this workflow.
++
+ ## Project Structure
+ 
+ ```
+ TabKebab/
+   manifest.json              # Extension manifest (MV3)
++  bunfig.toml                # Bun test preload and coverage settings
+   service-worker.js          # Background service worker & message hub
++  tests/                     # Bun regressions and Chrome API test doubles
+   icons/                     # Logo and icon assets (SVG + PNG)
+   core/
+     tabs-api.js              # Chrome tabs/windows API wrapper
+     sessions.js              # Session save/restore with v1→v2 migration
+     stash-db.js              # IndexedDB stash storage
+     grouping.js              # 4-phase grouping orchestrator
+     duplicates.js            # Duplicate tab detection + empty pages
+     focus.js                 # Focus Mode engine: state, timer, blocking
+     focus-profiles.js        # Built-in focus profiles
+     focus-blocklists.js      # Curated distraction blocklists
+diff --git a/VERSION b/VERSION
+index 23aa839..0495c4a 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.2.2
++1.2.3
+diff --git a/bunfig.toml b/bunfig.toml
+new file mode 100644
+index 0000000..ffc87b3
+--- /dev/null
++++ b/bunfig.toml
+@@ -0,0 +1,3 @@
++[test]
++preload = ["./tests/setup.js"]
++coverageSkipTestFiles = true
+diff --git a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+index a41b960..ec225a0 100644
+--- a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
++++ b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+@@ -76,58 +76,59 @@
+ export function createChromeEvent();
+ export function createRuntimePortPair(name = 'test-port');
+ // returns { clientPort, workerPort }
+ export function installChromeMock(overrides = {});
+ export function resetChromeMock();
+ export function readStorageArea(areaName);
+ ```
+ 
+ `installChromeMock()` accepts `{ local, session, tabs, windows, groups, failures, runtimeHandler }`, installs the global `chrome`, and returns `{ calls, setRuntimeHandler, snapshot, connect }`. It must provide resettable `storage.local`, `storage.session`, `storage.onChanged`, `runtime.sendMessage`, `runtime.connect`, `runtime.onMessage`, `runtime.onConnect`, `runtime.onStartup`, `runtime.onInstalled`, tabs/windows/tabGroups events, alarms, action, sidePanel, bookmarks, identity, and call-recording stubs. Storage setters must emit Chrome-shaped change records and support one-shot injected failures. `runtime.connect()` returns the client port from `createRuntimePortPair()`, dispatches its worker peer through `runtime.onConnect`, posts only to the peer, and disconnects both ends exactly once.
+ 
+-- [ ] Create `tests/harness.test.js` first. Assert test-to-test storage/listener isolation, local/session separation, Chrome-shaped change events, seeded tab/window/group mutations, listener removal, peer-only port delivery, one-shot disconnect, and one-shot failure injection.
+-- [ ] Run `bun test tests/harness.test.js` and preserve the expected failures before the helper and preload are implemented.
+-- [ ] Create `tests/syntax.test.js`. Use `Bun.spawnSync(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.js'])` to enumerate tracked plus not-yet-added JavaScript while excluding ignored output, `new Bun.Transpiler({ loader: 'js' }).transformSync(source)` to parse each file, and `JSON.parse` plus assertions to verify `manifest_version === 3` and `manifest.version === VERSION`.
++- [x] Create `tests/harness.test.js` first. Assert test-to-test storage/listener isolation, local/session separation, Chrome-shaped change events, seeded tab/window/group mutations, listener removal, peer-only port delivery, one-shot disconnect, and one-shot failure injection.
++- [x] Run `bun test tests/harness.test.js` and preserve the expected failures before the helper and preload are implemented.
++- [x] Create `tests/syntax.test.js`. Use `Bun.spawnSync(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.js'])` to enumerate tracked plus not-yet-added JavaScript while excluding ignored output, `new Bun.Transpiler({ loader: 'js' }).transformSync(source)` to parse each file, and `JSON.parse` plus assertions to verify `manifest_version === 3` and `manifest.version === VERSION`.
+ 
+ ```js
+ test('every repository JavaScript file parses', async () => {
+   const listed = Bun.spawnSync([
+     'git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.js',
+   ]);
+   expect(listed.exitCode).toBe(0);
+   const files = new TextDecoder()
+     .decode(listed.stdout)
+     .split('\0')
+     .filter(Boolean);
+   expect(files.length).toBeGreaterThan(0);
+   const transpiler = new Bun.Transpiler({ loader: 'js' });
+   for (const file of files) {
+-    expect(() => transpiler.transformSync(await Bun.file(file).text())).not.toThrow();
++    const source = await Bun.file(file).text();
++    expect(() => transpiler.transformSync(source)).not.toThrow();
+   }
+ });
+ ```
+ 
+-- [ ] Implement `tests/helpers/chrome-mock.js`. Each event returned by `createChromeEvent()` must expose `addListener`, `removeListener`, `hasListener`, and an async `dispatch(...args)` that awaits listeners.
+-- [ ] Implement `tests/setup.js` with `beforeEach(() => installChromeMock())` and `afterEach(() => resetChromeMock())`. Do not install DOM or IndexedDB shims.
+-- [ ] Write `tests/sidepanel/message-client.test.js` red first, then create the approved `sendOrThrow()` implementation in `sidepanel/message-client.js`. Cover unchanged success, `{ error }` rejection, native rejection, and valid null; later tasks consume this boundary rather than reimplementing error checks.
+-- [ ] Add `bunfig.toml`:
++- [x] Implement `tests/helpers/chrome-mock.js`. Each event returned by `createChromeEvent()` must expose `addListener`, `removeListener`, `hasListener`, and an async `dispatch(...args)` that awaits listeners.
++- [x] Implement `tests/setup.js` with `beforeEach(() => installChromeMock())` and `afterEach(() => resetChromeMock())`. Do not install DOM or IndexedDB shims.
++- [x] Write `tests/sidepanel/message-client.test.js` red first, then create the approved `sendOrThrow()` implementation in `sidepanel/message-client.js`. Cover unchanged success, `{ error }` rejection, native rejection, and valid null; later tasks consume this boundary rather than reimplementing error checks.
++- [x] Add `bunfig.toml`:
+ 
+ ```toml
+ [test]
+ preload = ["./tests/setup.js"]
+ coverageSkipTestFiles = true
+ ```
+ 
+-- [ ] Add `.github/workflows/ci.yml` with a `test` job on `pull_request`, `workflow_dispatch`, and pushes to `main` only (not tag pushes). Use `actions/checkout@v4` and `oven-sh/setup-bun@v2` with `bun-version-file: .bun-version`. Its required commands, in order, are `bun test`, `bun test --coverage`, and `bun test tests/syntax.test.js`.
+-- [ ] Add `coverage/` to `.gitignore`. Do not ignore test evidence reports.
+-- [ ] Run `bun test tests/harness.test.js`, then all three global commands, and confirm zero failures. Confirm `git status --short` contains no coverage output.
+-- [ ] Document the pinned Bun prerequisite, local commands, mock-versus-Chrome boundary, and CI gate in `README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
+-- [ ] Close the task using the global version/docs/commit/tag/push chain.
++- [x] Add `.github/workflows/ci.yml` with a `test` job on `pull_request`, `workflow_dispatch`, and pushes to `main` only (not tag pushes). Use `actions/checkout@v4` and `oven-sh/setup-bun@v2` with `bun-version-file: .bun-version`. Its required commands, in order, are `bun test`, `bun test --coverage`, and `bun test tests/syntax.test.js`.
++- [x] Add `coverage/` to `.gitignore`. Do not ignore test evidence reports.
++- [x] Run `bun test tests/harness.test.js`, then all three global commands, and confirm zero failures. Confirm `git status --short` contains no coverage output.
++- [x] Document the pinned Bun prerequisite, local commands, mock-versus-Chrome boundary, and CI gate in `README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
++- [x] Close the task using the global version/docs/commit/tag/push chain.
+ 
+ ### Task 2: Make session and stash restoration complete-or-recoverable
+ 
+ **Findings:** 1 and 12
+ 
+ **Release checkpoint:** expected `v1.2.4`
+ 
+ **Files:**
+ 
+ - Create: `core/restore-outcome.js`
+diff --git a/manifest.json b/manifest.json
+index 4a1a09f..2e1ba3e 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -1,14 +1,14 @@
+ {
+   "manifest_version": 3,
+   "name": "TabKebab",
+-  "version": "1.2.2",
++  "version": "1.2.3",
+   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
+ 
+   "permissions": [
+     "tabs",
+     "tabGroups",
+     "storage",
+     "sidePanel",
+     "identity",
+     "alarms",
+     "bookmarks"
+diff --git a/sidepanel/message-client.js b/sidepanel/message-client.js
+new file mode 100644
+index 0000000..6c1d697
+--- /dev/null
++++ b/sidepanel/message-client.js
+@@ -0,0 +1,5 @@
++export async function sendOrThrow(message) {
++  const response = await chrome.runtime.sendMessage(message);
++  if (response?.error) throw new Error(response.error);
++  return response;
++}
+diff --git a/tests/harness.test.js b/tests/harness.test.js
+new file mode 100644
+index 0000000..162b76f
+--- /dev/null
++++ b/tests/harness.test.js
+@@ -0,0 +1,329 @@
++import { describe, expect, test } from 'bun:test';
++
++import {
++  createChromeEvent,
++  createRuntimePortPair,
++  installChromeMock,
++  readStorageArea,
++} from './helpers/chrome-mock.js';
++
++let previousStorageEvent;
++let previousStorageListener;
++let previousClientPort;
++let previousWorkerPort;
++let previousPortDisconnects;
++
++describe('Chrome mock harness', () => {
++  test('a test can mutate storage and listeners without leaking them', async () => {
++    previousStorageEvent = chrome.storage.onChanged;
++    previousStorageListener = () => {};
++    previousStorageEvent.addListener(previousStorageListener);
++
++    await chrome.storage.local.set({ leaked: true });
++
++    expect(readStorageArea('local')).toEqual({ leaked: true });
++    expect(previousStorageEvent.hasListener(previousStorageListener)).toBe(true);
++  });
++
++  test('the preload gives the next test isolated storage and listeners', () => {
++    expect(readStorageArea('local')).toEqual({});
++    expect(readStorageArea('session')).toEqual({});
++    expect(chrome.storage.onChanged).not.toBe(previousStorageEvent);
++    expect(previousStorageEvent.hasListener(previousStorageListener)).toBe(false);
++  });
++
++  test('a test can open a runtime port without leaking it', () => {
++    const harness = installChromeMock();
++    previousPortDisconnects = { client: 0, worker: 0 };
++    chrome.runtime.onConnect.addListener((port) => {
++      previousWorkerPort = port;
++    });
++
++    previousClientPort = harness.connect('isolated-port');
++    previousClientPort.onDisconnect.addListener(() => previousPortDisconnects.client++);
++    previousWorkerPort.onDisconnect.addListener(() => previousPortDisconnects.worker++);
++  });
++
++  test('the preload disconnects both ends of ports from the prior test', () => {
++    expect(previousPortDisconnects).toEqual({ client: 1, worker: 1 });
++    expect(() => previousClientPort.postMessage({ stale: true })).toThrow('disconnected');
++    expect(() => previousWorkerPort.postMessage({ stale: true })).toThrow('disconnected');
++  });
++
++  test('install cannot expose a replacement harness to prior asynchronous teardown', async () => {
++    const firstHarness = installChromeMock();
++    const clientPort = firstHarness.connect('async-teardown');
++    clientPort.onDisconnect.addListener(async () => {
++      await Promise.resolve();
++      await chrome.storage.local.set({ leakedFromPriorHarness: true });
++    });
++
++    const replacementHarness = installChromeMock();
++    await Promise.resolve();
++    await Promise.resolve();
++
++    expect(replacementHarness.snapshot().local).toEqual({});
++  });
++
++  test('stale harness controls cannot replace the active runtime handler', async () => {
++    const staleHarness = installChromeMock({
++      runtimeHandler: () => ({ owner: 'first' }),
++    });
++    installChromeMock({ runtimeHandler: () => ({ owner: 'current' }) });
++
++    staleHarness.setRuntimeHandler(() => ({ owner: 'stale' }));
++
++    await expect(chrome.runtime.sendMessage({ type: 'owner' })).resolves.toEqual({
++      owner: 'current',
++    });
++  });
++
++  test('runtime handlers receive and return serialized message values', async () => {
++    const callerMessage = { type: 'clone', nested: { owner: 'caller' } };
++    const handlerResponse = { ok: true, nested: { owner: 'handler' } };
++    installChromeMock({
++      runtimeHandler(message) {
++        message.nested.owner = 'mutated by handler';
++        return handlerResponse;
++      },
++    });
++
++    const received = await chrome.runtime.sendMessage(callerMessage);
++    received.nested.owner = 'mutated by caller';
++
++    expect(callerMessage).toEqual({ type: 'clone', nested: { owner: 'caller' } });
++    expect(handlerResponse).toEqual({ ok: true, nested: { owner: 'handler' } });
++  });
++
++  test('local and session storage remain separate', async () => {
++    await chrome.storage.local.set({ shared: 'local', localOnly: true });
++    await chrome.storage.session.set({ shared: 'session', sessionOnly: true });
++
++    expect(await chrome.storage.local.get(['shared', 'sessionOnly'])).toEqual({
++      shared: 'local',
++    });
++    expect(await chrome.storage.session.get(['shared', 'localOnly'])).toEqual({
++      shared: 'session',
++    });
++  });
++
++  test('storage setters emit Chrome-shaped change records', async () => {
++    const changes = [];
++    chrome.storage.onChanged.addListener((changeRecord, areaName) => {
++      changes.push([changeRecord, areaName]);
++    });
++
++    await chrome.storage.local.set({ theme: 'dark', enabled: true });
++    await chrome.storage.local.set({ theme: 'light' });
++
++    expect(changes).toEqual([
++      [
++        {
++          theme: { newValue: 'dark' },
++          enabled: { newValue: true },
++        },
++        'local',
++      ],
++      [
++        {
++          theme: { oldValue: 'dark', newValue: 'light' },
++        },
++        'local',
++      ],
++    ]);
++  });
++
++  test('storage.getBytesInUse records only its own API call', async () => {
++    const harness = installChromeMock({ local: { theme: 'dark' } });
++
++    expect(await chrome.storage.local.getBytesInUse('theme')).toBeGreaterThan(0);
++    expect(harness.calls.storage.local.getBytesInUse).toEqual([['theme']]);
++    expect(harness.calls.storage.local.get).toEqual([]);
++  });
++
++  test('seeded tabs, windows, and groups mutate through Chrome APIs', async () => {
++    const harness = installChromeMock({
++      tabs: [
++        {
++          id: 11,
++          windowId: 7,
++          index: 0,
++          groupId: -1,
++          active: true,
++          pinned: false,
++          url: 'https://one.test/',
++          title: 'One',
++        },
++      ],
++      windows: [{ id: 7, focused: true, state: 'normal', type: 'normal' }],
++      groups: [
++        { id: 31, windowId: 7, title: 'Work', color: 'blue', collapsed: false },
++      ],
++    });
++
++    const created = await chrome.tabs.create({
++      windowId: 7,
++      active: false,
++      url: 'https://two.test/',
++    });
++    await chrome.tabs.update(created.id, { pinned: true });
++    await chrome.tabs.group({ tabIds: [created.id], groupId: 31 });
++    await chrome.windows.update(7, { state: 'maximized' });
++    await chrome.tabGroups.update(31, { title: 'Deep Work', color: 'purple' });
++
++    const snapshot = harness.snapshot();
++    expect(snapshot.tabs).toContainEqual(
++      expect.objectContaining({
++        id: created.id,
++        windowId: 7,
++        groupId: 31,
++        pinned: true,
++        url: 'https://two.test/',
++      }),
++    );
++    expect(snapshot.windows).toContainEqual(
++      expect.objectContaining({ id: 7, state: 'maximized' }),
++    );
++    expect(snapshot.groups).toContainEqual(
++      expect.objectContaining({ id: 31, title: 'Deep Work', color: 'purple' }),
++    );
++    expect(harness.calls.tabs.create).toHaveLength(1);
++    expect(harness.calls.tabs.update).toHaveLength(1);
++    expect(harness.calls.tabs.group).toHaveLength(1);
++  });
++
++  test('tabs.move reports the original and destination indexes', async () => {
++    installChromeMock({
++      windows: [{ id: 1, focused: true, state: 'normal', type: 'normal' }],
++      tabs: [
++        { id: 10, windowId: 1, index: 0, url: 'https://one.test/' },
++        { id: 11, windowId: 1, index: 1, url: 'https://two.test/' },
++        { id: 12, windowId: 1, index: 2, url: 'https://three.test/' },
++      ],
++    });
++    const moves = [];
++    chrome.tabs.onMoved.addListener((tabId, moveInfo) => moves.push([tabId, moveInfo]));
++
++    await chrome.tabs.move(10, { index: 2 });
++
++    expect(moves).toEqual([
++      [10, { windowId: 1, fromIndex: 0, toIndex: 2 }],
++    ]);
++  });
++
++  test('windows.create focuses a new window by default', async () => {
++    const harness = installChromeMock({
++      windows: [{ id: 1, focused: true, state: 'normal', type: 'normal' }],
++    });
++
++    const created = await chrome.windows.create({ url: 'https://new.test/' });
++
++    expect(created.focused).toBe(true);
++    expect(harness.snapshot().windows).toEqual([
++      expect.objectContaining({ id: 1, focused: false }),
++      expect.objectContaining({ id: created.id, focused: true }),
++    ]);
++  });
++
++  test('windows.create preserves focus when the new window opts out', async () => {
++    const harness = installChromeMock({
++      windows: [{ id: 1, focused: true, state: 'normal', type: 'normal' }],
++    });
++
++    const created = await chrome.windows.create({
++      focused: false,
++      url: 'https://background.test/',
++    });
++
++    expect(created.focused).toBe(false);
++    expect(harness.snapshot().windows).toEqual([
++      expect.objectContaining({ id: 1, focused: true }),
++      expect.objectContaining({ id: created.id, focused: false }),
++    ]);
++  });
++
++  test('events remove listeners and await asynchronous listeners', async () => {
++    const event = createChromeEvent();
++    const received = [];
++    const listener = async (value) => {
++      await Promise.resolve();
++      received.push(value);
++    };
++
++    event.addListener(listener);
++    expect(event.hasListener(listener)).toBe(true);
++    await event.dispatch('first');
++    event.removeListener(listener);
++    await event.dispatch('second');
++
++    expect(event.hasListener(listener)).toBe(false);
++    expect(received).toEqual(['first']);
++  });
++
++  test('runtime ports deliver only to their peer and disconnect both ends once', async () => {
++    const { clientPort, workerPort } = createRuntimePortPair('chrome-ai');
++    const clientMessages = [];
++    const workerMessages = [];
++    let clientDisconnects = 0;
++    let workerDisconnects = 0;
++
++    clientPort.onMessage.addListener((message) => clientMessages.push(message));
++    workerPort.onMessage.addListener((message) => workerMessages.push(message));
++    clientPort.onDisconnect.addListener(() => clientDisconnects++);
++    workerPort.onDisconnect.addListener(() => workerDisconnects++);
++
++    await clientPort.postMessage({ request: 1 });
++    expect(clientMessages).toEqual([]);
++    expect(workerMessages).toEqual([{ request: 1 }]);
++
++    await workerPort.postMessage({ response: 1 });
++    expect(clientMessages).toEqual([{ response: 1 }]);
++    expect(workerMessages).toEqual([{ request: 1 }]);
++
++    await clientPort.disconnect();
++    await workerPort.disconnect();
++    expect(clientDisconnects).toBe(1);
++    expect(workerDisconnects).toBe(1);
++  });
++
++  test('runtime.connect returns the client and dispatches its worker peer', async () => {
++    let connectedWorker;
++    chrome.runtime.onConnect.addListener((port) => {
++      connectedWorker = port;
++    });
++
++    const client = chrome.runtime.connect({ name: 'focus-ai' });
++    expect(client.name).toBe('focus-ai');
++    expect(connectedWorker?.name).toBe('focus-ai');
++
++    const messages = [];
++    connectedWorker.onMessage.addListener((message) => messages.push(message));
++    await client.postMessage({ type: 'classify' });
++    expect(messages).toEqual([{ type: 'classify' }]);
++  });
++
++  test('runtime.sendMessage awaits an asynchronous sendResponse channel', async () => {
++    chrome.runtime.onMessage.addListener((_message, _sender, sendResponse) => {
++      setTimeout(() => sendResponse({ ok: true }), 0);
++      return true;
++    });
++
++    await expect(chrome.runtime.sendMessage({ type: 'delayed' })).resolves.toEqual({
++      ok: true,
++    });
++  });
++
++  test('failure injection rejects once and then allows the next call', async () => {
++    installChromeMock({
++      failures: {
++        'storage.local.set': [new Error('disk unavailable')],
++      },
++    });
++
++    await expect(chrome.storage.local.set({ first: true })).rejects.toThrow(
++      'disk unavailable',
++    );
++    await expect(chrome.storage.local.set({ second: true })).resolves.toBeUndefined();
++    expect(readStorageArea('local')).toEqual({ second: true });
++  });
++});
+diff --git a/tests/helpers/chrome-mock.js b/tests/helpers/chrome-mock.js
+new file mode 100644
+index 0000000..21d84e4
+--- /dev/null
++++ b/tests/helpers/chrome-mock.js
+@@ -0,0 +1,1293 @@
++const eventListeners = new WeakMap();
++const runtimePortControls = new WeakMap();
++
++let activeHarness = null;
++
++function clone(value) {
++  if (value === undefined) return undefined;
++  return structuredClone(value);
++}
++
++function cloneArgs(args) {
++  return args.map((arg) => (typeof arg === 'function' ? arg : clone(arg)));
++}
++
++function clearEvent(event) {
++  eventListeners.get(event)?.clear();
++}
++
++export function createChromeEvent() {
++  const listeners = new Set();
++  const event = {
++    addListener(listener) {
++      if (typeof listener !== 'function') {
++        throw new TypeError('Chrome event listeners must be functions');
++      }
++      listeners.add(listener);
++    },
++
++    removeListener(listener) {
++      listeners.delete(listener);
++    },
++
++    hasListener(listener) {
++      return listeners.has(listener);
++    },
++
++    async dispatch(...args) {
++      return Promise.all([...listeners].map((listener) => listener(...args)));
++    },
++  };
++
++  eventListeners.set(event, listeners);
++  activeHarness?.events.add(event);
++  return event;
++}
++
++export function createRuntimePortPair(name = 'test-port') {
++  const clientOnMessage = createChromeEvent();
++  const clientOnDisconnect = createChromeEvent();
++  const workerOnMessage = createChromeEvent();
++  const workerOnDisconnect = createChromeEvent();
++  let disconnected = false;
++
++  async function disconnectPair() {
++    if (disconnected) return;
++    disconnected = true;
++    await Promise.all([
++      clientOnDisconnect.dispatch(clientPort),
++      workerOnDisconnect.dispatch(workerPort),
++    ]);
++  }
++
++  function ensureConnected() {
++    if (disconnected) {
++      throw new Error(`Port "${name}" is disconnected`);
++    }
++  }
++
++  const clientPort = {
++    name,
++    onMessage: clientOnMessage,
++    onDisconnect: clientOnDisconnect,
++    postMessage(message) {
++      ensureConnected();
++      return workerOnMessage.dispatch(clone(message), workerPort);
++    },
++    disconnect: disconnectPair,
++  };
++
++  const workerPort = {
++    name,
++    sender: {
++      id: 'tabkebab-test-extension',
++      url: 'chrome-extension://tabkebab-test-extension/sidepanel/panel.html',
++    },
++    onMessage: workerOnMessage,
++    onDisconnect: workerOnDisconnect,
++    postMessage(message) {
++      ensureConnected();
++      return clientOnMessage.dispatch(clone(message), clientPort);
++    },
++    disconnect: disconnectPair,
++  };
++
++  const pair = { clientPort, workerPort };
++  runtimePortControls.set(pair, {
++    invalidate() {
++      disconnected = true;
++    },
++  });
++  return pair;
++}
++
++function discardActiveHarness() {
++  if (!activeHarness) return;
++
++  const harness = activeHarness;
++  for (const connection of harness.connections) {
++    runtimePortControls.get(connection)?.invalidate();
++  }
++  for (const event of harness.events) clearEvent(event);
++  if (harness.hadChrome) {
++    globalThis.chrome = harness.previousChrome;
++  } else {
++    delete globalThis.chrome;
++  }
++  activeHarness = null;
++}
++
++function createCalls() {
++  const methods = (names) => Object.fromEntries(names.map((name) => [name, []]));
++
++  return {
++    storage: {
++      local: methods(['get', 'set', 'remove', 'clear', 'getBytesInUse', 'setAccessLevel']),
++      session: methods(['get', 'set', 'remove', 'clear', 'getBytesInUse', 'setAccessLevel']),
++    },
++    runtime: methods(['sendMessage', 'connect']),
++    tabs: methods([
++      'query',
++      'get',
++      'create',
++      'update',
++      'remove',
++      'discard',
++      'move',
++      'group',
++      'ungroup',
++      'goBack',
++      'reload',
++      'sendMessage',
++    ]),
++    windows: methods(['get', 'getAll', 'getCurrent', 'getLastFocused', 'create', 'update', 'remove']),
++    tabGroups: methods(['get', 'query', 'update', 'move']),
++    alarms: methods(['create', 'get', 'getAll', 'clear', 'clearAll']),
++    action: methods([
++      'setBadgeText',
++      'getBadgeText',
++      'setBadgeBackgroundColor',
++      'getBadgeBackgroundColor',
++      'setTitle',
++      'getTitle',
++      'setIcon',
++      'enable',
++      'disable',
++    ]),
++    sidePanel: methods(['open', 'setOptions', 'getOptions', 'setPanelBehavior']),
++    bookmarks: methods([
++      'get',
++      'getTree',
++      'getChildren',
++      'create',
++      'update',
++      'move',
++      'remove',
++      'removeTree',
++      'search',
++    ]),
++    identity: methods([
++      'getAuthToken',
++      'removeCachedAuthToken',
++      'clearAllCachedAuthTokens',
++      'launchWebAuthFlow',
++      'getProfileUserInfo',
++    ]),
++  };
++}
++
++function makeFailureQueues(failures) {
++  return new Map(
++    Object.entries(failures).map(([path, configured]) => [
++      path,
++      Array.isArray(configured) ? [...configured] : [configured],
++    ]),
++  );
++}
++
++function makeEventSet(names) {
++  return Object.fromEntries(names.map((name) => [name, createChromeEvent()]));
++}
++
++function nextId(items, minimum = 1) {
++  return Math.max(minimum - 1, ...items.map(({ id }) => Number(id) || 0)) + 1;
++}
++
++function normalizeWindow(window, id) {
++  return {
++    id,
++    focused: false,
++    incognito: false,
++    alwaysOnTop: false,
++    type: 'normal',
++    state: 'normal',
++    ...clone(window),
++    id,
++  };
++}
++
++function normalizeTab(tab, id, windowId, index) {
++  return {
++    id,
++    windowId,
++    index,
++    groupId: -1,
++    active: false,
++    highlighted: false,
++    pinned: false,
++    audible: false,
++    discarded: false,
++    autoDiscardable: true,
++    status: 'complete',
++    title: '',
++    url: 'about:blank',
++    mutedInfo: { muted: false },
++    ...clone(tab),
++    id,
++    windowId,
++    index,
++  };
++}
++
++function normalizeGroup(group, id, windowId) {
++  return {
++    id,
++    windowId,
++    title: '',
++    color: 'grey',
++    collapsed: false,
++    ...clone(group),
++    id,
++    windowId,
++  };
++}
++
++function wildcardMatches(value, pattern) {
++  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
++  return new RegExp(`^${escaped}$`).test(value);
++}
++
++export function installChromeMock(overrides = {}) {
++  discardActiveHarness();
++
++  const {
++    local = {},
++    session = {},
++    tabs = [],
++    windows = [],
++    groups = [],
++    failures = {},
++    runtimeHandler = null,
++  } = overrides;
++
++  const hadChrome = Object.hasOwn(globalThis, 'chrome');
++  const previousChrome = globalThis.chrome;
++  const calls = createCalls();
++  const failureQueues = makeFailureQueues(failures);
++  const storageState = {
++    local: clone(local),
++    session: clone(session),
++  };
++  const state = {
++    tabs: [],
++    windows: [],
++    groups: [],
++    alarms: new Map(),
++    bookmarks: [
++      { id: '0', title: '', children: [{ id: '1', parentId: '0', title: 'Bookmarks bar', children: [] }] },
++    ],
++    action: {
++      badgeText: '',
++      badgeBackgroundColor: null,
++      title: '',
++      enabled: true,
++    },
++    sidePanel: {
++      behavior: {},
++      options: new Map(),
++    },
++    identity: {
++      authToken: 'test-auth-token',
++      profile: { email: '', id: '' },
++    },
++  };
++
++  const harness = {
++    calls,
++    events: new Set(),
++    hadChrome,
++    previousChrome,
++    state,
++    storageState,
++    runtimeHandler,
++    connections: new Set(),
++  };
++  activeHarness = harness;
++
++  for (const seededWindow of windows) {
++    const id = seededWindow.id ?? nextId(state.windows);
++    state.windows.push(normalizeWindow(seededWindow, id));
++  }
++
++  for (const seededTab of tabs) {
++    const windowId = seededTab.windowId ?? state.windows[0]?.id ?? 1;
++    if (!state.windows.some(({ id }) => id === windowId)) {
++      state.windows.push(normalizeWindow({}, windowId));
++    }
++    const siblingCount = state.tabs.filter((tab) => tab.windowId === windowId).length;
++    const id = seededTab.id ?? nextId(state.tabs);
++    state.tabs.push(normalizeTab(seededTab, id, windowId, seededTab.index ?? siblingCount));
++  }
++
++  for (const seededGroup of groups) {
++    const windowId = seededGroup.windowId ?? state.windows[0]?.id ?? 1;
++    if (!state.windows.some(({ id }) => id === windowId)) {
++      state.windows.push(normalizeWindow({}, windowId));
++    }
++    const id = seededGroup.id ?? nextId(state.groups);
++    state.groups.push(normalizeGroup(seededGroup, id, windowId));
++  }
++
++  function record(domain, method, args) {
++    if (domain === 'storage') {
++      const [operation, ...operationArgs] = args;
++      calls.storage[method][operation].push(cloneArgs(operationArgs));
++      return;
++    }
++    calls[domain][method].push(cloneArgs(args));
++  }
++
++  function failOnce(path, args) {
++    const queue = failureQueues.get(path);
++    if (!queue?.length) return;
++    let failure = queue.shift();
++    if (typeof failure === 'function') failure = failure(...args);
++    if (failure == null || failure === false) return;
++    throw failure instanceof Error ? failure : new Error(String(failure));
++  }
++
++  function reindexTabs(windowId) {
++    state.tabs
++      .filter((tab) => tab.windowId === windowId)
++      .sort((left, right) => left.index - right.index)
++      .forEach((tab, index) => {
++        tab.index = index;
++      });
++  }
++
++  function findTab(tabId) {
++    const tab = state.tabs.find(({ id }) => id === tabId);
++    if (!tab) throw new Error(`No tab with id: ${tabId}`);
++    return tab;
++  }
++
++  function findWindow(windowId) {
++    const window = state.windows.find(({ id }) => id === windowId);
++    if (!window) throw new Error(`No window with id: ${windowId}`);
++    return window;
++  }
++
++  function findGroup(groupId) {
++    const group = state.groups.find(({ id }) => id === groupId);
++    if (!group) throw new Error(`No tab group with id: ${groupId}`);
++    return group;
++  }
++
++  function populatedWindow(window, populate) {
++    const result = clone(window);
++    if (populate) {
++      result.tabs = state.tabs
++        .filter(({ windowId }) => windowId === window.id)
++        .sort((left, right) => left.index - right.index)
++        .map((tab) => clone(tab));
++    }
++    return result;
++  }
++
++  const storageOnChanged = createChromeEvent();
++
++  function createStorageArea(areaName) {
++    const area = storageState[areaName];
++
++    function select(keys) {
++      if (keys == null) return clone(area);
++
++      if (typeof keys === 'string') {
++        return Object.hasOwn(area, keys) ? { [keys]: clone(area[keys]) } : {};
++      }
++
++      if (Array.isArray(keys)) {
++        return Object.fromEntries(
++          keys.filter((key) => Object.hasOwn(area, key)).map((key) => [key, clone(area[key])]),
++        );
++      }
++
++      if (typeof keys === 'object') {
++        return Object.fromEntries(
++          Object.entries(keys).map(([key, fallback]) => [
++            key,
++            Object.hasOwn(area, key) ? clone(area[key]) : clone(fallback),
++          ]),
++        );
++      }
++
++      throw new TypeError('Storage keys must be null, a string, an array, or an object');
++    }
++
++    return {
++      async get(keys = null) {
++        record('storage', areaName, ['get', keys]);
++        failOnce(`storage.${areaName}.get`, [keys]);
++        return select(keys);
++      },
++
++      async set(items) {
++        record('storage', areaName, ['set', items]);
++        failOnce(`storage.${areaName}.set`, [items]);
++        if (!items || typeof items !== 'object' || Array.isArray(items)) {
++          throw new TypeError('Storage items must be an object');
++        }
++
++        const changes = {};
++        for (const [key, value] of Object.entries(items)) {
++          const change = { newValue: clone(value) };
++          if (Object.hasOwn(area, key)) change.oldValue = clone(area[key]);
++          changes[key] = change;
++          area[key] = clone(value);
++        }
++
++        if (Object.keys(changes).length) {
++          await storageOnChanged.dispatch(changes, areaName);
++        }
++      },
++
++      async remove(keys) {
++        record('storage', areaName, ['remove', keys]);
++        failOnce(`storage.${areaName}.remove`, [keys]);
++        const requested = Array.isArray(keys) ? keys : [keys];
++        const changes = {};
++        for (const key of requested) {
++          if (!Object.hasOwn(area, key)) continue;
++          changes[key] = { oldValue: clone(area[key]) };
++          delete area[key];
++        }
++        if (Object.keys(changes).length) {
++          await storageOnChanged.dispatch(changes, areaName);
++        }
++      },
++
++      async clear() {
++        record('storage', areaName, ['clear']);
++        failOnce(`storage.${areaName}.clear`, []);
++        const changes = Object.fromEntries(
++          Object.entries(area).map(([key, value]) => [key, { oldValue: clone(value) }]),
++        );
++        for (const key of Object.keys(area)) delete area[key];
++        if (Object.keys(changes).length) {
++          await storageOnChanged.dispatch(changes, areaName);
++        }
++      },
++
++      async getBytesInUse(keys = null) {
++        record('storage', areaName, ['getBytesInUse', keys]);
++        failOnce(`storage.${areaName}.getBytesInUse`, [keys]);
++        return new TextEncoder().encode(JSON.stringify(select(keys))).byteLength;
++      },
++
++      async setAccessLevel(accessOptions) {
++        record('storage', areaName, ['setAccessLevel', accessOptions]);
++        failOnce(`storage.${areaName}.setAccessLevel`, [accessOptions]);
++      },
++    };
++  }
++
++  const runtimeEvents = makeEventSet([
++    'onMessage',
++    'onConnect',
++    'onStartup',
++    'onInstalled',
++    'onSuspend',
++    'onUpdateAvailable',
++  ]);
++  const tabsEvents = makeEventSet([
++    'onActivated',
++    'onAttached',
++    'onCreated',
++    'onDetached',
++    'onHighlighted',
++    'onMoved',
++    'onRemoved',
++    'onReplaced',
++    'onUpdated',
++    'onZoomChange',
++  ]);
++  const windowsEvents = makeEventSet(['onCreated', 'onFocusChanged', 'onRemoved']);
++  const tabGroupsEvents = makeEventSet(['onCreated', 'onMoved', 'onRemoved', 'onUpdated']);
++  const alarmsOnAlarm = createChromeEvent();
++  const actionOnClicked = createChromeEvent();
++  const bookmarksEvents = makeEventSet([
++    'onChanged',
++    'onChildrenReordered',
++    'onCreated',
++    'onImportBegan',
++    'onImportEnded',
++    'onMoved',
++    'onRemoved',
++  ]);
++
++  const runtime = {
++    id: 'tabkebab-test-extension',
++    lastError: undefined,
++    ...runtimeEvents,
++
++    getManifest() {
++      return { manifest_version: 3, name: 'TabKebab Test', version: '0.0.0' };
++    },
++
++    getURL(path = '') {
++      return `chrome-extension://tabkebab-test-extension/${path.replace(/^\//, '')}`;
++    },
++
++    async sendMessage(...args) {
++      record('runtime', 'sendMessage', args);
++      failOnce('runtime.sendMessage', args);
++      const message = args.length > 1 && typeof args[0] === 'string' ? args[1] : args[0];
++      if (harness.runtimeHandler) {
++        const response = await harness.runtimeHandler(
++          clone(message),
++          {
++            id: runtime.id,
++            url: runtime.getURL('sidepanel/panel.html'),
++          },
++        );
++        return clone(response);
++      }
++
++      let response;
++      let responseWasSent = false;
++      let resolveResponse;
++      const responsePromise = new Promise((resolve) => {
++        resolveResponse = resolve;
++      });
++      const results = await runtime.onMessage.dispatch(
++        clone(message),
++        { id: runtime.id, url: runtime.getURL('sidepanel/panel.html') },
++        (value) => {
++          if (responseWasSent) return;
++          responseWasSent = true;
++          response = value;
++          resolveResponse();
++        },
++      );
++      if (responseWasSent) return clone(response);
++      const returned = results.find((value) => value !== undefined && value !== true);
++      if (returned !== undefined) return clone(returned);
++      if (results.includes(true)) {
++        await responsePromise;
++        return clone(response);
++      }
++      return undefined;
++    },
++
++    connect(...args) {
++      if (activeHarness !== harness) {
++        throw new Error('Chrome mock harness is no longer active');
++      }
++      record('runtime', 'connect', args);
++      failOnce('runtime.connect', args);
++      const connectInfo =
++        args.length > 1 && typeof args[0] === 'string' ? args[1] : args[0] ?? {};
++      const pair = createRuntimePortPair(connectInfo.name ?? '');
++      harness.connections.add(pair);
++      void runtime.onConnect.dispatch(pair.workerPort);
++      return pair.clientPort;
++    },
++  };
++
++  const tabsApi = {
++    ...tabsEvents,
++    TAB_ID_NONE: -1,
++
++    async query(queryInfo = {}) {
++      record('tabs', 'query', [queryInfo]);
++      failOnce('tabs.query', [queryInfo]);
++      let result = [...state.tabs];
++      const focusedWindowId = state.windows.find(({ focused }) => focused)?.id;
++
++      for (const key of [
++        'active',
++        'audible',
++        'autoDiscardable',
++        'discarded',
++        'groupId',
++        'highlighted',
++        'pinned',
++        'status',
++        'windowId',
++      ]) {
++        if (queryInfo[key] !== undefined) {
++          result = result.filter((tab) => tab[key] === queryInfo[key]);
++        }
++      }
++
++      if (queryInfo.currentWindow || queryInfo.lastFocusedWindow) {
++        result = result.filter(({ windowId }) => windowId === focusedWindowId);
++      }
++
++      if (queryInfo.url !== undefined) {
++        const patterns = Array.isArray(queryInfo.url) ? queryInfo.url : [queryInfo.url];
++        result = result.filter((tab) => patterns.some((pattern) => wildcardMatches(tab.url, pattern)));
++      }
++
++      return result
++        .sort((left, right) => left.windowId - right.windowId || left.index - right.index)
++        .map((tab) => clone(tab));
++    },
++
++    async get(tabId) {
++      record('tabs', 'get', [tabId]);
++      failOnce('tabs.get', [tabId]);
++      return clone(findTab(tabId));
++    },
++
++    async create(createProperties = {}) {
++      record('tabs', 'create', [createProperties]);
++      failOnce('tabs.create', [createProperties]);
++      let windowId = createProperties.windowId;
++      if (windowId === undefined) {
++        windowId = state.windows.find(({ focused }) => focused)?.id ?? state.windows[0]?.id;
++      }
++      if (windowId === undefined) {
++        windowId = nextId(state.windows);
++        state.windows.push(normalizeWindow({ focused: true }, windowId));
++      } else {
++        findWindow(windowId);
++      }
++
++      const siblings = state.tabs
++        .filter((tab) => tab.windowId === windowId)
++        .sort((left, right) => left.index - right.index);
++      const requestedIndex = createProperties.index;
++      const index =
++        requestedIndex === undefined || requestedIndex < 0
++          ? siblings.length
++          : Math.min(requestedIndex, siblings.length);
++      for (const sibling of siblings) {
++        if (sibling.index >= index) sibling.index++;
++      }
++
++      const id = nextId(state.tabs);
++      const tab = normalizeTab(
++        {
++          ...createProperties,
++          active: createProperties.active ?? true,
++          highlighted: createProperties.active ?? true,
++          url: createProperties.url ?? 'about:blank',
++          title: createProperties.title ?? '',
++        },
++        id,
++        windowId,
++        index,
++      );
++      if (tab.active) {
++        for (const sibling of siblings) {
++          sibling.active = false;
++          sibling.highlighted = false;
++        }
++      }
++      state.tabs.push(tab);
++      await tabsApi.onCreated.dispatch(clone(tab));
++      return clone(tab);
++    },
++
++    async update(tabIdOrProperties, maybeProperties) {
++      const hasId = typeof tabIdOrProperties === 'number';
++      const updateProperties = hasId ? maybeProperties ?? {} : tabIdOrProperties ?? {};
++      const tabId = hasId
++        ? tabIdOrProperties
++        : state.tabs.find(({ active, windowId }) =>
++            active && windowId === state.windows.find(({ focused }) => focused)?.id,
++          )?.id;
++      record('tabs', 'update', hasId ? [tabId, updateProperties] : [updateProperties]);
++      failOnce('tabs.update', hasId ? [tabId, updateProperties] : [updateProperties]);
++      const tab = findTab(tabId);
++      const changeInfo = {};
++
++      for (const [key, value] of Object.entries(updateProperties)) {
++        if (key === 'muted') {
++          tab.mutedInfo = { ...tab.mutedInfo, muted: Boolean(value) };
++          changeInfo.mutedInfo = clone(tab.mutedInfo);
++        } else {
++          tab[key] = clone(value);
++          changeInfo[key] = clone(value);
++        }
++      }
++
++      if (updateProperties.active) {
++        for (const sibling of state.tabs) {
++          if (sibling.windowId === tab.windowId && sibling.id !== tab.id) {
++            sibling.active = false;
++            sibling.highlighted = false;
++          }
++        }
++        tab.highlighted = true;
++        await tabsApi.onActivated.dispatch({ tabId: tab.id, windowId: tab.windowId });
++      }
++
++      await tabsApi.onUpdated.dispatch(tab.id, changeInfo, clone(tab));
++      return clone(tab);
++    },
++
++    async remove(tabIds) {
++      record('tabs', 'remove', [tabIds]);
++      failOnce('tabs.remove', [tabIds]);
++      const requested = Array.isArray(tabIds) ? tabIds : [tabIds];
++      for (const tabId of requested) {
++        const tab = findTab(tabId);
++        state.tabs.splice(state.tabs.indexOf(tab), 1);
++        reindexTabs(tab.windowId);
++        await tabsApi.onRemoved.dispatch(tabId, {
++          windowId: tab.windowId,
++          isWindowClosing: false,
++        });
++      }
++    },
++
++    async discard(tabId) {
++      record('tabs', 'discard', [tabId]);
++      failOnce('tabs.discard', [tabId]);
++      const tab = findTab(tabId);
++      tab.discarded = true;
++      tab.status = 'unloaded';
++      await tabsApi.onUpdated.dispatch(tab.id, { discarded: true }, clone(tab));
++      return clone(tab);
++    },
++
++    async move(tabIds, moveProperties) {
++      record('tabs', 'move', [tabIds, moveProperties]);
++      failOnce('tabs.move', [tabIds, moveProperties]);
++      const requested = Array.isArray(tabIds) ? tabIds : [tabIds];
++      const moving = requested.map(findTab);
++      const originalIndexes = new Map(moving.map((tab) => [tab.id, tab.index]));
++      const affectedWindows = new Set(moving.map(({ windowId }) => windowId));
++      const destinationWindowId = moveProperties.windowId ?? moving[0].windowId;
++      findWindow(destinationWindowId);
++      affectedWindows.add(destinationWindowId);
++
++      for (const tab of moving) state.tabs.splice(state.tabs.indexOf(tab), 1);
++      for (const windowId of affectedWindows) reindexTabs(windowId);
++
++      const destination = state.tabs
++        .filter(({ windowId }) => windowId === destinationWindowId)
++        .sort((left, right) => left.index - right.index);
++      const insertionIndex =
++        moveProperties.index === undefined || moveProperties.index < 0
++          ? destination.length
++          : Math.min(moveProperties.index, destination.length);
++      destination.splice(insertionIndex, 0, ...moving);
++      destination.forEach((tab, index) => {
++        tab.windowId = destinationWindowId;
++        tab.index = index;
++      });
++      for (const tab of moving) state.tabs.push(tab);
++      for (const windowId of affectedWindows) reindexTabs(windowId);
++
++      await Promise.all(
++        moving.map((tab) =>
++          tabsApi.onMoved.dispatch(tab.id, {
++            windowId: destinationWindowId,
++            fromIndex: originalIndexes.get(tab.id),
++            toIndex: tab.index,
++          }),
++        ),
++      );
++      const result = moving.map((tab) => clone(tab));
++      return Array.isArray(tabIds) ? result : result[0];
++    },
++
++    async group(groupOptions) {
++      record('tabs', 'group', [groupOptions]);
++      failOnce('tabs.group', [groupOptions]);
++      const tabIds = Array.isArray(groupOptions.tabIds)
++        ? groupOptions.tabIds
++        : [groupOptions.tabIds];
++      const selected = tabIds.map(findTab);
++      if (!selected.length) throw new Error('At least one tab is required to create a group');
++      const windowId = groupOptions.createProperties?.windowId ?? selected[0].windowId;
++      let groupId = groupOptions.groupId;
++      if (groupId === undefined) {
++        groupId = nextId(state.groups);
++        const group = normalizeGroup({}, groupId, windowId);
++        state.groups.push(group);
++        await tabGroupsApi.onCreated.dispatch(clone(group));
++      } else {
++        findGroup(groupId);
++      }
++
++      for (const tab of selected) {
++        tab.groupId = groupId;
++        tab.windowId = windowId;
++      }
++      return groupId;
++    },
++
++    async ungroup(tabIds) {
++      record('tabs', 'ungroup', [tabIds]);
++      failOnce('tabs.ungroup', [tabIds]);
++      const requested = Array.isArray(tabIds) ? tabIds : [tabIds];
++      for (const tabId of requested) findTab(tabId).groupId = -1;
++    },
++
++    async goBack(tabId) {
++      record('tabs', 'goBack', [tabId]);
++      failOnce('tabs.goBack', [tabId]);
++      return clone(findTab(tabId));
++    },
++
++    async reload(tabId, reloadProperties) {
++      record('tabs', 'reload', [tabId, reloadProperties]);
++      failOnce('tabs.reload', [tabId, reloadProperties]);
++    },
++
++    async sendMessage(tabId, message, options) {
++      record('tabs', 'sendMessage', [tabId, message, options]);
++      failOnce('tabs.sendMessage', [tabId, message, options]);
++    },
++  };
++
++  const windowsApi = {
++    ...windowsEvents,
++    WINDOW_ID_NONE: -1,
++    WINDOW_ID_CURRENT: -2,
++
++    async get(windowId, getInfo = {}) {
++      record('windows', 'get', [windowId, getInfo]);
++      failOnce('windows.get', [windowId, getInfo]);
++      return populatedWindow(findWindow(windowId), getInfo.populate);
++    },
++
++    async getAll(getInfo = {}) {
++      record('windows', 'getAll', [getInfo]);
++      failOnce('windows.getAll', [getInfo]);
++      let result = [...state.windows];
++      if (getInfo.windowTypes) {
++        result = result.filter(({ type }) => getInfo.windowTypes.includes(type));
++      }
++      return result.map((window) => populatedWindow(window, getInfo.populate));
++    },
++
++    async getCurrent(getInfo = {}) {
++      record('windows', 'getCurrent', [getInfo]);
++      failOnce('windows.getCurrent', [getInfo]);
++      const window = state.windows.find(({ focused }) => focused) ?? state.windows[0];
++      if (!window) throw new Error('No current window');
++      return populatedWindow(window, getInfo.populate);
++    },
++
++    async getLastFocused(getInfo = {}) {
++      record('windows', 'getLastFocused', [getInfo]);
++      failOnce('windows.getLastFocused', [getInfo]);
++      const window = state.windows.find(({ focused }) => focused) ?? state.windows[0];
++      if (!window) throw new Error('No focused window');
++      return populatedWindow(window, getInfo.populate);
++    },
++
++    async create(createData = {}) {
++      record('windows', 'create', [createData]);
++      failOnce('windows.create', [createData]);
++      const id = nextId(state.windows);
++      if (createData.focused !== false) {
++        for (const existing of state.windows) existing.focused = false;
++      }
++      const window = normalizeWindow(
++        { ...createData, focused: createData.focused !== false },
++        id,
++      );
++      state.windows.push(window);
++
++      if (createData.tabId !== undefined) {
++        const tab = findTab(createData.tabId);
++        const oldWindowId = tab.windowId;
++        tab.windowId = id;
++        tab.index = 0;
++        reindexTabs(oldWindowId);
++      } else {
++        const urls = Array.isArray(createData.url)
++          ? createData.url
++          : [createData.url ?? 'chrome://newtab/'];
++        urls.forEach((url, index) => {
++          state.tabs.push(
++            normalizeTab({ url, active: index === 0, highlighted: index === 0 }, nextId(state.tabs), id, index),
++          );
++        });
++      }
++
++      await windowsApi.onCreated.dispatch(populatedWindow(window, true));
++      return populatedWindow(window, true);
++    },
++
++    async update(windowId, updateInfo) {
++      record('windows', 'update', [windowId, updateInfo]);
++      failOnce('windows.update', [windowId, updateInfo]);
++      const window = findWindow(windowId);
++      if (updateInfo.focused) {
++        for (const existing of state.windows) existing.focused = existing.id === windowId;
++        await windowsApi.onFocusChanged.dispatch(windowId);
++      }
++      Object.assign(window, clone(updateInfo));
++      return populatedWindow(window, false);
++    },
++
++    async remove(windowId) {
++      record('windows', 'remove', [windowId]);
++      failOnce('windows.remove', [windowId]);
++      const window = findWindow(windowId);
++      state.windows.splice(state.windows.indexOf(window), 1);
++      state.tabs = state.tabs.filter((tab) => tab.windowId !== windowId);
++      state.groups = state.groups.filter((group) => group.windowId !== windowId);
++      await windowsApi.onRemoved.dispatch(windowId);
++    },
++  };
++
++  const tabGroupsApi = {
++    ...tabGroupsEvents,
++    TAB_GROUP_ID_NONE: -1,
++
++    async get(groupId) {
++      record('tabGroups', 'get', [groupId]);
++      failOnce('tabGroups.get', [groupId]);
++      return clone(findGroup(groupId));
++    },
++
++    async query(queryInfo = {}) {
++      record('tabGroups', 'query', [queryInfo]);
++      failOnce('tabGroups.query', [queryInfo]);
++      return state.groups
++        .filter((group) =>
++          Object.entries(queryInfo).every(([key, value]) => group[key] === value),
++        )
++        .map((group) => clone(group));
++    },
++
++    async update(groupId, updateProperties) {
++      record('tabGroups', 'update', [groupId, updateProperties]);
++      failOnce('tabGroups.update', [groupId, updateProperties]);
++      const group = findGroup(groupId);
++      Object.assign(group, clone(updateProperties));
++      await tabGroupsApi.onUpdated.dispatch(clone(group));
++      return clone(group);
++    },
++
++    async move(groupId, moveProperties) {
++      record('tabGroups', 'move', [groupId, moveProperties]);
++      failOnce('tabGroups.move', [groupId, moveProperties]);
++      const group = findGroup(groupId);
++      if (moveProperties.windowId !== undefined) group.windowId = moveProperties.windowId;
++      const movedTabs = state.tabs.filter((tab) => tab.groupId === groupId);
++      if (moveProperties.windowId !== undefined) {
++        for (const tab of movedTabs) tab.windowId = moveProperties.windowId;
++      }
++      await tabGroupsApi.onMoved.dispatch(clone(group));
++      return clone(group);
++    },
++  };
++
++  const alarmsApi = {
++    onAlarm: alarmsOnAlarm,
++
++    async create(nameOrInfo, maybeInfo) {
++      const name = typeof nameOrInfo === 'string' ? nameOrInfo : '';
++      const alarmInfo = typeof nameOrInfo === 'string' ? maybeInfo ?? {} : nameOrInfo ?? {};
++      record('alarms', 'create', typeof nameOrInfo === 'string' ? [name, alarmInfo] : [alarmInfo]);
++      failOnce('alarms.create', [name, alarmInfo]);
++      state.alarms.set(name, { name, ...clone(alarmInfo) });
++    },
++
++    async get(name) {
++      record('alarms', 'get', [name]);
++      failOnce('alarms.get', [name]);
++      return clone(state.alarms.get(name));
++    },
++
++    async getAll() {
++      record('alarms', 'getAll', []);
++      failOnce('alarms.getAll', []);
++      return [...state.alarms.values()].map((alarm) => clone(alarm));
++    },
++
++    async clear(name) {
++      record('alarms', 'clear', [name]);
++      failOnce('alarms.clear', [name]);
++      return state.alarms.delete(name);
++    },
++
++    async clearAll() {
++      record('alarms', 'clearAll', []);
++      failOnce('alarms.clearAll', []);
++      const hadAlarms = state.alarms.size > 0;
++      state.alarms.clear();
++      return hadAlarms;
++    },
++  };
++
++  function makeRecordedStateMethod(domain, method, implementation = () => undefined) {
++    return async (...args) => {
++      record(domain, method, args);
++      failOnce(`${domain}.${method}`, args);
++      return clone(await implementation(...args));
++    };
++  }
++
++  const actionApi = {
++    onClicked: actionOnClicked,
++    setBadgeText: makeRecordedStateMethod('action', 'setBadgeText', ({ text }) => {
++      state.action.badgeText = text;
++    }),
++    getBadgeText: makeRecordedStateMethod('action', 'getBadgeText', () => state.action.badgeText),
++    setBadgeBackgroundColor: makeRecordedStateMethod(
++      'action',
++      'setBadgeBackgroundColor',
++      ({ color }) => {
++        state.action.badgeBackgroundColor = clone(color);
++      },
++    ),
++    getBadgeBackgroundColor: makeRecordedStateMethod(
++      'action',
++      'getBadgeBackgroundColor',
++      () => state.action.badgeBackgroundColor,
++    ),
++    setTitle: makeRecordedStateMethod('action', 'setTitle', ({ title }) => {
++      state.action.title = title;
++    }),
++    getTitle: makeRecordedStateMethod('action', 'getTitle', () => state.action.title),
++    setIcon: makeRecordedStateMethod('action', 'setIcon'),
++    enable: makeRecordedStateMethod('action', 'enable', () => {
++      state.action.enabled = true;
++    }),
++    disable: makeRecordedStateMethod('action', 'disable', () => {
++      state.action.enabled = false;
++    }),
++  };
++
++  const sidePanelApi = {
++    open: makeRecordedStateMethod('sidePanel', 'open'),
++    setOptions: makeRecordedStateMethod('sidePanel', 'setOptions', (options) => {
++      const key = options.tabId ?? 'default';
++      state.sidePanel.options.set(key, clone(options));
++    }),
++    getOptions: makeRecordedStateMethod('sidePanel', 'getOptions', ({ tabId } = {}) =>
++      state.sidePanel.options.get(tabId ?? 'default') ?? {},
++    ),
++    setPanelBehavior: makeRecordedStateMethod('sidePanel', 'setPanelBehavior', (behavior) => {
++      state.sidePanel.behavior = clone(behavior);
++    }),
++  };
++
++  function flattenBookmarks(nodes = state.bookmarks) {
++    return nodes.flatMap((node) => [node, ...flattenBookmarks(node.children ?? [])]);
++  }
++
++  function findBookmark(id) {
++    const bookmark = flattenBookmarks().find((node) => node.id === String(id));
++    if (!bookmark) throw new Error(`No bookmark with id: ${id}`);
++    return bookmark;
++  }
++
++  function findBookmarkParent(id, nodes = state.bookmarks) {
++    for (const node of nodes) {
++      if (node.children?.some((child) => child.id === String(id))) return node;
++      const nested = findBookmarkParent(id, node.children ?? []);
++      if (nested) return nested;
++    }
++    return null;
++  }
++
++  const bookmarksApi = {
++    ...bookmarksEvents,
++    async get(ids) {
++      record('bookmarks', 'get', [ids]);
++      failOnce('bookmarks.get', [ids]);
++      const requested = Array.isArray(ids) ? ids : [ids];
++      return requested.map((id) => clone(findBookmark(id)));
++    },
++    async getTree() {
++      record('bookmarks', 'getTree', []);
++      failOnce('bookmarks.getTree', []);
++      return clone(state.bookmarks);
++    },
++    async getChildren(id) {
++      record('bookmarks', 'getChildren', [id]);
++      failOnce('bookmarks.getChildren', [id]);
++      return clone(findBookmark(id).children ?? []);
++    },
++    async create(bookmark) {
++      record('bookmarks', 'create', [bookmark]);
++      failOnce('bookmarks.create', [bookmark]);
++      const parent = findBookmark(bookmark.parentId ?? '1');
++      parent.children ??= [];
++      const created = {
++        id: String(nextId(flattenBookmarks())),
++        parentId: parent.id,
++        title: '',
++        ...clone(bookmark),
++      };
++      if (!created.url) created.children = [];
++      parent.children.push(created);
++      await bookmarksApi.onCreated.dispatch(created.id, clone(created));
++      return clone(created);
++    },
++    async update(id, changes) {
++      record('bookmarks', 'update', [id, changes]);
++      failOnce('bookmarks.update', [id, changes]);
++      const bookmark = findBookmark(id);
++      Object.assign(bookmark, clone(changes));
++      await bookmarksApi.onChanged.dispatch(String(id), clone(changes));
++      return clone(bookmark);
++    },
++    async move(id, destination) {
++      record('bookmarks', 'move', [id, destination]);
++      failOnce('bookmarks.move', [id, destination]);
++      const bookmark = findBookmark(id);
++      const oldParent = findBookmarkParent(id);
++      oldParent.children.splice(oldParent.children.indexOf(bookmark), 1);
++      const newParent = findBookmark(destination.parentId ?? oldParent.id);
++      newParent.children ??= [];
++      const index = destination.index ?? newParent.children.length;
++      newParent.children.splice(index, 0, bookmark);
++      bookmark.parentId = newParent.id;
++      await bookmarksApi.onMoved.dispatch(String(id), {
++        parentId: newParent.id,
++        oldParentId: oldParent.id,
++        index,
++      });
++      return clone(bookmark);
++    },
++    async remove(id) {
++      record('bookmarks', 'remove', [id]);
++      failOnce('bookmarks.remove', [id]);
++      const parent = findBookmarkParent(id);
++      const bookmark = findBookmark(id);
++      if (bookmark.children?.length) throw new Error('Cannot remove a non-empty bookmark folder');
++      parent.children.splice(parent.children.indexOf(bookmark), 1);
++      await bookmarksApi.onRemoved.dispatch(String(id), { parentId: parent.id });
++    },
++    async removeTree(id) {
++      record('bookmarks', 'removeTree', [id]);
++      failOnce('bookmarks.removeTree', [id]);
++      const parent = findBookmarkParent(id);
++      const bookmark = findBookmark(id);
++      parent.children.splice(parent.children.indexOf(bookmark), 1);
++      await bookmarksApi.onRemoved.dispatch(String(id), { parentId: parent.id });
++    },
++    async search(query) {
++      record('bookmarks', 'search', [query]);
++      failOnce('bookmarks.search', [query]);
++      const term = typeof query === 'string' ? query : query.query ?? '';
++      return flattenBookmarks()
++        .filter((bookmark) => `${bookmark.title} ${bookmark.url ?? ''}`.includes(term))
++        .map((bookmark) => clone(bookmark));
++    },
++  };
++
++  function invokeIdentityCallback(path, args, value) {
++    const callback = args.at(-1);
++    if (typeof callback !== 'function') return false;
++    try {
++      failOnce(path, args.slice(0, -1));
++      callback(clone(value));
++    } catch (error) {
++      runtime.lastError = { message: error.message };
++      callback(undefined);
++      runtime.lastError = undefined;
++    }
++    return true;
++  }
++
++  const identityApi = {
++    getAuthToken(...args) {
++      record('identity', 'getAuthToken', args);
++      if (invokeIdentityCallback('identity.getAuthToken', args, state.identity.authToken)) return;
++      failOnce('identity.getAuthToken', args);
++      return Promise.resolve(state.identity.authToken);
++    },
++    async removeCachedAuthToken(details) {
++      record('identity', 'removeCachedAuthToken', [details]);
++      failOnce('identity.removeCachedAuthToken', [details]);
++      if (details?.token === state.identity.authToken) state.identity.authToken = null;
++    },
++    async clearAllCachedAuthTokens() {
++      record('identity', 'clearAllCachedAuthTokens', []);
++      failOnce('identity.clearAllCachedAuthTokens', []);
++      state.identity.authToken = null;
++    },
++    launchWebAuthFlow(...args) {
++      record('identity', 'launchWebAuthFlow', args);
++      const redirectUrl = args[0]?.url ?? '';
++      if (invokeIdentityCallback('identity.launchWebAuthFlow', args, redirectUrl)) return;
++      failOnce('identity.launchWebAuthFlow', args);
++      return Promise.resolve(redirectUrl);
++    },
++    getProfileUserInfo(...args) {
++      record('identity', 'getProfileUserInfo', args);
++      if (invokeIdentityCallback('identity.getProfileUserInfo', args, state.identity.profile)) return;
++      failOnce('identity.getProfileUserInfo', args);
++      return Promise.resolve(clone(state.identity.profile));
++    },
++  };
++
++  globalThis.chrome = {
++    storage: {
++      local: createStorageArea('local'),
++      session: createStorageArea('session'),
++      onChanged: storageOnChanged,
++    },
++    runtime,
++    tabs: tabsApi,
++    windows: windowsApi,
++    tabGroups: tabGroupsApi,
++    alarms: alarmsApi,
++    action: actionApi,
++    sidePanel: sidePanelApi,
++    bookmarks: bookmarksApi,
++    identity: identityApi,
++  };
++
++  function snapshot() {
++    return {
++      local: clone(storageState.local),
++      session: clone(storageState.session),
++      tabs: state.tabs
++        .slice()
++        .sort((left, right) => left.windowId - right.windowId || left.index - right.index)
++        .map((tab) => clone(tab)),
++      windows: state.windows.map((window) => populatedWindow(window, false)),
++      groups: state.groups.map((group) => clone(group)),
++      alarms: [...state.alarms.values()].map((alarm) => clone(alarm)),
++      bookmarks: clone(state.bookmarks),
++      action: clone(state.action),
++      sidePanel: {
++        behavior: clone(state.sidePanel.behavior),
++        options: [...state.sidePanel.options.values()].map((options) => clone(options)),
++      },
++    };
++  }
++
++  return {
++    calls,
++    setRuntimeHandler(handler) {
++      if (handler !== null && typeof handler !== 'function') {
++        throw new TypeError('Runtime handler must be a function or null');
++      }
++      harness.runtimeHandler = handler;
++    },
++    snapshot,
++    connect(name = 'test-port') {
++      return runtime.connect({ name });
++    },
++  };
++}
++
++export function resetChromeMock() {
++  if (!activeHarness) return;
++
++  const harness = activeHarness;
++  const disconnections = [...harness.connections].map(({ clientPort }) =>
++    clientPort.disconnect(),
++  );
++  for (const event of harness.events) clearEvent(event);
++  if (harness.hadChrome) {
++    globalThis.chrome = harness.previousChrome;
++  } else {
++    delete globalThis.chrome;
++  }
++  activeHarness = null;
++  return Promise.all(disconnections);
++}
++
++export function readStorageArea(areaName) {
++  if (!activeHarness) throw new Error('Chrome mock is not installed');
++  if (areaName !== 'local' && areaName !== 'session') {
++    throw new TypeError(`Unknown storage area: ${areaName}`);
++  }
++  return clone(activeHarness.storageState[areaName]);
++}
+diff --git a/tests/setup.js b/tests/setup.js
+new file mode 100644
+index 0000000..b0d2706
+--- /dev/null
++++ b/tests/setup.js
+@@ -0,0 +1,6 @@
++import { afterEach, beforeEach } from 'bun:test';
++
++import { installChromeMock, resetChromeMock } from './helpers/chrome-mock.js';
++
++beforeEach(() => installChromeMock());
++afterEach(() => resetChromeMock());
+diff --git a/tests/sidepanel/message-client.test.js b/tests/sidepanel/message-client.test.js
+new file mode 100644
+index 0000000..e9a6b18
+--- /dev/null
++++ b/tests/sidepanel/message-client.test.js
+@@ -0,0 +1,36 @@
++import { expect, test } from 'bun:test';
++
++import { sendOrThrow } from '../../sidepanel/message-client.js';
++import { installChromeMock } from '../helpers/chrome-mock.js';
++
++test('returns a successful response unchanged', async () => {
++  const response = { ok: true, tabs: [1, 2] };
++  const harness = installChromeMock({ runtimeHandler: () => response });
++  const message = { type: 'getTabs' };
++
++  await expect(sendOrThrow(message)).resolves.toEqual(response);
++  expect(harness.calls.runtime.sendMessage).toEqual([[message]]);
++});
++
++test('rejects an error-shaped response', async () => {
++  installChromeMock({ runtimeHandler: () => ({ error: 'restore failed' }) });
++
++  await expect(sendOrThrow({ type: 'restoreStash' })).rejects.toThrow('restore failed');
++});
++
++test('preserves a native runtime rejection', async () => {
++  const nativeError = new Error('extension context invalidated');
++  installChromeMock({
++    runtimeHandler: async () => {
++      throw nativeError;
++    },
++  });
++
++  await expect(sendOrThrow({ type: 'getSettings' })).rejects.toBe(nativeError);
++});
++
++test('accepts null as a valid response', async () => {
++  installChromeMock({ runtimeHandler: () => null });
++
++  await expect(sendOrThrow({ type: 'optionalResult' })).resolves.toBeNull();
++});
+diff --git a/tests/syntax.test.js b/tests/syntax.test.js
+new file mode 100644
+index 0000000..793e97f
+--- /dev/null
++++ b/tests/syntax.test.js
+@@ -0,0 +1,26 @@
++import { expect, test } from 'bun:test';
++
++test('every repository JavaScript file parses', async () => {
++  const listed = Bun.spawnSync([
++    'git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.js',
++  ]);
++  expect(listed.exitCode).toBe(0);
++  const files = new TextDecoder()
++    .decode(listed.stdout)
++    .split('\0')
++    .filter(Boolean);
++  expect(files.length).toBeGreaterThan(0);
++  const transpiler = new Bun.Transpiler({ loader: 'js' });
++  for (const file of files) {
++    const source = await Bun.file(file).text();
++    expect(() => transpiler.transformSync(source)).not.toThrow();
++  }
++});
++
++test('manifest is MV3 and mirrors VERSION', async () => {
++  const manifest = JSON.parse(await Bun.file('manifest.json').text());
++  const version = (await Bun.file('VERSION').text()).trim();
++
++  expect(manifest.manifest_version).toBe(3);
++  expect(manifest.version).toBe(version);
++});

@@ -1,0 +1,3182 @@
+# Review package: 31df517..4204782
+
+## Commits
+4204782 fix: preserve restore siblings after seed failure
+1c87d7a fix: make tab restoration recoverable
+
+## Files changed
+ ARCHITECTURE.md                                    |   2 +
+ CHANGELOG.md                                       |  19 +
+ GUIDE.md                                           |  18 +-
+ PROGRESS.md                                        |  13 +-
+ README.md                                          |   6 +-
+ VERSION                                            |   2 +-
+ core/restore-outcome.js                            |  22 +
+ core/sessions.js                                   | 357 +-----------
+ core/stash-db.js                                   | 277 +---------
+ core/tab-restore.js                                | 464 ++++++++++++++++
+ docs/reports/2026-07-14-reliability-smoke.md       |  90 +++
+ .../2026-07-14-tabkebab-reliability-hardening.md   |  30 +-
+ manifest.json                                      |   2 +-
+ service-worker.js                                  |  35 +-
+ sidepanel/components/session-manager.js            |  32 +-
+ sidepanel/components/stash-list.js                 |  27 +-
+ sidepanel/panel.css                                |   5 +
+ sidepanel/restore-feedback.js                      |  55 ++
+ tests/core/restore-outcome.test.js                 |  62 +++
+ tests/core/session-restore.test.js                 | 611 +++++++++++++++++++++
+ tests/core/stash-restore.test.js                   | 187 +++++++
+ tests/integration/stash-restore-handler.test.js    |  90 +++
+ tests/sidepanel/restore-feedback.test.js           |  79 +++
+ 23 files changed, 1778 insertions(+), 707 deletions(-)
+
+## Diff
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index fdc2147..8894422 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -15,20 +15,22 @@ The service worker must not assume browser-document APIs are present. In particu
+ ### Side panel
+ 
+ `sidepanel/panel.html` loads `sidepanel/panel.js` and the components under `sidepanel/components/`. The side panel owns user interaction, rendering, confirmations, and document-only capabilities such as Chrome Built-in AI.
+ 
+ Side-panel commands cross one checked runtime-message boundary. Background errors must become rejected operations before components display success.
+ 
+ ### Core modules
+ 
+ `core/` contains tab, session, stash, Focus Mode, Drive, export, settings, and command logic. `core/engine/` implements the snapshot, solver, planner, and executor grouping pipeline. `core/ai/` contains provider adapters, key handling, caching, and request scheduling.
+ 
++`core/tab-restore.js` is the single session/stash restore coordinator. It clones saved inputs, preserves `{ savedTab, createdTab }` associations across settled batches, returns the fixed outcome from `core/restore-outcome.js`, and owns mute/discard/unmute cleanup. IndexedDB deletion remains in the service-worker boundary and is allowed only for a complete outcome.
++
+ Pure policy and merge decisions belong in core modules that can run without Chrome. Chrome API calls remain at explicit adapters and orchestration boundaries.
+ 
+ ## Persistence
+ 
+ - `chrome.storage.local`: sessions, settings, manual groups, Focus Mode preferences/history, Drive state, AI configuration, and sync metadata.
+ - `chrome.storage.session`: decrypted API-key cache only; Chrome clears it on browser restart, extension reload, update, or disable.
+ - IndexedDB: stashes and their window/tab metadata.
+ - Google Drive `drive.file`: profile-scoped canonical sync/settings files plus dated exports.
+ 
+ Credentials, decrypted keys, OAuth tokens, caches, and active Focus Mode state are never included in portable exports.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5864ab2..45db9d7 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,16 +1,35 @@
+ # Changelog
+ 
+ All notable changes to TabKebab are documented in this file.
+ 
+ ---
+ 
++## [1.2.4] — 2026-07-14
++
++### Added
++
++- One dependency-free restore coordinator and fixed outcome contract for session and stash restoration, including requested, restored, duplicate, invalid, failed, and complete state.
++- Regression coverage for partial batch settlement, saved-record immutability, pinned/group association, discard audio ordering, cleanup retries, error scopes, retained stashes, and counted UI warnings.
++- Redacted real-Chrome smoke evidence for a non-discarding session restore and a retained partial stash.
++
++### Changed
++
++- Session and stash wrappers now share the same cloned, success-preserving restore pipeline.
++- Restore notifications use the checked message boundary and show warning counts whenever an outcome is incomplete.
++
++### Fixed
++
++- Kept the original stash unchanged when any URL is invalid or any Chrome restore operation fails, even if delete-after-restore was requested.
++- Preserved successful saved-tab metadata when a sibling creation rejects instead of shifting pinned/group data by array index.
++- Muted only background tabs entering the discard pipeline, unmuted after every discard attempt, retried pending cleanup in an outer `finally`, and kept the first visible tab active and unmuted.
++
+ ## [1.2.3] — 2026-07-14
+ 
+ ### Added
+ 
+ - Dependency-free Bun regression harness with isolated Chrome storage, events, tab/window/group state, runtime ports, call recording, and one-shot failure injection.
+ - Repository-wide JavaScript parse and Manifest V3/version consistency checks.
+ - Checked side-panel `sendOrThrow()` message boundary covering successful, error-shaped, rejected, and null responses.
+ - GitHub Actions test gate for pull requests, manual runs, and pushes to `main` using pinned Bun `1.3.11`.
+ 
+ ### Changed
+diff --git a/GUIDE.md b/GUIDE.md
+index c5073f2..371cf70 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -241,36 +241,34 @@ Stashes appear as cards with:
+ - **Favicon previews** — up to 5 favicons from the stashed tabs
+ - **Source badge** — Window, Group, Domain, or All
+ - **Restored badge** — shows if the stash has already been restored
+ - **Timestamp**
+ 
+ ### Restoring a Stash
+ 
+ Click the **Restore** button on a stash card.
+ 
+ - If the stash has a "Restored" badge, a confirmation dialog asks if you want to restore again.
+-- **Small stashes** (under 20 tabs): all tabs open at once.
+-- **Large stashes** (20+ tabs): uses **pipeline restore**:
+-  1. Tabs are created in batches of 5
+-  2. Each batch loads in the background
+-  3. After loading, tabs are discarded to save memory
+-  4. Progress bar shows two phases: "Creating tabs..." then "Loading... X / Y ready"
+-  5. An animated stripe on the progress bar indicates active loading
++- Tabs are restored in batches of up to six. Successful creations retain their own saved pinned/group metadata even if a sibling tab fails.
++- In the default discard pipeline, only background tabs being discarded are temporarily muted. Each is unmuted after the discard attempt, including failure cleanup; the first visible tab stays active and unmuted.
++- A non-discarding restore does not mute restored tabs.
++- The result accounts for every saved tab as restored, already-open, invalid, or failed. An incomplete result shows a counted warning and keeps the original stash unchanged for recovery.
++- Progress shows the creation and loading/discard phases without hiding partial failures.
+ 
+ ### Other Stash Actions
+ 
+ - **Export** — download the stash as a JSON file
+ - **Delete** — permanently remove the stash (with confirmation)
+ 
+ ### Settings Integration
+ 
+-- **Remove stash after restore** (Settings > General): automatically deletes the stash after successful restore.
++- **Remove stash after restore** (Settings > General): deletes the stash only after a complete restore. Invalid URLs or Chrome API failures retain the unchanged stash even when removal was requested.
+ 
+ ---
+ 
+ ## Sessions View
+ 
+ Sessions capture a complete snapshot of your browser state. The view is split into two sub-tabs:
+ 
+ | Tab | Contents |
+ |-----|----------|
+ | **Saved** | Sessions you created manually via the Save button |
+@@ -296,21 +294,23 @@ TabKebab automatically saves a session:
+ - **At regular intervals** (default: every 24 hours)
+ - Auto-saves are subject to a retention policy (default: keep 7 days of auto-saves)
+ - At least 2 auto-saves are always kept regardless of retention
+ 
+ Auto-saved sessions appear in the **Auto** tab with just the date/time as their name.
+ 
+ ### Restoring a Session
+ 
+ Click **Restore** on a session card to open in new windows matching the original layout. Click **Restore here** to open all tabs in the current window. In both modes, tabs already open (by URL) are skipped.
+ 
+-**Pipeline restore** (same as stash) activates for sessions with 20+ tabs, with two-phase progress tracking.
++Session restore uses the same settlement-preserving coordinator as stash restore. Each saved tab is counted; valid siblings continue restoring after a creation failure; pinned state and groups stay associated with the correct successful tab. Incomplete restores show restored, duplicate, invalid, and failed counts while the saved session remains available to retry.
++
++The default discard pipeline temporarily mutes only background tabs that are about to be discarded and always attempts to unmute them afterward. The first visible tab remains active and unmuted, and non-discarding restores never mute tabs.
+ 
+ ### Session Actions
+ 
+ - **Export** — download as JSON (arrow icon)
+ - **Delete** — remove permanently with 8-second undo via toast
+ 
+ ---
+ 
+ ## Tab Sleep (Kebab)
+ 
+diff --git a/PROGRESS.md b/PROGRESS.md
+index d8501ef..5981f6e 100644
+--- a/PROGRESS.md
++++ b/PROGRESS.md
+@@ -1,28 +1,35 @@
+ # TabKebab Progress
+ 
+ ## Current state
+ 
+-- Repository version: `1.2.3`
++- Repository version: `1.2.4`
+ - Active initiative: reliability and data-safety hardening
+ - Design status: architecture and written specification approved on 2026-07-14
+ - Plan status: approved 15-task TDD implementation plan in progress
+-- Implementation status: Task 1 complete; Bun regression and CI boundary established
++- Implementation status: Tasks 1–2 complete; restore outcomes, recoverable stash retention, and audio-safe discard cleanup established
+ 
+ ## Completed implementation slices
+ 
+ ### Task 1 — Bun regression and CI boundary (`1.2.3`)
+ 
+ - Added the pinned Bun preload, isolated Chrome API mock, syntax/version checks, and checked side-panel message client.
+ - Added the three-command GitHub Actions gate for pull requests, manual dispatches, and `main` pushes while excluding tag pushes.
+ - Kept the runtime dependency-free and directly loadable by Chrome; browser-only DOM, IndexedDB, lifecycle, OAuth, and Prompt API behavior remain real-Chrome gates.
+ 
++### Task 2 — Complete-or-recoverable restoration (`1.2.4`)
++
++- Replaced divergent session/stash pipelines with one coordinator that clones saved records, settles each creation independently, and preserves saved-tab/created-tab associations for pinned state and groups.
++- Added the fixed restore outcome and fail-closed stash deletion policy: incomplete outcomes retain the original IndexedDB record unchanged.
++- Limited muting to background discard candidates, unmuted in `finally` after success or failure, retried pending cleanup, and kept the first visible/non-discarding tabs unmuted.
++- Added focused orchestration, handler, audio-order, error-scope, and warning-feedback tests plus redacted Chrome 148 smoke evidence.
++
+ ## Confirmed remediation scope
+ 
+ The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
+ 
+ 1. Preserve stashes after incomplete restores.
+ 2. Preserve canonical Google Drive sync and settings files during retention cleanup.
+ 3. Cancel stale Focus Mode actions and make teardown non-blocking.
+ 4. Apply URL, domain, and Chrome-group allowlists consistently, including strict-empty behavior.
+ 5. Match natural-language domain filters by exact host or subdomain.
+ 6. Preserve hash-routed pages during duplicate cleanup and make Undo complete.
+@@ -37,11 +44,11 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
+ ## Approved technical direction
+ 
+ - Deliver narrow, independently testable hardening slices instead of a large rewrite.
+ - Use Bun `1.3.11` and `bun:test` for zero-package unit and integration tests.
+ - Use explicit Chrome API test doubles for non-browser tests.
+ - Keep IndexedDB, DOM, extension-context messaging, and Prompt API verification in the real-Chrome smoke matrix.
+ - Preserve backward compatibility for existing local data, Drive sync version 1, and export version 1.
+ 
+ ## Next gate
+ 
+-Task 2 makes session and stash restoration complete-or-recoverable, with exact restore outcomes, source retention after partial failure, and mute/discard/unmute regression coverage.
++Task 3 applies one complete Focus Mode allowlist policy at startup and navigation time.
+diff --git a/README.md b/README.md
+index 2a20912..ae86dab 100644
+--- a/README.md
++++ b/README.md
+@@ -43,32 +43,32 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
+ - **Domain grouping** — one-click to group all tabs by domain into Chrome native tab groups
+ - **AI smart grouping** — understands context (research, shopping, work, entertainment) and creates meaningful groups
+ - **4-phase pipeline**: Snapshot → Solver → Planner → Executor with live progress per phase
+ - **Custom groups** — create, rename, recolor, and manage your own groups with three ways to add tabs: drag-and-drop, text search filter, or URL paste
+ - **Collapsible section headers** in the Groups sub-view
+ 
+ ### Sessions
+ 
+ - **Save** full snapshots of every window, tab, and tab group layout
+ - **Saved / Auto tabs** — sessions view split into **Saved** (user-created) and **Auto** (automatic) sub-tabs for clean separation
+-- **Restore** with automatic deduplication — already-open tabs are skipped
++- **Recoverable restore outcomes** — every saved tab is reported as restored, already open, invalid, or failed
+ - **Restore modes**: original windows, current window, or single new window
+-- **Pipeline restore** for large sessions (20+ tabs): batched creation → load → discard with two-phase progress tracking
++- **Audio-safe pipeline restore**: batched creation → temporary background mute → discard → guaranteed unmute cleanup; non-discarding restores never mute
+ - **Auto-save** on browser start and at configurable intervals (default 24h), with retention policy
+ - **Per-session export** as JSON for sharing or backup
+ - **Rename and delete** sessions from the panel
+ 
+ ### Stash
+ 
+ - **Stash and close** tabs by window, Chrome group, domain, or all at once
+ - Save to **IndexedDB** — no storage limits
+-- **Lazy restore** for large stashes: batched with per-batch discard to avoid overwhelming Chrome
++- **Fail-closed stash restore**: incomplete restores retain the unchanged IndexedDB source even when delete-after-restore is enabled
+ - **Two-phase progress bar**: "Creating tabs..." then "Loading... X / Y ready" with animated stripe
+ - **Restored badge** on stashes already restored, with confirmation before re-restoring
+ - **Favicon previews**, source badges, tab count, and one-click restore or delete
+ - **Per-stash export** as JSON
+ 
+ ### Bookmarks
+ 
+ - **Three bookmark formats**: By Windows, By Groups, By Domains
+ - **Multiple destinations**: Chrome Bookmarks, Local Storage, Google Drive, or all
+ - **Auto-bookmark on stash** — automatically create bookmarks when stashing
+diff --git a/VERSION b/VERSION
+index 0495c4a..e8ea05d 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.2.3
++1.2.4
+diff --git a/core/restore-outcome.js b/core/restore-outcome.js
+new file mode 100644
+index 0000000..9588331
+--- /dev/null
++++ b/core/restore-outcome.js
+@@ -0,0 +1,22 @@
++export function createRestoreOutcome(requestedCount) {
++  return {
++    requestedCount,
++    restoredCount: 0,
++    skippedDuplicate: 0,
++    skippedInvalid: 0,
++    errors: [],
++    complete: false,
++  };
++}
++
++export function finalizeRestoreOutcome(outcome) {
++  outcome.complete =
++    outcome.skippedInvalid === 0 &&
++    outcome.errors.length === 0 &&
++    outcome.restoredCount + outcome.skippedDuplicate === outcome.requestedCount;
++  return outcome;
++}
++
++export function shouldDeleteRestoredSource(outcome, removeAfterRestore) {
++  return Boolean(removeAfterRestore && outcome.complete);
++}
+diff --git a/core/sessions.js b/core/sessions.js
+index 704c4c1..55e4cd9 100644
+--- a/core/sessions.js
++++ b/core/sessions.js
+@@ -1,46 +1,20 @@
+ // core/sessions.js — Session save/restore/list/delete (v2: window-aware)
+ 
+ import { getAllTabs } from './tabs-api.js';
+ import { Storage } from './storage.js';
+-import { normalizeUrl } from './duplicates.js';
++import { restoreTabWindows } from './tab-restore.js';
+ 
+ function generateId() {
+   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+ }
+ 
+-/**
+- * URLs that cannot be opened programmatically by extensions.
+- */
+-function isRestorableUrl(url) {
+-  if (!url) return false;
+-  const blocked = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
+-  return !blocked.some(prefix => url.startsWith(prefix));
+-}
+-
+-/**
+- * Sanitize a tab object before restore: truncate title, validate favicon, coerce pinned.
+- */
+-function sanitizeTab(tab) {
+-  if (tab.title && tab.title.length > 500) {
+-    tab.title = tab.title.slice(0, 500);
+-  }
+-  if (tab.favIconUrl) {
+-    const scheme = tab.favIconUrl.split(':')[0];
+-    if (!['http', 'https', 'chrome', 'data'].includes(scheme)) {
+-      tab.favIconUrl = '';
+-    }
+-  }
+-  tab.pinned = Boolean(tab.pinned);
+-  return tab;
+-}
+-
+ /**
+  * Migrate a v1 session (flat tabs array) to v2 (windows array).
+  * Pure function — does not write to storage.
+  */
+ function migrateV1toV2(session) {
+   if (session.version === 2 || !session.tabs) return session;
+ 
+   // Group tabs by windowId
+   const windowMap = new Map();
+   for (const tab of session.tabs) {
+@@ -140,349 +114,30 @@ export async function saveSession(name, allWindows = true) {
+   };
+ 
+   const sessions = (await Storage.get('sessions')) || [];
+   sessions.unshift(session);
+   await Storage.set('sessions', sessions);
+   return session;
+ }
+ 
+ // ── Restore ──
+ 
+-async function muteTabs(tabs) {
+-  for (const tab of tabs) {
+-    try { await chrome.tabs.update(tab.id, { muted: true }); } catch { /* ignore */ }
+-  }
+-}
+-
+-const RESTORE_BATCH = 6;
+-const LOAD_TIMEOUT_MS = 15000;
+-
+-function sleep(ms) {
+-  return new Promise(resolve => setTimeout(resolve, ms));
+-}
+-
+-/**
+- * Wait for all tabs to finish loading (status === 'complete').
+- * Times out per-tab after LOAD_TIMEOUT_MS to avoid hanging forever.
+- */
+-async function waitForTabsLoaded(tabIds) {
+-  await Promise.all(tabIds.map(async (id) => {
+-    const start = Date.now();
+-    while (Date.now() - start < LOAD_TIMEOUT_MS) {
+-      try {
+-        const tab = await chrome.tabs.get(id);
+-        if (tab.status === 'complete') return;
+-      } catch { return; }
+-      await sleep(250);
+-    }
+-  }));
+-}
+-
+-async function discardTabs(tabIds) {
+-  for (const id of tabIds) {
+-    try { await chrome.tabs.discard(id); } catch (e) { /* tab may be active or protected */ }
+-  }
+-}
+-
+-/**
+- * Restore Chrome tab groups after tabs have been created.
+- * Maps saved groupIds to actual tab IDs and recreates groups.
+- */
+-async function restoreGroups(savedTabs, createdTabs, groups, windowId, result) {
+-  // Build a map: old groupId → [actual tab IDs]
+-  const groupTabMap = new Map();
+-  for (let i = 0; i < savedTabs.length && i < createdTabs.length; i++) {
+-    const gid = savedTabs[i].groupId;
+-    if (gid !== undefined && gid !== -1) {
+-      if (!groupTabMap.has(gid)) groupTabMap.set(gid, []);
+-      groupTabMap.get(gid).push(createdTabs[i].id);
+-    }
+-  }
+-
+-  // Index saved group metadata by id
+-  const groupMetaMap = new Map();
+-  for (const g of groups) {
+-    groupMetaMap.set(g.id, g);
+-  }
+-
+-  // Create each group
+-  for (const [oldGid, tabIds] of groupTabMap) {
+-    if (tabIds.length === 0) continue;
+-    const meta = groupMetaMap.get(oldGid);
+-
+-    try {
+-      const newGroupId = await chrome.tabs.group({
+-        createProperties: { windowId },
+-        tabIds,
+-      });
+-
+-      if (meta) {
+-        const updateProps = {};
+-        if (meta.title) updateProps.title = meta.title;
+-        if (meta.color) updateProps.color = meta.color;
+-        if (meta.collapsed) updateProps.collapsed = meta.collapsed;
+-        if (Object.keys(updateProps).length > 0) {
+-          await chrome.tabGroups.update(newGroupId, updateProps);
+-        }
+-      }
+-
+-      result.groupsRestored++;
+-    } catch (e) {
+-      console.warn('[TabKebab] group recreation failed:', e);
+-    }
+-  }
+-}
+-
+ /**
+- * Restore a saved session.
+- * @param {string} sessionId
+- * @param {Object} [options]
+- * @param {string} [options.mode='windows'] - 'windows' | 'here' | 'single-window'
+- * @param {Function} [options.onProgress] - callback({ created, loaded, total }) called during restore
+- * @returns {Promise<Object>} RestoreResult
++ * Restore a saved session through the shared tab-restore coordinator.
+  */
+ export async function restoreSession(sessionId, options = {}) {
+-  const mode = options.mode || 'windows';
+-  const onProgress = options.onProgress || null;
+-
+   const sessions = (await Storage.get('sessions')) || [];
+-  let session = sessions.find(s => s.id === sessionId);
+-  if (!session) throw new Error('Session not found');
+-
+-  // Migrate v1 → v2 if needed
+-  session = migrateV1toV2(session);
+-
+-  // Build set of currently open URLs for dedup
+-  const openTabs = await getAllTabs({ allWindows: true });
+-  const openUrls = new Set();
+-  for (const t of openTabs) {
+-    if (t.url) openUrls.add(normalizeUrl(t.url));
+-  }
+-
+-  const result = {
+-    restoredCount: 0,
+-    skippedDuplicate: 0,
+-    skippedInvalid: 0,
+-    windowsCreated: 0,
+-    groupsRestored: 0,
+-    errors: [],
+-  };
+-
+-  // Collect restorable tabs per window, filtering out dupes and invalid URLs
+-  const windowBatches = [];
+-  for (const win of session.windows) {
+-    const restorable = [];
+-    for (const tab of win.tabs) {
+-      sanitizeTab(tab);
+-      if (!isRestorableUrl(tab.url)) {
+-        result.skippedInvalid++;
+-        continue;
+-      }
+-      const norm = normalizeUrl(tab.url);
+-      if (openUrls.has(norm)) {
+-        result.skippedDuplicate++;
+-        continue;
+-      }
+-      // Mark as "will be open" so cross-window dupes within the session are also caught
+-      openUrls.add(norm);
+-      restorable.push(tab);
+-    }
+-    if (restorable.length > 0) {
+-      windowBatches.push({ tabs: restorable, groups: win.groups || [] });
+-    }
+-  }
+-
+-  const allRestorable = windowBatches.flatMap(wb => wb.tabs);
+-
+-  if (allRestorable.length === 0) {
+-    return result;
+-  }
+-
+-  const totalCount = allRestorable.length;
+-
+-  let created = 0;
+-  let loaded = 0;
+-
+-  if (mode === 'windows') {
+-    // Each saved window → new Chrome window
+-    for (const { tabs, groups } of windowBatches) {
+-      try {
+-        // Create window with first tab
+-        const win = await chrome.windows.create({ url: tabs[0].url });
+-        result.windowsCreated++;
+-        result.restoredCount++;
+-        created++;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-        const windowId = win.id;
+-        if (win.tabs && win.tabs[0]) await muteTabs(win.tabs);
+-
+-        // Pipeline: create next batch while waiting for previous to load
+-        let prevBatchIds = null;
+-
+-        for (let i = 1; i < tabs.length; i += RESTORE_BATCH) {
+-          const batch = tabs.slice(i, i + RESTORE_BATCH);
+-          const createdTabs = await Promise.all(
+-            batch.map(tab =>
+-              chrome.tabs.create({ windowId, url: tab.url, active: false })
+-            )
+-          );
+-          result.restoredCount += batch.length;
+-          created += batch.length;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-          await muteTabs(createdTabs);
+-
+-          const currentIds = createdTabs.map(ct => ct.id);
+-
+-          if (prevBatchIds) {
+-            await waitForTabsLoaded(prevBatchIds);
+-            await discardTabs(prevBatchIds);
+-            loaded += prevBatchIds.length;
+-            if (onProgress) onProgress({ created, loaded, total: totalCount });
+-          }
+-
+-          prevBatchIds = currentIds;
+-        }
+-
+-        if (prevBatchIds) {
+-          await waitForTabsLoaded(prevBatchIds);
+-          await discardTabs(prevBatchIds);
+-          loaded += prevBatchIds.length;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-        }
+-
+-        // Count the first tab (created with the window) as loaded
+-        loaded++;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-        // Query created tabs to get their actual IDs
+-        const windowTabs = await chrome.tabs.query({ windowId });
+-
+-        // Restore pinned state
+-        for (let i = 0; i < tabs.length && i < windowTabs.length; i++) {
+-          if (tabs[i].pinned) {
+-            try {
+-              await chrome.tabs.update(windowTabs[i].id, { pinned: true });
+-            } catch (e) { /* Tab may have been closed */ }
+-          }
+-        }
+-
+-        // Restore tab groups
+-        if (groups.length > 0) {
+-          await restoreGroups(tabs, windowTabs, groups, windowId, result);
+-        }
+-      } catch (err) {
+-        result.errors.push(`Window creation failed: ${err.message}`);
+-      }
+-    }
+-  } else if (mode === 'here') {
+-    let prevBatchIds = null;
+-
+-    for (let i = 0; i < allRestorable.length; i += RESTORE_BATCH) {
+-      const batch = allRestorable.slice(i, i + RESTORE_BATCH);
+-      const batchTabs = await Promise.all(
+-        batch.map(tab =>
+-          chrome.tabs.create({ url: tab.url, active: false, pinned: tab.pinned || false })
+-        )
+-      );
+-      result.restoredCount += batch.length;
+-      created += batch.length;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-      await muteTabs(batchTabs);
+-
+-      const currentIds = batchTabs.map(ct => ct.id);
+-
+-      if (prevBatchIds) {
+-        await waitForTabsLoaded(prevBatchIds);
+-        await discardTabs(prevBatchIds);
+-        loaded += prevBatchIds.length;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-      }
+-
+-      prevBatchIds = currentIds;
+-    }
+-
+-    if (prevBatchIds) {
+-      await waitForTabsLoaded(prevBatchIds);
+-      await discardTabs(prevBatchIds);
+-      loaded += prevBatchIds.length;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-    }
+-  } else if (mode === 'single-window') {
+-    // All tabs in one new window
+-    try {
+-      const win = await chrome.windows.create({ url: allRestorable[0].url });
+-      result.windowsCreated++;
+-      result.restoredCount++;
+-      created++;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-      const windowId = win.id;
+-      if (win.tabs && win.tabs[0]) await muteTabs(win.tabs);
+-
+-      let prevBatchIds = null;
+-
+-      for (let i = 1; i < allRestorable.length; i += RESTORE_BATCH) {
+-        const batch = allRestorable.slice(i, i + RESTORE_BATCH);
+-        const batchTabs = await Promise.all(
+-          batch.map(tab =>
+-            chrome.tabs.create({ windowId, url: tab.url, active: false })
+-          )
+-        );
+-        result.restoredCount += batch.length;
+-        created += batch.length;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-        await muteTabs(batchTabs);
+-
+-        const currentIds = batchTabs.map(ct => ct.id);
+-
+-        if (prevBatchIds) {
+-          await waitForTabsLoaded(prevBatchIds);
+-          await discardTabs(prevBatchIds);
+-          loaded += prevBatchIds.length;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-        }
+-
+-        prevBatchIds = currentIds;
+-      }
+-
+-      if (prevBatchIds) {
+-        await waitForTabsLoaded(prevBatchIds);
+-        await discardTabs(prevBatchIds);
+-        loaded += prevBatchIds.length;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-      }
+-
+-      // Count the first tab (created with the window) as loaded
+-      loaded++;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-      // Restore pinned state
+-      const windowTabs = await chrome.tabs.query({ windowId });
+-      for (let i = 0; i < allRestorable.length && i < windowTabs.length; i++) {
+-        if (allRestorable[i].pinned) {
+-          try {
+-            await chrome.tabs.update(windowTabs[i].id, { pinned: true });
+-          } catch (e) {
+-            // Tab may have been closed
+-          }
+-        }
+-      }
+-    } catch (err) {
+-      result.errors.push(`Window creation failed: ${err.message}`);
+-    }
+-  }
++  const storedSession = sessions.find((session) => session.id === sessionId);
++  if (!storedSession) throw new Error('Session not found');
+ 
+-  return result;
++  const session = migrateV1toV2(storedSession);
++  return restoreTabWindows(session.windows || [], options);
+ }
+ 
+ // ── List / Delete ──
+ 
+ export async function listSessions() {
+   const sessions = (await Storage.get('sessions')) || [];
+   // Return with v2 migration applied (for display purposes)
+   return sessions.map(migrateV1toV2);
+ }
+ 
+diff --git a/core/stash-db.js b/core/stash-db.js
+index a1df40b..659c40a 100644
+--- a/core/stash-db.js
++++ b/core/stash-db.js
+@@ -1,14 +1,13 @@
+ // core/stash-db.js — IndexedDB storage for stashed tabs
+ 
+-import { getAllTabs } from './tabs-api.js';
+-import { normalizeUrl } from './duplicates.js';
++import { restoreTabWindows } from './tab-restore.js';
+ 
+ const DB_NAME = 'TabKebabStash';
+ const DB_VERSION = 1;
+ const STORE_NAME = 'stashes';
+ 
+ let dbPromise = null;
+ 
+ function openDB() {
+   if (dbPromise) return dbPromise;
+ 
+@@ -124,286 +123,16 @@ export async function clearAllStashes() {
+   return new Promise((resolve, reject) => {
+     const tx = db.transaction(STORE_NAME, 'readwrite');
+     tx.objectStore(STORE_NAME).clear();
+     tx.oncomplete = () => resolve();
+     tx.onerror = () => reject(tx.error);
+   });
+ }
+ 
+ // ── Restore ──
+ 
+-async function muteTabs(tabs) {
+-  for (const tab of tabs) {
+-    try { await chrome.tabs.update(tab.id, { muted: true }); } catch { /* ignore */ }
+-  }
+-}
+-
+-const RESTORE_BATCH = 6;
+-const LOAD_TIMEOUT_MS = 15000;
+-
+-function sleep(ms) {
+-  return new Promise(resolve => setTimeout(resolve, ms));
+-}
+-
+-function isRestorableUrl(url) {
+-  if (!url) return false;
+-  const blocked = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
+-  return !blocked.some(prefix => url.startsWith(prefix));
+-}
+-
+-function sanitizeTab(tab) {
+-  if (tab.title && tab.title.length > 500) {
+-    tab.title = tab.title.slice(0, 500);
+-  }
+-  if (tab.favIconUrl) {
+-    const scheme = tab.favIconUrl.split(':')[0];
+-    if (!['http', 'https', 'chrome', 'data'].includes(scheme)) {
+-      tab.favIconUrl = '';
+-    }
+-  }
+-  tab.pinned = Boolean(tab.pinned);
+-  return tab;
+-}
+-
+-async function waitForTabsLoaded(tabIds) {
+-  await Promise.all(tabIds.map(async (id) => {
+-    const start = Date.now();
+-    while (Date.now() - start < LOAD_TIMEOUT_MS) {
+-      try {
+-        const tab = await chrome.tabs.get(id);
+-        if (tab.status === 'complete') return;
+-      } catch { return; }
+-      await sleep(250);
+-    }
+-  }));
+-}
+-
+-async function discardTabs(tabIds) {
+-  for (const id of tabIds) {
+-    try { await chrome.tabs.discard(id); } catch (e) { /* tab may be active or protected */ }
+-  }
+-}
+-
+-async function restoreGroups(savedTabs, createdTabs, groups, windowId, result) {
+-  const groupTabMap = new Map();
+-  for (let i = 0; i < savedTabs.length && i < createdTabs.length; i++) {
+-    const gid = savedTabs[i].groupId;
+-    if (gid !== undefined && gid !== -1) {
+-      if (!groupTabMap.has(gid)) groupTabMap.set(gid, []);
+-      groupTabMap.get(gid).push(createdTabs[i].id);
+-    }
+-  }
+-
+-  const groupMetaMap = new Map();
+-  for (const g of groups) {
+-    groupMetaMap.set(g.id, g);
+-  }
+-
+-  for (const [oldGid, tabIds] of groupTabMap) {
+-    if (tabIds.length === 0) continue;
+-    const meta = groupMetaMap.get(oldGid);
+-
+-    try {
+-      const newGroupId = await chrome.tabs.group({
+-        createProperties: { windowId },
+-        tabIds,
+-      });
+-
+-      if (meta) {
+-        const updateProps = {};
+-        if (meta.title) updateProps.title = meta.title;
+-        if (meta.color) updateProps.color = meta.color;
+-        if (meta.collapsed) updateProps.collapsed = meta.collapsed;
+-        if (Object.keys(updateProps).length > 0) {
+-          await chrome.tabGroups.update(newGroupId, updateProps);
+-        }
+-      }
+-
+-      result.groupsRestored++;
+-    } catch { /* group creation can fail if tabs were closed */ }
+-  }
+-}
+-
+ /**
+- * Restore stashed tabs. Mirrors the session restore logic.
+- * @param {Object} stash — Stash object from IndexedDB
+- * @param {Object} [options]
+- * @param {string} [options.mode='windows'] — 'windows' | 'here'
+- * @param {boolean} [options.discarded=true] — restore tabs in discarded state (not loaded until clicked)
+- * @param {Function} [options.onProgress] — callback({ created, loaded, total }) called during restore
++ * Restore a stash through the shared tab-restore coordinator.
+  */
+ export async function restoreStashTabs(stash, options = {}) {
+-  const mode = options.mode || 'windows';
+-  const shouldDiscard = options.discarded !== false;
+-  const onProgress = options.onProgress || null;
+-
+-  // Build set of currently open URLs for dedup
+-  const openTabs = await getAllTabs({ allWindows: true });
+-  const openUrls = new Set();
+-  for (const t of openTabs) {
+-    if (t.url) openUrls.add(normalizeUrl(t.url));
+-  }
+-
+-  const result = {
+-    restoredCount: 0,
+-    skippedDuplicate: 0,
+-    skippedInvalid: 0,
+-    windowsCreated: 0,
+-    groupsRestored: 0,
+-    errors: [],
+-  };
+-
+-  // Collect restorable tabs per window
+-  const windowBatches = [];
+-  for (const win of stash.windows) {
+-    const restorable = [];
+-    for (const tab of win.tabs) {
+-      sanitizeTab(tab);
+-      if (!isRestorableUrl(tab.url)) {
+-        result.skippedInvalid++;
+-        continue;
+-      }
+-      const norm = normalizeUrl(tab.url);
+-      if (openUrls.has(norm)) {
+-        result.skippedDuplicate++;
+-        continue;
+-      }
+-      openUrls.add(norm);
+-      restorable.push(tab);
+-    }
+-    if (restorable.length > 0) {
+-      windowBatches.push({ tabs: restorable, groups: win.groups || [] });
+-    }
+-  }
+-
+-  const allRestorable = windowBatches.flatMap(wb => wb.tabs);
+-
+-  if (allRestorable.length === 0) {
+-    return result;
+-  }
+-
+-  const totalCount = allRestorable.length;
+-
+-  let created = 0;
+-  let loaded = 0;
+-
+-  if (mode === 'windows') {
+-    for (const { tabs, groups } of windowBatches) {
+-      try {
+-        const win = await chrome.windows.create({ url: tabs[0].url });
+-        result.windowsCreated++;
+-        result.restoredCount++;
+-        created++;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-        const windowId = win.id;
+-        if (win.tabs && win.tabs[0]) await muteTabs(win.tabs);
+-
+-        let prevBatchIds = null;
+-
+-        for (let i = 1; i < tabs.length; i += RESTORE_BATCH) {
+-          const batch = tabs.slice(i, i + RESTORE_BATCH);
+-          const batchTabs = await Promise.all(
+-            batch.map(tab =>
+-              chrome.tabs.create({ windowId, url: tab.url, active: false })
+-            )
+-          );
+-          result.restoredCount += batch.length;
+-          created += batch.length;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-          await muteTabs(batchTabs);
+-
+-          const currentIds = batchTabs.map(ct => ct.id);
+-
+-          if (shouldDiscard && prevBatchIds) {
+-            await waitForTabsLoaded(prevBatchIds);
+-            await discardTabs(prevBatchIds);
+-            loaded += prevBatchIds.length;
+-            if (onProgress) onProgress({ created, loaded, total: totalCount });
+-          }
+-
+-          prevBatchIds = currentIds;
+-        }
+-
+-        if (shouldDiscard && prevBatchIds) {
+-          await waitForTabsLoaded(prevBatchIds);
+-          await discardTabs(prevBatchIds);
+-          loaded += prevBatchIds.length;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-        }
+-
+-        // Count the first tab (created with the window) as loaded
+-        if (shouldDiscard) {
+-          loaded++;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-        }
+-
+-        // When not discarding, loaded tracks created
+-        if (!shouldDiscard) {
+-          loaded = created;
+-          if (onProgress) onProgress({ created, loaded, total: totalCount });
+-        }
+-
+-        const windowTabs = await chrome.tabs.query({ windowId });
+-
+-        // Restore pinned state
+-        for (let i = 0; i < tabs.length && i < windowTabs.length; i++) {
+-          if (tabs[i].pinned) {
+-            try {
+-              await chrome.tabs.update(windowTabs[i].id, { pinned: true });
+-            } catch { /* tab may have been closed */ }
+-          }
+-        }
+-
+-        // Restore tab groups
+-        if (groups.length > 0) {
+-          await restoreGroups(tabs, windowTabs, groups, windowId, result);
+-        }
+-      } catch (err) {
+-        result.errors.push(`Window creation failed: ${err.message}`);
+-      }
+-    }
+-  } else if (mode === 'here') {
+-    let prevBatchIds = null;
+-
+-    for (let i = 0; i < allRestorable.length; i += RESTORE_BATCH) {
+-      const batch = allRestorable.slice(i, i + RESTORE_BATCH);
+-      const batchTabs = await Promise.all(
+-        batch.map(tab =>
+-          chrome.tabs.create({ url: tab.url, active: false, pinned: tab.pinned || false })
+-        )
+-      );
+-      result.restoredCount += batch.length;
+-      created += batch.length;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-
+-      await muteTabs(batchTabs);
+-
+-      const currentIds = batchTabs.map(ct => ct.id);
+-
+-      if (shouldDiscard && prevBatchIds) {
+-        await waitForTabsLoaded(prevBatchIds);
+-        await discardTabs(prevBatchIds);
+-        loaded += prevBatchIds.length;
+-        if (onProgress) onProgress({ created, loaded, total: totalCount });
+-      }
+-
+-      prevBatchIds = currentIds;
+-    }
+-
+-    if (shouldDiscard && prevBatchIds) {
+-      await waitForTabsLoaded(prevBatchIds);
+-      await discardTabs(prevBatchIds);
+-      loaded += prevBatchIds.length;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-    }
+-
+-    // When not discarding, loaded tracks created
+-    if (!shouldDiscard) {
+-      loaded = created;
+-      if (onProgress) onProgress({ created, loaded, total: totalCount });
+-    }
+-  }
+-
+-  return result;
++  return restoreTabWindows(stash?.windows || [], options);
+ }
+diff --git a/core/tab-restore.js b/core/tab-restore.js
+new file mode 100644
+index 0000000..db1d038
+--- /dev/null
++++ b/core/tab-restore.js
+@@ -0,0 +1,464 @@
++import { normalizeUrl } from './duplicates.js';
++import { createRestoreOutcome, finalizeRestoreOutcome } from './restore-outcome.js';
++import { getAllTabs } from './tabs-api.js';
++
++const RESTORE_BATCH = 6;
++const LOAD_TIMEOUT_MS = 15000;
++const VALID_MODES = new Set(['windows', 'here', 'single-window']);
++const FORBIDDEN_PROTOCOLS = new Set([
++  'about:',
++  'blob:',
++  'brave:',
++  'chrome:',
++  'chrome-extension:',
++  'data:',
++  'devtools:',
++  'edge:',
++  'javascript:',
++]);
++
++function sleep(ms) {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++function cloneSavedTab(tab) {
++  if (!tab || typeof tab !== 'object' || Array.isArray(tab)) {
++    return { url: '' };
++  }
++  return structuredClone(tab);
++}
++
++function sanitizeTab(tab) {
++  if (typeof tab.url === 'string') tab.url = tab.url.trim();
++
++  if (typeof tab.title === 'string' && tab.title.length > 500) {
++    tab.title = tab.title.slice(0, 500);
++  }
++
++  if (typeof tab.favIconUrl === 'string' && tab.favIconUrl) {
++    let scheme = '';
++    try {
++      scheme = new URL(tab.favIconUrl).protocol.replace(/:$/, '');
++    } catch {
++      scheme = tab.favIconUrl.split(':', 1)[0].toLowerCase();
++    }
++    if (!['http', 'https', 'chrome', 'data'].includes(scheme)) {
++      tab.favIconUrl = '';
++    }
++  }
++
++  tab.pinned = Boolean(tab.pinned);
++  return tab;
++}
++
++function isRestorableUrl(url) {
++  if (typeof url !== 'string' || url.length === 0) return false;
++  try {
++    const parsed = new URL(url);
++    return !FORBIDDEN_PROTOCOLS.has(parsed.protocol.toLowerCase());
++  } catch {
++    return false;
++  }
++}
++
++function errorMessage(error) {
++  return error?.message || String(error);
++}
++
++function addError(outcome, scope, savedTab, error) {
++  outcome.errors.push({
++    scope,
++    url: typeof savedTab?.url === 'string' ? savedTab.url : '',
++    message: errorMessage(error),
++  });
++}
++
++async function waitForTabsLoaded(tabIds) {
++  await Promise.all(tabIds.map(async (id) => {
++    const start = Date.now();
++    while (Date.now() - start < LOAD_TIMEOUT_MS) {
++      try {
++        const tab = await chrome.tabs.get(id);
++        if (tab.status === 'complete') return;
++      } catch {
++        return;
++      }
++      await sleep(250);
++    }
++  }));
++}
++
++/**
++ * Restore saved tab windows through one settlement-preserving coordinator.
++ * Saved inputs are cloned before validation and sanitization.
++ */
++export async function restoreTabWindows(savedWindows, {
++  mode = 'windows',
++  discarded = true,
++  onProgress = null,
++} = {}) {
++  if (!Array.isArray(savedWindows)) {
++    throw new TypeError('Saved windows must be an array');
++  }
++  if (!VALID_MODES.has(mode)) {
++    throw new TypeError(`Unsupported restore mode: ${mode}`);
++  }
++
++  const requestedCount = savedWindows.reduce(
++    (count, window) => count + (Array.isArray(window?.tabs) ? window.tabs.length : 0),
++    0,
++  );
++  const outcome = Object.assign(createRestoreOutcome(requestedCount), {
++    windowsCreated: 0,
++    groupsRestored: 0,
++  });
++
++  const openTabs = await getAllTabs({ allWindows: true });
++  const openUrls = new Set(
++    openTabs
++      .filter((tab) => typeof tab.url === 'string' && tab.url)
++      .map((tab) => normalizeUrl(tab.url)),
++  );
++
++  const preparedWindows = savedWindows.map((savedWindow, sourceIndex) => {
++    const tabs = [];
++    for (const rawTab of Array.isArray(savedWindow?.tabs) ? savedWindow.tabs : []) {
++      const savedTab = sanitizeTab(cloneSavedTab(rawTab));
++      if (!isRestorableUrl(savedTab.url)) {
++        outcome.skippedInvalid++;
++        continue;
++      }
++
++      const normalized = normalizeUrl(savedTab.url);
++      if (openUrls.has(normalized)) {
++        outcome.skippedDuplicate++;
++        continue;
++      }
++
++      openUrls.add(normalized);
++      tabs.push(savedTab);
++    }
++
++    return {
++      sourceIndex,
++      tabs,
++      groups: Array.isArray(savedWindow?.groups) ? structuredClone(savedWindow.groups) : [],
++    };
++  });
++
++  const total = preparedWindows.reduce((count, window) => count + window.tabs.length, 0);
++  const progress = { created: 0, loaded: 0, total };
++  const pendingMuted = new Map();
++
++  async function reportProgress() {
++    if (typeof onProgress !== 'function') return;
++    try {
++      await onProgress({ ...progress });
++    } catch (error) {
++      console.warn('[TabKebab] restore progress callback failed:', error);
++    }
++  }
++
++  async function recordCreated(savedTab, createdTab, sourceIndex) {
++    outcome.restoredCount++;
++    progress.created++;
++    await reportProgress();
++    return { savedTab, createdTab, sourceIndex };
++  }
++
++  async function createTabBatch(savedTabs, sourceIndex, windowId) {
++    const settled = await Promise.allSettled(savedTabs.map((savedTab) => {
++      const createProperties = { url: savedTab.url, active: false };
++      if (windowId !== undefined) createProperties.windowId = windowId;
++      return chrome.tabs.create(createProperties);
++    }));
++
++    const pairs = [];
++    for (let index = 0; index < settled.length; index++) {
++      const savedTab = savedTabs[index];
++      const settlement = settled[index];
++      if (settlement.status === 'fulfilled') {
++        pairs.push(await recordCreated(savedTab, settlement.value, sourceIndex));
++      } else {
++        addError(outcome, 'create', savedTab, settlement.reason);
++      }
++    }
++    return pairs;
++  }
++
++  async function updatePinned(pair) {
++    if (!pair.savedTab.pinned) return;
++    try {
++      await chrome.tabs.update(pair.createdTab.id, { pinned: true });
++    } catch (error) {
++      addError(outcome, 'pin', pair.savedTab, error);
++    }
++  }
++
++  async function processPairs(pairs, shouldDiscard) {
++    for (const pair of pairs) await updatePinned(pair);
++
++    if (!shouldDiscard) {
++      progress.loaded += pairs.length;
++      await reportProgress();
++      return;
++    }
++
++    for (const pair of pairs) {
++      try {
++        await chrome.tabs.update(pair.createdTab.id, { muted: true });
++        pendingMuted.set(pair.createdTab.id, pair.savedTab);
++      } catch (error) {
++        addError(outcome, 'update', pair.savedTab, error);
++      }
++    }
++
++    await waitForTabsLoaded(pairs.map((pair) => pair.createdTab.id));
++
++    for (const pair of pairs) {
++      try {
++        await chrome.tabs.discard(pair.createdTab.id);
++      } catch (error) {
++        addError(outcome, 'discard', pair.savedTab, error);
++      } finally {
++        if (pendingMuted.has(pair.createdTab.id)) {
++          try {
++            await chrome.tabs.update(pair.createdTab.id, { muted: false });
++            pendingMuted.delete(pair.createdTab.id);
++          } catch (error) {
++            addError(outcome, 'unmute', pair.savedTab, error);
++          }
++        }
++      }
++      progress.loaded++;
++      await reportProgress();
++    }
++  }
++
++  async function restoreGroups(preparedWindow, pairs, windowId) {
++    const pairsByGroup = new Map();
++    for (const pair of pairs) {
++      const groupId = pair.savedTab.groupId;
++      if (groupId === undefined || groupId === -1) continue;
++      if (!pairsByGroup.has(groupId)) pairsByGroup.set(groupId, []);
++      pairsByGroup.get(groupId).push(pair);
++    }
++
++    const groupMetadata = new Map(preparedWindow.groups.map((group) => [group.id, group]));
++    for (const [savedGroupId, groupPairs] of pairsByGroup) {
++      const representative = groupPairs[0].savedTab;
++      let restoredGroupId;
++      try {
++        restoredGroupId = await chrome.tabs.group({
++          createProperties: { windowId },
++          tabIds: groupPairs.map((pair) => pair.createdTab.id),
++        });
++      } catch (error) {
++        addError(outcome, 'group', representative, error);
++        continue;
++      }
++
++      outcome.groupsRestored++;
++      const metadata = groupMetadata.get(savedGroupId);
++      if (!metadata) continue;
++
++      const updateProperties = {};
++      if (metadata.title) updateProperties.title = metadata.title;
++      if (metadata.color) updateProperties.color = metadata.color;
++      if (metadata.collapsed) updateProperties.collapsed = metadata.collapsed;
++      if (Object.keys(updateProperties).length === 0) continue;
++
++      try {
++        await chrome.tabGroups.update(restoredGroupId, updateProperties);
++      } catch (error) {
++        addError(outcome, 'update', representative, error);
++      }
++    }
++  }
++
++  async function makePairVisible(pair) {
++    try {
++      pair.createdTab = await chrome.tabs.update(pair.createdTab.id, {
++        active: true,
++        muted: false,
++      });
++    } catch (error) {
++      addError(outcome, 'update', pair.savedTab, error);
++    }
++  }
++
++  async function createVisibleWindowTab(savedTab, sourceIndex) {
++    let window;
++    try {
++      window = await chrome.windows.create({ url: savedTab.url });
++    } catch (error) {
++      addError(outcome, 'create', savedTab, error);
++      return null;
++    }
++
++    outcome.windowsCreated++;
++    let createdTab = window.tabs?.[0];
++    if (!createdTab) {
++      try {
++        const windowTabs = await chrome.tabs.query({ windowId: window.id });
++        createdTab = windowTabs[0];
++      } catch (error) {
++        addError(outcome, 'create', savedTab, error);
++        return { pair: null, windowId: window.id };
++      }
++    }
++    if (!createdTab) {
++      addError(outcome, 'create', savedTab, new Error('Created window did not contain a tab'));
++      return { pair: null, windowId: window.id };
++    }
++
++    const pair = await recordCreated(savedTab, createdTab, sourceIndex);
++    await makePairVisible(pair);
++    return { pair, windowId: window.id };
++  }
++
++  async function createWindowFromCandidates(entries) {
++    for (let index = 0; index < entries.length; index++) {
++      const entry = entries[index];
++      const visible = await createVisibleWindowTab(entry.savedTab, entry.sourceIndex);
++      // Retry only a true windows.create rejection. Once a window exists, reuse it
++      // even if its seed tab could not be discovered, avoiding an orphan extra window.
++      if (visible) return { ...visible, nextIndex: index + 1 };
++    }
++    return null;
++  }
++
++  async function processBatchWithVisibleFallback(pairs, visiblePair) {
++    if (visiblePair || pairs.length === 0) {
++      await processPairs(pairs, discarded);
++      return visiblePair;
++    }
++
++    const [promotedPair, ...backgroundPairs] = pairs;
++    await makePairVisible(promotedPair);
++    await processPairs([promotedPair], false);
++    await processPairs(backgroundPairs, discarded);
++    return promotedPair;
++  }
++
++  async function restoreIntoExistingWindow(preparedWindow) {
++    const pairs = [];
++    for (let index = 0; index < preparedWindow.tabs.length; index += RESTORE_BATCH) {
++      const batchPairs = await createTabBatch(
++        preparedWindow.tabs.slice(index, index + RESTORE_BATCH),
++        preparedWindow.sourceIndex,
++      );
++      pairs.push(...batchPairs);
++      await processPairs(batchPairs, discarded);
++    }
++
++    if (pairs.length > 0) {
++      await restoreGroups(preparedWindow, pairs, pairs[0].createdTab.windowId);
++    }
++  }
++
++  async function restoreIntoNewWindow(preparedWindow) {
++    if (preparedWindow.tabs.length === 0) return;
++    const entries = preparedWindow.tabs.map((savedTab) => ({
++      savedTab,
++      sourceIndex: preparedWindow.sourceIndex,
++    }));
++    const visible = await createWindowFromCandidates(entries);
++    if (!visible) return;
++
++    const pairs = visible.pair ? [visible.pair] : [];
++    let visiblePair = visible.pair;
++    if (visiblePair) await processPairs([visiblePair], false);
++
++    for (let index = visible.nextIndex; index < preparedWindow.tabs.length; index += RESTORE_BATCH) {
++      const batchPairs = await createTabBatch(
++        preparedWindow.tabs.slice(index, index + RESTORE_BATCH),
++        preparedWindow.sourceIndex,
++        visible.windowId,
++      );
++      pairs.push(...batchPairs);
++      visiblePair = await processBatchWithVisibleFallback(batchPairs, visiblePair);
++    }
++
++    await restoreGroups(preparedWindow, pairs, visible.windowId);
++  }
++
++  try {
++    if (mode === 'windows') {
++      for (const preparedWindow of preparedWindows) {
++        await restoreIntoNewWindow(preparedWindow);
++      }
++    } else if (mode === 'here') {
++      for (const preparedWindow of preparedWindows) {
++        await restoreIntoExistingWindow(preparedWindow);
++      }
++    } else {
++      const allTabs = preparedWindows.flatMap((preparedWindow) =>
++        preparedWindow.tabs.map((savedTab) => ({
++          savedTab,
++          sourceIndex: preparedWindow.sourceIndex,
++        })),
++      );
++
++      if (allTabs.length > 0) {
++        const visible = await createWindowFromCandidates(allTabs);
++        if (visible) {
++          const pairsBySource = new Map();
++          let visiblePair = visible.pair;
++          if (visiblePair) {
++            pairsBySource.set(visiblePair.sourceIndex, [visiblePair]);
++            await processPairs([visiblePair], false);
++          }
++
++          for (let index = visible.nextIndex; index < allTabs.length; index += RESTORE_BATCH) {
++            const batch = allTabs.slice(index, index + RESTORE_BATCH);
++            const settled = await Promise.allSettled(batch.map(({ savedTab }) =>
++              chrome.tabs.create({
++                windowId: visible.windowId,
++                url: savedTab.url,
++                active: false,
++              }),
++            ));
++            const batchPairs = [];
++            for (let offset = 0; offset < settled.length; offset++) {
++              const entry = batch[offset];
++              const settlement = settled[offset];
++              if (settlement.status === 'fulfilled') {
++                const pair = await recordCreated(
++                  entry.savedTab,
++                  settlement.value,
++                  entry.sourceIndex,
++                );
++                batchPairs.push(pair);
++                if (!pairsBySource.has(entry.sourceIndex)) pairsBySource.set(entry.sourceIndex, []);
++                pairsBySource.get(entry.sourceIndex).push(pair);
++              } else {
++                addError(outcome, 'create', entry.savedTab, settlement.reason);
++              }
++            }
++            visiblePair = await processBatchWithVisibleFallback(batchPairs, visiblePair);
++          }
++
++          for (const preparedWindow of preparedWindows) {
++            await restoreGroups(
++              preparedWindow,
++              pairsBySource.get(preparedWindow.sourceIndex) || [],
++              visible.windowId,
++            );
++          }
++        }
++      }
++    }
++  } finally {
++    for (const [tabId, savedTab] of pendingMuted) {
++      try {
++        await chrome.tabs.update(tabId, { muted: false });
++        pendingMuted.delete(tabId);
++      } catch (error) {
++        addError(outcome, 'unmute', savedTab, error);
++      }
++    }
++  }
++
++  return finalizeRestoreOutcome(outcome);
++}
+diff --git a/docs/reports/2026-07-14-reliability-smoke.md b/docs/reports/2026-07-14-reliability-smoke.md
+new file mode 100644
+index 0000000..372e880
+--- /dev/null
++++ b/docs/reports/2026-07-14-reliability-smoke.md
+@@ -0,0 +1,90 @@
++# Reliability Hardening Smoke Evidence
++
++Date: 2026-07-14
++
++Slice: Task 2, complete-or-recoverable session and stash restoration
++
++Extension version: `1.2.4`
++
++## Browser boundary
++
++The first attempt used the requested installed browser:
++
++```text
++Google Chrome 148.0.7778.178
++xvfb-run -a /usr/bin/google-chrome \
++  --no-first-run --no-default-browser-check \
++  --user-data-dir=/tmp/tabkebab-task2-xvfb.[redacted] \
++  --disable-extensions-except=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --load-extension=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --remote-debugging-port=0 about:blank
++```
++
++Google Chrome started, but its DevTools targets and disposable profile did not register TabKebab. The only extension targets belonged to a bundled Google component; requesting the known development extension URL produced an error page. No application claim was inferred from that run.
++
++The successful fallback used the already-installed official Chrome for Testing build at the same browser major:
++
++```text
++Google Chrome for Testing 148.0.7778.96
++binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
++xvfb-run -a -f /tmp/tabkebab-task2-final.[redacted]/Xauthority \
++  /home/michel/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome \
++  --no-first-run --no-default-browser-check \
++  --user-data-dir=/tmp/tabkebab-task2-final.[redacted] \
++  --disable-extensions-except=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --load-extension=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --remote-debugging-port=0 about:blank
++```
++
++The driver discovered the unpacked extension's generated ID from its service-worker target, opened the real side-panel document, and used the Chrome DevTools Protocol to run synthetic restore messages in that extension context. No production failure hook, DOM shim, IndexedDB shim, package, or build step was used.
++
++## Redacted results
++
++The session fixture contained two synthetic HTTPS tabs and used `mode: "single-window"` with `discarded: false`.
++
++```json
++{
++  "requestedCount": 2,
++  "restoredCount": 2,
++  "skippedDuplicate": 0,
++  "skippedInvalid": 0,
++  "errorCount": 0,
++  "complete": true,
++  "windowsCreated": 1,
++  "restoredTabCount": 2,
++  "activeTabPresent": true,
++  "activeTabMuted": false,
++  "everyRestoredTabUnmuted": true,
++  "everyRestoredTabNotDiscarded": true
++}
++```
++
++The stash fixture contained one synthetic HTTPS tab and one forbidden Chrome URL. Delete-after-restore was explicitly requested.
++
++```json
++{
++  "requestedCount": 2,
++  "restoredCount": 1,
++  "skippedDuplicate": 0,
++  "skippedInvalid": 1,
++  "errorCount": 0,
++  "complete": false,
++  "retained": true,
++  "unchanged": true
++}
++```
++
++The synthetic page was silent, so the audio-safety assertion is Chrome's authoritative tab mute state (`mutedInfo.muted === false`), not an unsupported claim that sound was actively playing.
++
++## Cleanup
++
++The successful run reported:
++
++```text
++DISPOSABLE_PROFILE_ENTRIES_BEFORE_CLEANUP=283
++CLEANUP_PROFILE_REMOVED=1
++CLEANUP_CHROME_PROCESSES=0
++CLEANUP_XVFB_PROCESSES=0
++```
++
++An earlier failed driver attempt also had its uniquely named profile audited and removed separately; it left zero matching Chrome or Xvfb processes. No browser process, X server, or disposable profile was left running.
+diff --git a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+index ec225a0..91e18f2 100644
+--- a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
++++ b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+@@ -178,46 +178,46 @@ export function shouldDeleteRestoredSource(outcome, removeAfterRestore) {
+ 
+ // core/tab-restore.js
+ export async function restoreTabWindows(savedWindows, {
+   mode = 'windows',
+   discarded = true,
+   onProgress = null,
+ } = {});
+ // resolves to RestoreOutcome plus numeric windowsCreated and groupsRestored fields
+ ```
+ 
+-- [ ] Write `tests/core/restore-outcome.test.js` first. Cover zero-tab completion, all-restored completion, restored-plus-duplicate completion, invalid URL incompletion, create error incompletion, and delete decision requiring both `removeAfterRestore` and `complete`.
+-- [ ] Write failing orchestration tests for `restoreSession()` and `restoreStashTabs()` using Chrome stubs. Assert exact `requestedCount`, `restoredCount`, `skippedDuplicate`, `skippedInvalid`, `errors`, and `complete` values for mixed inputs.
+-- [ ] Add a partial-batch test where the middle `tabs.create()` rejects. Assert successful sibling tabs retain their originating saved records so pinned/group metadata cannot shift onto the wrong created tab, and assert the saved session/stash object is not mutated by sanitization.
+-- [ ] Add `tests/integration/stash-restore-handler.test.js` proving `restoreStash` does not call `deleteStashDB` when one saved URL is invalid or one `tabs.create` call rejects, even when delete-after-restore is requested.
+-- [ ] Add failing audio-order tests for both restore implementations:
++- [x] Write `tests/core/restore-outcome.test.js` first. Cover zero-tab completion, all-restored completion, restored-plus-duplicate completion, invalid URL incompletion, create error incompletion, and delete decision requiring both `removeAfterRestore` and `complete`.
++- [x] Write failing orchestration tests for `restoreSession()` and `restoreStashTabs()` using Chrome stubs. Assert exact `requestedCount`, `restoredCount`, `skippedDuplicate`, `skippedInvalid`, `errors`, and `complete` values for mixed inputs.
++- [x] Add a partial-batch test where the middle `tabs.create()` rejects. Assert successful sibling tabs retain their originating saved records so pinned/group metadata cannot shift onto the wrong created tab, and assert the saved session/stash object is not mutated by sanitization.
++- [x] Add `tests/integration/stash-restore-handler.test.js` proving `restoreStash` does not call `deleteStashDB` when one saved URL is invalid or one `tabs.create` call rejects, even when delete-after-restore is requested.
++- [x] Add failing audio-order tests for both restore implementations:
+ 
+ ```js
+ expect(calls).toEqual([
+   ['create', { active: false }],
+   ['update', createdTabId, { muted: true }],
+   ['discard', createdTabId],
+   ['update', createdTabId, { muted: false }],
+ ]);
+ ```
+ 
+ Also assert that a non-discarding mode never calls `tabs.update(..., { muted: true })`, the first visible tab is unmuted, and a discard failure still reaches the unmute call through `finally`.
+-- [ ] Run `bun test tests/core/restore-outcome.test.js tests/core/session-restore.test.js tests/core/stash-restore.test.js tests/integration/stash-restore-handler.test.js` and preserve failures against current raw result objects, unconditional stash deletion, and permanent muting.
+-- [ ] Implement `core/restore-outcome.js` and the shared `restoreTabWindows()` coordinator. Make `restoreSession()` and `restoreStashTabs()` thin storage/lookup wrappers over it so their pipelines cannot diverge. Count every saved tab in `requestedCount`; count malformed or forbidden URLs in `skippedInvalid`; append `{ scope, url, message }` for create/update/group/pin/discard/unmute failures; finalize once after all windows/batches settle.
+-- [ ] Clone saved records before sanitizing. Replace failure-hiding batch `Promise.all()` behavior with success-preserving settlement and retain `{ savedTab, createdTab }` pairs for every successful creation.
+-- [ ] In both restore implementations, mute only tabs entering the discard pipeline. After each discard attempt, unmute in `finally`. Track every tab muted by this invocation and unmute any still pending in an outer `finally` before returning or throwing.
+-- [ ] Keep the first visible restored tab active and unmuted. In non-discard modes, do not mute any created tab.
+-- [ ] Change the `restoreStash` handler to delete the IndexedDB source only when `shouldDeleteRestoredSource(result, removeAfterRestore)` is true. On incomplete restore, retain the original stash unchanged and return the outcome so the panel can display restored, duplicate, invalid, and failed counts.
+-- [ ] Update both UI components so `complete: false` produces a warning with counts and never a success message claiming the source was removed.
+-- [ ] Run `bun test tests/core/restore-outcome.test.js tests/core/session-restore.test.js tests/core/stash-restore.test.js tests/integration/stash-restore-handler.test.js`, then the full three-command gate.
+-- [ ] In real Chrome, restore a small session in non-discard mode and confirm the active tab is audible; then force one invalid stash URL and confirm the stash remains. Record this early smoke evidence in `docs/reports/2026-07-14-reliability-smoke.md` for final consolidation.
+-- [ ] Update the restore behavior in `GUIDE.md`, then close the task using the global chain.
++- [x] Run `bun test tests/core/restore-outcome.test.js tests/core/session-restore.test.js tests/core/stash-restore.test.js tests/integration/stash-restore-handler.test.js` and preserve failures against current raw result objects, unconditional stash deletion, and permanent muting.
++- [x] Implement `core/restore-outcome.js` and the shared `restoreTabWindows()` coordinator. Make `restoreSession()` and `restoreStashTabs()` thin storage/lookup wrappers over it so their pipelines cannot diverge. Count every saved tab in `requestedCount`; count malformed or forbidden URLs in `skippedInvalid`; append `{ scope, url, message }` for create/update/group/pin/discard/unmute failures; finalize once after all windows/batches settle.
++- [x] Clone saved records before sanitizing. Replace failure-hiding batch `Promise.all()` behavior with success-preserving settlement and retain `{ savedTab, createdTab }` pairs for every successful creation.
++- [x] In both restore implementations, mute only tabs entering the discard pipeline. After each discard attempt, unmute in `finally`. Track every tab muted by this invocation and unmute any still pending in an outer `finally` before returning or throwing.
++- [x] Keep the first visible restored tab active and unmuted. In non-discard modes, do not mute any created tab.
++- [x] Change the `restoreStash` handler to delete the IndexedDB source only when `shouldDeleteRestoredSource(result, removeAfterRestore)` is true. On incomplete restore, retain the original stash unchanged and return the outcome so the panel can display restored, duplicate, invalid, and failed counts.
++- [x] Update both UI components so `complete: false` produces a warning with counts and never a success message claiming the source was removed.
++- [x] Run `bun test tests/core/restore-outcome.test.js tests/core/session-restore.test.js tests/core/stash-restore.test.js tests/integration/stash-restore-handler.test.js`, then the full three-command gate.
++- [x] In real Chrome, restore a small session in non-discard mode and confirm the active tab is audible; then force one invalid stash URL and confirm the stash remains. Record this early smoke evidence in `docs/reports/2026-07-14-reliability-smoke.md` for final consolidation.
++- [x] Update the restore behavior in `GUIDE.md`, then close the task using the global chain.
+ 
+ ### Task 3: Apply one complete Focus allowlist policy at startup and navigation time
+ 
+ **Finding:** 4
+ 
+ **Release checkpoint:** expected `v1.2.5`
+ 
+ **Files:**
+ 
+ - Create: `core/focus-policy.js`
+diff --git a/manifest.json b/manifest.json
+index 2e1ba3e..9234781 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -1,14 +1,14 @@
+ {
+   "manifest_version": 3,
+   "name": "TabKebab",
+-  "version": "1.2.3",
++  "version": "1.2.4",
+   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
+ 
+   "permissions": [
+     "tabs",
+     "tabGroups",
+     "storage",
+     "sidePanel",
+     "identity",
+     "alarms",
+     "bookmarks"
+diff --git a/service-worker.js b/service-worker.js
+index 6d7841a..7c1335b 100644
+--- a/service-worker.js
++++ b/service-worker.js
+@@ -2,20 +2,21 @@
+ 
+ import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows } from './core/grouping.js';
+ import { findDuplicates, findEmptyPages } from './core/duplicates.js';
+ import { saveSession, restoreSession, listSessions, deleteSession } from './core/sessions.js';
+ import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
+ import { AIClient } from './core/ai/ai-client.js';
+ import { Prompts } from './core/ai/prompts.js';
+ import { filterTabs, executeNLAction } from './core/nl-executor.js';
+ import { Storage } from './core/storage.js';
+ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
++import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
+ import { getSettings, saveSettings } from './core/settings.js';
+ import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
+ import { getCachedFocusState, getFocusState, isBlockedDomain, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles } from './core/focus.js';
+ 
+ // ── Keep Awake Defaults ──
+ 
+ const DEFAULT_KEEP_AWAKE_DOMAINS = [
+   'gmail.com', 'outlook.com', 'outlook.live.com', 'mail.yahoo.com', 'proton.me',
+   'calendar.google.com', 'outlook.office.com',
+   'claude.ai', 'chat.openai.com', 'aistudio.google.com', 'gemini.google.com', 'codex.openai.com',
+@@ -866,20 +867,46 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+ 
+ // Message handler — side panel communicates via chrome.runtime.sendMessage
+ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+   handleMessage(message).then(sendResponse).catch(err => {
+     console.warn(`[TabKebab] handler error (${message?.action}):`, err);
+     sendResponse({ error: err?.message || String(err) });
+   });
+   return true; // keep channel open for async response
+ });
+ 
++/**
++ * Apply the storage policy for one completed stash restore.
++ * Incomplete outcomes leave the original IndexedDB record untouched.
++ */
++export async function applyStashRestoreDisposition(
++  stash,
++  restoreResult,
++  removeAfterRestore,
++  {
++    deleteSource = deleteStashDB,
++    saveSource = saveStash,
++  } = {},
++) {
++  if (shouldDeleteRestoredSource(restoreResult, removeAfterRestore)) {
++    await deleteSource(stash.id);
++    return { deleted: true, markedRestored: false };
++  }
++
++  if (restoreResult.complete && restoreResult.restoredCount > 0) {
++    await saveSource({ ...stash, restoredAt: Date.now() });
++    return { deleted: false, markedRestored: true };
++  }
++
++  return { deleted: false, markedRestored: false };
++}
++
+ async function handleMessage(msg) {
+   switch (msg.action) {
+     case 'getTabs':
+       return getAllTabs({ allWindows: msg.allWindows ?? true });
+ 
+     case 'getGroupedTabs':
+       return getAllTabsGroupedByDomain();
+ 
+     case 'applyDomainGroups': {
+       const result = await applyDomainGroupsToChrome((progress) => {
+@@ -1415,27 +1442,21 @@ async function handleMessage(msg) {
+       // Read removeStashAfterRestore from settings if not overridden in message
+       const removeOverride = msg.deleteAfterRestore;
+       let shouldRemove;
+       if (removeOverride !== undefined) {
+         shouldRemove = removeOverride;
+       } else {
+         const settings = await getSettings();
+         shouldRemove = settings.removeStashAfterRestore;
+       }
+ 
+-      if (shouldRemove !== false) {
+-        await deleteStashDB(msg.stashId);
+-      } else if (restoreResult.restoredCount > 0) {
+-        // Mark stash as restored (when not deleted)
+-        stash.restoredAt = Date.now();
+-        await saveStash(stash);
+-      }
++      await applyStashRestoreDisposition(stash, restoreResult, shouldRemove);
+ 
+       return restoreResult;
+     }
+ 
+     case 'deleteStash':
+       await deleteStashDB(msg.stashId);
+       return { success: true };
+ 
+     case 'undoDeleteStash':
+       await saveStash(msg.stash);
+diff --git a/sidepanel/components/session-manager.js b/sidepanel/components/session-manager.js
+index 91f6651..2a13f64 100644
+--- a/sidepanel/components/session-manager.js
++++ b/sidepanel/components/session-manager.js
+@@ -1,14 +1,16 @@
+ // session-manager.js — Save/restore/delete sessions + export/import
+ 
+ import { showToast } from './toast.js';
+ import { exportData, exportSession, importData } from '../../core/export-import.js';
++import { sendOrThrow } from '../message-client.js';
++import { formatRestoreFeedback } from '../restore-feedback.js';
+ 
+ export class SessionManager {
+   constructor(rootEl) {
+     this.root = rootEl;
+     this.savedListEl = rootEl.querySelector('#session-list-saved');
+     this.autoListEl = rootEl.querySelector('#session-list-auto');
+     this.activeRestoreId = null;
+ 
+     rootEl.querySelector('#btn-save-session').addEventListener('click', () => this.saveSession());
+     rootEl.querySelector('#btn-export').addEventListener('click', () => this.export());
+@@ -181,42 +183,42 @@ export class SessionManager {
+     const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
+       restoreBtn.disabled = true;
+       restoreBtn.textContent = 'Restoring...';
+       this.activeRestoreId = session.id;
+       try {
+         const result = await this.send({
+           action: 'restoreSession',
+           sessionId: session.id,
+           options: { mode: 'windows' },
+         });
+-        this.showRestoreResult(session.name, result);
++        this.showRestoreResult(result);
+       } catch (err) {
+         showToast(`Restore failed: ${err.message}`, 'error');
+       } finally {
+         this.activeRestoreId = null;
+         this.hideProgress(session.id);
+         restoreBtn.disabled = false;
+         restoreBtn.textContent = 'Restore';
+       }
+     });
+ 
+     const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
+       restoreHereBtn.disabled = true;
+       restoreHereBtn.textContent = 'Restoring...';
+       this.activeRestoreId = session.id;
+       try {
+         const result = await this.send({
+           action: 'restoreSession',
+           sessionId: session.id,
+           options: { mode: 'here' },
+         });
+-        this.showRestoreResult(session.name, result);
++        this.showRestoreResult(result);
+       } catch (err) {
+         showToast(`Restore failed: ${err.message}`, 'error');
+       } finally {
+         this.activeRestoreId = null;
+         this.hideProgress(session.id);
+         restoreHereBtn.disabled = false;
+         restoreHereBtn.textContent = 'Restore here';
+       }
+     });
+ 
+@@ -268,41 +270,23 @@ export class SessionManager {
+       if (groupCount > 0) {
+         meta += ` \u00b7 ${groupCount} group${groupCount !== 1 ? 's' : ''}`;
+       }
+       return `${meta} \u00b7 ${dateStr}`;
+     }
+     // v1 fallback
+     const tabCount = session.tabs ? session.tabs.length : 0;
+     return `${tabCount} tabs \u00b7 ${dateStr}`;
+   }
+ 
+-  showRestoreResult(name, result) {
+-    if (result.restoredCount === 0) {
+-      showToast('All tabs already open \u2014 nothing to restore', 'info');
+-      return;
+-    }
+-
+-    const parts = [`Restored ${result.restoredCount} tabs`];
+-
+-    if (result.windowsCreated > 0) {
+-      parts[0] += ` in ${result.windowsCreated} window${result.windowsCreated > 1 ? 's' : ''}`;
+-    }
+-
+-    if (result.groupsRestored > 0) {
+-      parts.push(`${result.groupsRestored} group${result.groupsRestored > 1 ? 's' : ''} restored`);
+-    }
+-
+-    if (result.skippedDuplicate > 0) {
+-      parts.push(`${result.skippedDuplicate} duplicate${result.skippedDuplicate > 1 ? 's' : ''} skipped`);
+-    }
+-
+-    showToast(parts.join(' \u2014 '), 'success');
++  showRestoreResult(result) {
++    const feedback = formatRestoreFeedback(result, { source: 'session' });
++    showToast(feedback.message, feedback.type);
+   }
+ 
+   async saveSession() {
+     const input = this.root.querySelector('#session-name');
+     const name = input.value.trim();
+     if (!name) {
+       showToast('Enter a session name', 'error');
+       input.focus();
+       return;
+     }
+@@ -344,19 +328,19 @@ export class SessionManager {
+ 
+   createBtn(text, className, onClick) {
+     const btn = document.createElement('button');
+     btn.className = className;
+     btn.textContent = text;
+     btn.addEventListener('click', onClick);
+     return btn;
+   }
+ 
+   send(msg) {
+-    return chrome.runtime.sendMessage(msg);
++    return sendOrThrow(msg);
+   }
+ 
+   escapeHtml(str) {
+     const div = document.createElement('div');
+     div.textContent = str;
+     return div.innerHTML;
+   }
+ }
+diff --git a/sidepanel/components/stash-list.js b/sidepanel/components/stash-list.js
+index 2fcbbce..8ec80a6 100644
+--- a/sidepanel/components/stash-list.js
++++ b/sidepanel/components/stash-list.js
+@@ -1,15 +1,17 @@
+ // stash-list.js — Stash view: list, restore, delete, export/import stashes
+ 
+ import { showToast } from './toast.js';
+ import { showConfirm } from './confirm-dialog.js';
+ import { Storage } from '../../core/storage.js';
++import { sendOrThrow } from '../message-client.js';
++import { formatRestoreFeedback } from '../restore-feedback.js';
+ 
+ export class StashList {
+   constructor(rootEl) {
+     this.root = rootEl;
+     this.listEl = rootEl.querySelector('#stash-list');
+     this.driveConnected = false;
+     this.activeRestoreId = null;
+ 
+     rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => this.exportStashes());
+     rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
+@@ -161,40 +163,40 @@ export class StashList {
+         const ok = await showConfirm({
+           title: 'Restore again?',
+           message: 'This stash was already restored. Restore again?',
+           confirmLabel: 'Restore',
+         });
+         if (!ok) return;
+       }
+       restoreBtn.disabled = true;
+       restoreBtn.textContent = 'Restoring...';
+       this.activeRestoreId = stash.id;
+-      await this.restoreStash(stash.id, stash.name, { mode: 'windows' });
++      await this.restoreStash(stash.id, { mode: 'windows' });
+       this.activeRestoreId = null;
+       this.hideProgress(stash.id);
+       restoreBtn.disabled = false;
+       restoreBtn.textContent = 'Restore';
+     });
+ 
+     const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
+       if (stash.restoredAt) {
+         const ok = await showConfirm({
+           title: 'Restore again?',
+           message: 'This stash was already restored. Restore again?',
+           confirmLabel: 'Restore',
+         });
+         if (!ok) return;
+       }
+       restoreHereBtn.disabled = true;
+       restoreHereBtn.textContent = 'Restoring...';
+       this.activeRestoreId = stash.id;
+-      await this.restoreStash(stash.id, stash.name, { mode: 'here' });
++      await this.restoreStash(stash.id, { mode: 'here' });
+       this.activeRestoreId = null;
+       this.hideProgress(stash.id);
+       restoreHereBtn.disabled = false;
+       restoreHereBtn.textContent = 'Restore here';
+     });
+ 
+     // Per-stash Export button (download arrow)
+     const exportBtn = this.createBtn('\u2913', 'stash-btn icon-btn', async () => {
+       await this.exportSingleStash(stash);
+     });
+@@ -245,44 +247,31 @@ export class StashList {
+     if (container) {
+       container.classList.remove('active');
+       const fill = container.querySelector('.restore-progress-fill');
+       if (fill) {
+         fill.style.width = '0%';
+         fill.classList.remove('loading');
+       }
+     }
+   }
+ 
+-  async restoreStash(id, name, options) {
++  async restoreStash(id, options) {
+     try {
+       // Let service worker read removeStashAfterRestore from settings
+       const result = await this.send({
+         action: 'restoreStash',
+         stashId: id,
+         options,
+       });
+ 
+-      if (result.restoredCount === 0) {
+-        showToast('All tabs already open \u2014 nothing to restore', 'info');
+-      } else {
+-        const parts = [`Restored ${result.restoredCount} tabs`];
+-        if (result.windowsCreated > 0) {
+-          parts[0] += ` in ${result.windowsCreated} window${result.windowsCreated > 1 ? 's' : ''}`;
+-        }
+-        if (result.groupsRestored > 0) {
+-          parts.push(`${result.groupsRestored} group${result.groupsRestored > 1 ? 's' : ''} restored`);
+-        }
+-        if (result.skippedDuplicate > 0) {
+-          parts.push(`${result.skippedDuplicate} duplicate${result.skippedDuplicate > 1 ? 's' : ''} skipped`);
+-        }
+-        showToast(parts.join(' \u2014 '), 'success');
+-      }
++      const feedback = formatRestoreFeedback(result, { source: 'stash' });
++      showToast(feedback.message, feedback.type);
+       this.refresh();
+     } catch (err) {
+       showToast(`Restore failed: ${err.message}`, 'error');
+     }
+   }
+ 
+   async deleteStash(stash) {
+     try {
+       await this.send({ action: 'deleteStash', stashId: stash.id });
+       this.refresh();
+@@ -381,13 +370,13 @@ export class StashList {
+ 
+   createBtn(text, className, onClick) {
+     const btn = document.createElement('button');
+     btn.className = className;
+     btn.textContent = text;
+     btn.addEventListener('click', onClick);
+     return btn;
+   }
+ 
+   send(msg) {
+-    return chrome.runtime.sendMessage(msg);
++    return sendOrThrow(msg);
+   }
+ }
+diff --git a/sidepanel/panel.css b/sidepanel/panel.css
+index 19953f3..b92e3d3 100644
+--- a/sidepanel/panel.css
++++ b/sidepanel/panel.css
+@@ -1618,20 +1618,25 @@ body.ai-available .ai-feature {
+ .toast.error {
+   background: var(--danger);
+   color: #fff;
+ }
+ 
+ .toast.success {
+   background: var(--success);
+   color: #fff;
+ }
+ 
++.toast.warning {
++  background: var(--warning);
++  color: #111827;
++}
++
+ @keyframes toastIn {
+   from {
+     transform: translateY(8px);
+     opacity: 0;
+   }
+ }
+ 
+ /* ── Scrollbar ── */
+ ::-webkit-scrollbar {
+   width: 4px;
+diff --git a/sidepanel/restore-feedback.js b/sidepanel/restore-feedback.js
+new file mode 100644
+index 0000000..743aa2b
+--- /dev/null
++++ b/sidepanel/restore-feedback.js
+@@ -0,0 +1,55 @@
++function count(value) {
++  return Number.isFinite(value) ? value : 0;
++}
++
++function plural(value, singular, pluralForm = `${singular}s`) {
++  return value === 1 ? singular : pluralForm;
++}
++
++export function formatRestoreFeedback(result, { source = 'session' } = {}) {
++  const requested = count(result?.requestedCount);
++  const restored = count(result?.restoredCount);
++  const duplicates = count(result?.skippedDuplicate);
++  const invalid = count(result?.skippedInvalid);
++  const failed = Array.isArray(result?.errors) ? result.errors.length : 0;
++
++  if (!result?.complete) {
++    const recovery = source === 'stash'
++      ? 'Stash kept for recovery.'
++      : 'Saved session remains available to retry.';
++    return {
++      type: 'warning',
++      message: [
++        `Restored ${restored} of ${requested} tabs`,
++        `${duplicates} ${plural(duplicates, 'duplicate')} skipped`,
++        `${invalid} invalid`,
++        `${failed} failed`,
++      ].join(' \u2014 ') + `. ${recovery}`,
++    };
++  }
++
++  if (restored === 0) {
++    return {
++      type: 'info',
++      message: requested === 0
++        ? 'No tabs to restore'
++        : `All ${requested} ${plural(requested, 'tab')} already open \u2014 nothing to restore`,
++    };
++  }
++
++  const parts = [`Restored ${restored} ${plural(restored, 'tab')}`];
++  const windowsCreated = count(result?.windowsCreated);
++  const groupsRestored = count(result?.groupsRestored);
++
++  if (windowsCreated > 0) {
++    parts[0] += ` in ${windowsCreated} ${plural(windowsCreated, 'window')}`;
++  }
++  if (groupsRestored > 0) {
++    parts.push(`${groupsRestored} ${plural(groupsRestored, 'group')} restored`);
++  }
++  if (duplicates > 0) {
++    parts.push(`${duplicates} ${plural(duplicates, 'duplicate')} skipped`);
++  }
++
++  return { type: 'success', message: parts.join(' \u2014 ') };
++}
+diff --git a/tests/core/restore-outcome.test.js b/tests/core/restore-outcome.test.js
+new file mode 100644
+index 0000000..01c571a
+--- /dev/null
++++ b/tests/core/restore-outcome.test.js
+@@ -0,0 +1,62 @@
++import { describe, expect, test } from 'bun:test';
++
++import {
++  createRestoreOutcome,
++  finalizeRestoreOutcome,
++  shouldDeleteRestoredSource,
++} from '../../core/restore-outcome.js';
++
++describe('restore outcomes', () => {
++  test('zero requested tabs is a complete restore', () => {
++    const outcome = finalizeRestoreOutcome(createRestoreOutcome(0));
++
++    expect(outcome).toEqual({
++      requestedCount: 0,
++      restoredCount: 0,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++    });
++  });
++
++  test('all requested tabs restored is complete', () => {
++    const outcome = createRestoreOutcome(2);
++    outcome.restoredCount = 2;
++
++    expect(finalizeRestoreOutcome(outcome).complete).toBe(true);
++  });
++
++  test('restored tabs plus known duplicates is complete', () => {
++    const outcome = createRestoreOutcome(3);
++    outcome.restoredCount = 2;
++    outcome.skippedDuplicate = 1;
++
++    expect(finalizeRestoreOutcome(outcome).complete).toBe(true);
++  });
++
++  test('an invalid saved URL makes the restore incomplete', () => {
++    const outcome = createRestoreOutcome(1);
++    outcome.skippedInvalid = 1;
++
++    expect(finalizeRestoreOutcome(outcome).complete).toBe(false);
++  });
++
++  test('a creation error makes the restore incomplete', () => {
++    const outcome = createRestoreOutcome(1);
++    outcome.errors.push({
++      scope: 'create',
++      url: 'https://failed.test/',
++      message: 'creation failed',
++    });
++
++    expect(finalizeRestoreOutcome(outcome).complete).toBe(false);
++  });
++
++  test('source deletion requires both opt-in and a complete outcome', () => {
++    expect(shouldDeleteRestoredSource({ complete: true }, true)).toBe(true);
++    expect(shouldDeleteRestoredSource({ complete: true }, false)).toBe(false);
++    expect(shouldDeleteRestoredSource({ complete: false }, true)).toBe(false);
++    expect(shouldDeleteRestoredSource({ complete: false }, false)).toBe(false);
++  });
++});
+diff --git a/tests/core/session-restore.test.js b/tests/core/session-restore.test.js
+new file mode 100644
+index 0000000..4605224
+--- /dev/null
++++ b/tests/core/session-restore.test.js
+@@ -0,0 +1,611 @@
++import { describe, expect, test } from 'bun:test';
++
++import { restoreSession } from '../../core/sessions.js';
++import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
++
++function makeSession(tabs, groups = []) {
++  return {
++    id: 'session-under-test',
++    name: 'Restore test',
++    version: 2,
++    createdAt: 1,
++    modifiedAt: 1,
++    windows: [{ tabCount: tabs.length, tabs, groups }],
++  };
++}
++
++function observeDiscardAudioOrder() {
++  const calls = [];
++  chrome.tabs.onCreated.addListener((tab) => {
++    calls.push(['create', { active: tab.active }]);
++  });
++  chrome.tabs.onUpdated.addListener((tabId, changes) => {
++    if (changes.mutedInfo) {
++      calls.push(['update', tabId, { muted: changes.mutedInfo.muted }]);
++    }
++    if (changes.discarded) calls.push(['discard', tabId]);
++  });
++  return calls;
++}
++
++describe('restoreSession', () => {
++  test('returns an exact incomplete outcome for restored, duplicate, invalid, and failed tabs', async () => {
++    const session = makeSession([
++      { url: 'https://restore.test/one', title: 'One' },
++      { url: 'https://open.test/', title: 'Already open' },
++      { url: 'chrome://settings/', title: 'Forbidden' },
++      { url: 'not a url', title: 'Malformed' },
++      { url: 'https://restore.test/fail', title: 'Fails to create' },
++    ]);
++    installChromeMock({
++      local: { sessions: [session] },
++      windows: [{ id: 7, focused: true }],
++      tabs: [{ id: 70, windowId: 7, index: 0, active: true, url: 'https://open.test/' }],
++      failures: { 'tabs.create': [null, new Error('synthetic create failure')] },
++    });
++
++    await expect(restoreSession(session.id, { mode: 'here', discarded: false })).resolves.toEqual({
++      requestedCount: 5,
++      restoredCount: 1,
++      skippedDuplicate: 1,
++      skippedInvalid: 2,
++      errors: [{
++        scope: 'create',
++        url: 'https://restore.test/fail',
++        message: 'synthetic create failure',
++      }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++  });
++
++  test('keeps successful saved-tab associations when the middle creation fails', async () => {
++    const session = makeSession([
++      {
++        url: 'https://association.test/first',
++        title: 'A'.repeat(700),
++        favIconUrl: 'javascript:bad-icon',
++        pinned: true,
++        groupId: 10,
++      },
++      {
++        url: 'https://association.test/middle',
++        title: 'Middle',
++        pinned: true,
++        groupId: 20,
++      },
++      {
++        url: 'https://association.test/last',
++        title: 'Last',
++        pinned: false,
++        groupId: 10,
++      },
++    ], [
++      { id: 10, title: 'Survivors', color: 'blue', collapsed: true },
++      { id: 20, title: 'Missing', color: 'red', collapsed: false },
++    ]);
++    const original = structuredClone(session);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      windows: [{ id: 4, focused: true }],
++      tabs: [{ id: 40, windowId: 4, index: 0, active: true, url: 'https://current.test/' }],
++      failures: { 'tabs.create': [null, new Error('middle create failed'), null] },
++    });
++
++    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
++    const restored = harness.snapshot().tabs.filter((tab) => tab.url.startsWith('https://association.test/'));
++    const first = restored.find((tab) => tab.url.endsWith('/first'));
++    const last = restored.find((tab) => tab.url.endsWith('/last'));
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 2,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://association.test/middle',
++        message: 'middle create failed',
++      }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 1,
++    });
++    expect(first).toEqual(expect.objectContaining({ pinned: true }));
++    expect(last).toEqual(expect.objectContaining({ pinned: false, groupId: first.groupId }));
++    expect(first.groupId).not.toBe(-1);
++    expect(readStorageArea('local').sessions[0]).toEqual(original);
++  });
++
++  test('mutes, discards, and then unmutes a background restore tab in order', async () => {
++    const session = makeSession([{ url: 'https://audio.test/background' }]);
++    const harness = installChromeMock({ local: { sessions: [session] } });
++    const calls = observeDiscardAudioOrder();
++
++    const result = await restoreSession(session.id, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/background');
++
++    expect(calls).toEqual([
++      ['create', { active: false }],
++      ['update', restoredTab.id, { muted: true }],
++      ['discard', restoredTab.id],
++      ['update', restoredTab.id, { muted: false }],
++    ]);
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.complete).toBe(true);
++  });
++
++  test('never mutes a tab in non-discard mode', async () => {
++    const session = makeSession([{ url: 'https://audio.test/loaded' }]);
++    const harness = installChromeMock({ local: { sessions: [session] } });
++
++    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
++
++    expect(harness.calls.tabs.update.filter(([, changes]) => changes.muted === true)).toEqual([]);
++    expect(harness.calls.tabs.discard).toEqual([]);
++    expect(result.complete).toBe(true);
++  });
++
++  test('keeps the first visible tab active and unmuted', async () => {
++    const session = makeSession([
++      { url: 'https://visible.test/first' },
++      { url: 'https://visible.test/background' },
++    ]);
++    const harness = installChromeMock({ local: { sessions: [session] } });
++
++    const result = await restoreSession(session.id, { mode: 'windows' });
++    const first = harness.snapshot().tabs.find((tab) => tab.url === 'https://visible.test/first');
++
++    expect(first).toEqual(expect.objectContaining({ active: true, discarded: false }));
++    expect(first.mutedInfo.muted).toBe(false);
++    expect(harness.calls.tabs.update).not.toContainEqual([first.id, { muted: true }]);
++    expect(result.complete).toBe(true);
++  });
++
++  test('windows mode retries a rejected seed and restores later siblings with aligned metadata', async () => {
++    const session = makeSession([
++      { url: 'https://seed-fallback.test/rejected', pinned: true, groupId: 20 },
++      { url: 'https://seed-fallback.test/visible', pinned: true, groupId: 10 },
++      { url: 'https://seed-fallback.test/background', pinned: false, groupId: 10 },
++    ], [
++      { id: 10, title: 'Survivors', color: 'blue', collapsed: true },
++      { id: 20, title: 'Rejected', color: 'red', collapsed: false },
++    ]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'windows.create': [new Error('first seed rejected'), null] },
++    });
++
++    const result = await restoreSession(session.id, { mode: 'windows', discarded: false });
++    const restored = harness.snapshot().tabs.filter((tab) =>
++      tab.url.startsWith('https://seed-fallback.test/'),
++    );
++    const visible = restored.find((tab) => tab.url.endsWith('/visible'));
++    const background = restored.find((tab) => tab.url.endsWith('/background'));
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 2,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://seed-fallback.test/rejected',
++        message: 'first seed rejected',
++      }],
++      complete: false,
++      windowsCreated: 1,
++      groupsRestored: 1,
++    });
++    expect(harness.calls.windows.create.map(([createData]) => createData.url)).toEqual([
++      'https://seed-fallback.test/rejected',
++      'https://seed-fallback.test/visible',
++    ]);
++    expect(harness.calls.tabs.create).toEqual([[
++      {
++        windowId: visible.windowId,
++        url: 'https://seed-fallback.test/background',
++        active: false,
++      },
++    ]]);
++    expect(visible).toEqual(expect.objectContaining({
++      active: true,
++      pinned: true,
++      discarded: false,
++    }));
++    expect(visible.mutedInfo.muted).toBe(false);
++    expect(background).toEqual(expect.objectContaining({
++      active: false,
++      pinned: false,
++      groupId: visible.groupId,
++    }));
++    expect(harness.snapshot().groups).toEqual([
++      expect.objectContaining({ title: 'Survivors', color: 'blue', collapsed: true }),
++    ]);
++  });
++
++  test('single-window mode retries a rejected seed and keeps the eventual visible tab unmuted', async () => {
++    const session = makeSession([
++      { url: 'https://single-seed.test/rejected' },
++      { url: 'https://single-seed.test/visible' },
++      { url: 'https://single-seed.test/background' },
++    ]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'windows.create': [new Error('single seed rejected'), null] },
++    });
++
++    const result = await restoreSession(session.id, {
++      mode: 'single-window',
++      discarded: false,
++    });
++    const restored = harness.snapshot().tabs.filter((tab) =>
++      tab.url.startsWith('https://single-seed.test/'),
++    );
++    const visible = restored.find((tab) => tab.url.endsWith('/visible'));
++    const background = restored.find((tab) => tab.url.endsWith('/background'));
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 2,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://single-seed.test/rejected',
++        message: 'single seed rejected',
++      }],
++      complete: false,
++      windowsCreated: 1,
++      groupsRestored: 0,
++    });
++    expect(harness.calls.windows.create.map(([createData]) => createData.url)).toEqual([
++      'https://single-seed.test/rejected',
++      'https://single-seed.test/visible',
++    ]);
++    expect(harness.calls.tabs.create).toEqual([[
++      {
++        windowId: visible.windowId,
++        url: 'https://single-seed.test/background',
++        active: false,
++      },
++    ]]);
++    expect(visible).toEqual(expect.objectContaining({ active: true, discarded: false }));
++    expect(visible.mutedInfo.muted).toBe(false);
++    expect(background).toEqual(expect.objectContaining({ active: false }));
++  });
++
++  test('accounts for every candidate when every single-window seed is rejected', async () => {
++    const session = makeSession([
++      { url: 'https://all-seeds.test/first' },
++      { url: 'https://all-seeds.test/second' },
++      { url: 'https://all-seeds.test/third' },
++    ]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: {
++        'windows.create': [
++          new Error('first rejected'),
++          new Error('second rejected'),
++          new Error('third rejected'),
++        ],
++      },
++    });
++
++    const result = await restoreSession(session.id, {
++      mode: 'single-window',
++      discarded: false,
++    });
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 0,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [
++        { scope: 'create', url: 'https://all-seeds.test/first', message: 'first rejected' },
++        { scope: 'create', url: 'https://all-seeds.test/second', message: 'second rejected' },
++        { scope: 'create', url: 'https://all-seeds.test/third', message: 'third rejected' },
++      ],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++    expect(harness.calls.windows.create).toHaveLength(3);
++    expect(harness.calls.tabs.create).toEqual([]);
++  });
++
++  test('does not open another seed window after a post-create visibility update failure', async () => {
++    const session = makeSession([
++      { url: 'https://post-create.test/visible' },
++      { url: 'https://post-create.test/background' },
++    ]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'tabs.update': new Error('visibility update failed') },
++    });
++
++    const result = await restoreSession(session.id, {
++      mode: 'single-window',
++      discarded: false,
++    });
++    const visible = harness.snapshot().tabs.find((tab) =>
++      tab.url === 'https://post-create.test/visible',
++    );
++
++    expect(result.errors).toEqual([{
++      scope: 'update',
++      url: 'https://post-create.test/visible',
++      message: 'visibility update failed',
++    }]);
++    expect(result.restoredCount).toBe(2);
++    expect(harness.calls.windows.create).toHaveLength(1);
++    expect(harness.calls.tabs.create).toHaveLength(1);
++    expect(visible).toEqual(expect.objectContaining({ active: true, discarded: false }));
++    expect(visible.mutedInfo.muted).toBe(false);
++  });
++
++  test('reuses a created seed window when seed-tab discovery fails', async () => {
++    const session = makeSession([
++      { url: 'https://seed-discovery.test/unknown' },
++      { url: 'https://seed-discovery.test/survivor' },
++    ]);
++    const harness = installChromeMock({ local: { sessions: [session] } });
++    const createWindow = chrome.windows.create.bind(chrome.windows);
++    const queryTabs = chrome.tabs.query.bind(chrome.tabs);
++    chrome.windows.create = async (createData) => {
++      const window = await createWindow(createData);
++      return { ...window, tabs: [] };
++    };
++    chrome.tabs.query = async (queryInfo = {}) => {
++      if (queryInfo.windowId !== undefined) {
++        throw new Error('seed tab discovery failed');
++      }
++      return queryTabs(queryInfo);
++    };
++
++    const result = await restoreSession(session.id, {
++      mode: 'single-window',
++      discarded: false,
++    });
++    const survivor = harness.snapshot().tabs.find((tab) =>
++      tab.url === 'https://seed-discovery.test/survivor',
++    );
++
++    expect(result).toEqual({
++      requestedCount: 2,
++      restoredCount: 1,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://seed-discovery.test/unknown',
++        message: 'seed tab discovery failed',
++      }],
++      complete: false,
++      windowsCreated: 1,
++      groupsRestored: 0,
++    });
++    expect(harness.calls.windows.create).toHaveLength(1);
++    expect(harness.calls.tabs.create).toEqual([[
++      {
++        windowId: survivor.windowId,
++        url: 'https://seed-discovery.test/survivor',
++        active: false,
++      },
++    ]]);
++    expect(survivor).toEqual(expect.objectContaining({ active: true, discarded: false }));
++    expect(survivor.mutedInfo.muted).toBe(false);
++  });
++
++  test('unmutes through finally and reports a discard failure', async () => {
++    const session = makeSession([{ url: 'https://audio.test/discard-failure' }]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'tabs.discard': new Error('synthetic discard failure') },
++    });
++    const calls = observeDiscardAudioOrder();
++
++    const result = await restoreSession(session.id, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/discard-failure');
++
++    expect(calls).toEqual([
++      ['create', { active: false }],
++      ['update', restoredTab.id, { muted: true }],
++      ['update', restoredTab.id, { muted: false }],
++    ]);
++    expect(harness.calls.tabs.discard).toEqual([[restoredTab.id]]);
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.errors).toEqual([{
++      scope: 'discard',
++      url: 'https://audio.test/discard-failure',
++      message: 'synthetic discard failure',
++    }]);
++    expect(result.complete).toBe(false);
++  });
++
++  test('retries pending unmute cleanup in the outer finally', async () => {
++    const session = makeSession([{ url: 'https://audio.test/unmute-retry' }]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'tabs.update': [null, new Error('first unmute failed'), null] },
++    });
++
++    const result = await restoreSession(session.id, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/unmute-retry');
++
++    expect(harness.calls.tabs.update).toEqual([
++      [restoredTab.id, { muted: true }],
++      [restoredTab.id, { muted: false }],
++      [restoredTab.id, { muted: false }],
++    ]);
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.errors).toEqual([{
++      scope: 'unmute',
++      url: 'https://audio.test/unmute-retry',
++      message: 'first unmute failed',
++    }]);
++    expect(result.complete).toBe(false);
++  });
++
++  test('reports a pin update failure without losing the created tab', async () => {
++    const session = makeSession([{ url: 'https://metadata.test/pin', pinned: true }]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'tabs.update': new Error('synthetic pin failure') },
++    });
++
++    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
++
++    expect(harness.snapshot().tabs.some((tab) => tab.url === 'https://metadata.test/pin')).toBe(true);
++    expect(result.errors).toEqual([{
++      scope: 'pin',
++      url: 'https://metadata.test/pin',
++      message: 'synthetic pin failure',
++    }]);
++    expect(result.complete).toBe(false);
++  });
++
++  test('reports group creation and metadata update failures with their saved URL', async () => {
++    const group = { id: 10, title: 'Saved group', color: 'blue', collapsed: true };
++    const groupFailureSession = makeSession([
++      { url: 'https://metadata.test/group', groupId: 10 },
++    ], [group]);
++    installChromeMock({
++      local: { sessions: [groupFailureSession] },
++      failures: { 'tabs.group': new Error('synthetic group failure') },
++    });
++
++    const groupFailure = await restoreSession(groupFailureSession.id, {
++      mode: 'here',
++      discarded: false,
++    });
++
++    expect(groupFailure.errors).toEqual([{
++      scope: 'group',
++      url: 'https://metadata.test/group',
++      message: 'synthetic group failure',
++    }]);
++    expect(groupFailure.complete).toBe(false);
++
++    const updateFailureSession = makeSession([
++      { url: 'https://metadata.test/update', groupId: 10 },
++    ], [group]);
++    installChromeMock({
++      local: { sessions: [updateFailureSession] },
++      failures: { 'tabGroups.update': new Error('synthetic metadata failure') },
++    });
++
++    const updateFailure = await restoreSession(updateFailureSession.id, {
++      mode: 'here',
++      discarded: false,
++    });
++
++    expect(updateFailure.groupsRestored).toBe(1);
++    expect(updateFailure.errors).toEqual([{
++      scope: 'update',
++      url: 'https://metadata.test/update',
++      message: 'synthetic metadata failure',
++    }]);
++    expect(updateFailure.complete).toBe(false);
++  });
++
++  test('reports a mute update failure while preserving an unmuted created tab', async () => {
++    const session = makeSession([{ url: 'https://audio.test/mute-failure' }]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      failures: { 'tabs.update': new Error('synthetic mute failure') },
++    });
++
++    const result = await restoreSession(session.id, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/mute-failure');
++
++    expect(restoredTab).toEqual(expect.objectContaining({ discarded: true }));
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.errors).toEqual([{
++      scope: 'update',
++      url: 'https://audio.test/mute-failure',
++      message: 'synthetic mute failure',
++    }]);
++    expect(result.complete).toBe(false);
++  });
++
++  test('single-window mode preserves groups with colliding saved IDs across source windows', async () => {
++    const session = {
++      id: 'single-window-associations',
++      name: 'Single window associations',
++      version: 2,
++      createdAt: 1,
++      modifiedAt: 1,
++      windows: [
++        {
++          tabCount: 2,
++          tabs: [
++            { url: 'https://single-window.test/first', groupId: 10 },
++            { url: 'https://single-window.test/second', groupId: 10 },
++          ],
++          groups: [{ id: 10, title: 'First source', color: 'blue' }],
++        },
++        {
++          tabCount: 1,
++          tabs: [{ url: 'https://single-window.test/third', groupId: 10 }],
++          groups: [{ id: 10, title: 'Second source', color: 'red' }],
++        },
++      ],
++    };
++    const harness = installChromeMock({ local: { sessions: [session] } });
++
++    const result = await restoreSession(session.id, {
++      mode: 'single-window',
++      discarded: false,
++    });
++    const restored = harness.snapshot().tabs.filter((tab) => tab.url.startsWith('https://single-window.test/'));
++    const first = restored.find((tab) => tab.url.endsWith('/first'));
++    const second = restored.find((tab) => tab.url.endsWith('/second'));
++    const third = restored.find((tab) => tab.url.endsWith('/third'));
++    const groups = harness.snapshot().groups;
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 3,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++      windowsCreated: 1,
++      groupsRestored: 2,
++    });
++    expect(new Set(restored.map((tab) => tab.windowId)).size).toBe(1);
++    expect(first).toEqual(expect.objectContaining({ active: true }));
++    expect(first.groupId).toBe(second.groupId);
++    expect(third.groupId).not.toBe(first.groupId);
++    expect(groups.map((group) => [group.title, group.color])).toEqual([
++      ['First source', 'blue'],
++      ['Second source', 'red'],
++    ]);
++  });
++
++  test('an all-duplicate session finalizes as complete without creating tabs', async () => {
++    const session = makeSession([{ url: 'https://duplicate.test/' }]);
++    const harness = installChromeMock({
++      local: { sessions: [session] },
++      windows: [{ id: 1, focused: true }],
++      tabs: [{ id: 10, windowId: 1, active: true, url: 'https://duplicate.test/' }],
++    });
++
++    const result = await restoreSession(session.id, { mode: 'here', discarded: false });
++
++    expect(result).toEqual({
++      requestedCount: 1,
++      restoredCount: 0,
++      skippedDuplicate: 1,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++    expect(harness.calls.tabs.create).toEqual([]);
++  });
++});
+diff --git a/tests/core/stash-restore.test.js b/tests/core/stash-restore.test.js
+new file mode 100644
+index 0000000..8263e8e
+--- /dev/null
++++ b/tests/core/stash-restore.test.js
+@@ -0,0 +1,187 @@
++import { describe, expect, test } from 'bun:test';
++
++import { restoreStashTabs } from '../../core/stash-db.js';
++import { installChromeMock } from '../helpers/chrome-mock.js';
++
++function makeStash(tabs, groups = []) {
++  return {
++    id: 'stash-under-test',
++    name: 'Restore test',
++    createdAt: 1,
++    tabCount: tabs.length,
++    windows: [{ tabCount: tabs.length, tabs, groups }],
++  };
++}
++
++function observeDiscardAudioOrder() {
++  const calls = [];
++  chrome.tabs.onCreated.addListener((tab) => {
++    calls.push(['create', { active: tab.active }]);
++  });
++  chrome.tabs.onUpdated.addListener((tabId, changes) => {
++    if (changes.mutedInfo) {
++      calls.push(['update', tabId, { muted: changes.mutedInfo.muted }]);
++    }
++    if (changes.discarded) calls.push(['discard', tabId]);
++  });
++  return calls;
++}
++
++describe('restoreStashTabs', () => {
++  test('returns an exact incomplete outcome for restored, duplicate, invalid, and failed tabs', async () => {
++    const stash = makeStash([
++      { url: 'https://restore.test/one', title: 'One' },
++      { url: 'https://open.test/', title: 'Already open' },
++      { url: 'chrome://settings/', title: 'Forbidden' },
++      { url: 'not a url', title: 'Malformed' },
++      { url: 'https://restore.test/fail', title: 'Fails to create' },
++    ]);
++    installChromeMock({
++      windows: [{ id: 7, focused: true }],
++      tabs: [{ id: 70, windowId: 7, index: 0, active: true, url: 'https://open.test/' }],
++      failures: { 'tabs.create': [null, new Error('synthetic create failure')] },
++    });
++
++    await expect(restoreStashTabs(stash, { mode: 'here', discarded: false })).resolves.toEqual({
++      requestedCount: 5,
++      restoredCount: 1,
++      skippedDuplicate: 1,
++      skippedInvalid: 2,
++      errors: [{
++        scope: 'create',
++        url: 'https://restore.test/fail',
++        message: 'synthetic create failure',
++      }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++  });
++
++  test('keeps successful saved-tab associations and leaves the stash object unchanged', async () => {
++    const stash = makeStash([
++      {
++        url: 'https://association.test/first',
++        title: 'A'.repeat(700),
++        favIconUrl: 'javascript:bad-icon',
++        pinned: true,
++        groupId: 10,
++      },
++      {
++        url: 'https://association.test/middle',
++        title: 'Middle',
++        pinned: true,
++        groupId: 20,
++      },
++      {
++        url: 'https://association.test/last',
++        title: 'Last',
++        pinned: false,
++        groupId: 10,
++      },
++    ], [
++      { id: 10, title: 'Survivors', color: 'blue', collapsed: true },
++      { id: 20, title: 'Missing', color: 'red', collapsed: false },
++    ]);
++    const original = structuredClone(stash);
++    const harness = installChromeMock({
++      windows: [{ id: 4, focused: true }],
++      tabs: [{ id: 40, windowId: 4, index: 0, active: true, url: 'https://current.test/' }],
++      failures: { 'tabs.create': [null, new Error('middle create failed'), null] },
++    });
++
++    const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
++    const restored = harness.snapshot().tabs.filter((tab) => tab.url.startsWith('https://association.test/'));
++    const first = restored.find((tab) => tab.url.endsWith('/first'));
++    const last = restored.find((tab) => tab.url.endsWith('/last'));
++
++    expect(result).toEqual({
++      requestedCount: 3,
++      restoredCount: 2,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://association.test/middle',
++        message: 'middle create failed',
++      }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 1,
++    });
++    expect(first).toEqual(expect.objectContaining({ pinned: true }));
++    expect(last).toEqual(expect.objectContaining({ pinned: false, groupId: first.groupId }));
++    expect(first.groupId).not.toBe(-1);
++    expect(stash).toEqual(original);
++  });
++
++  test('mutes, discards, and then unmutes a background restore tab in order', async () => {
++    const stash = makeStash([{ url: 'https://audio.test/background' }]);
++    const harness = installChromeMock();
++    const calls = observeDiscardAudioOrder();
++
++    const result = await restoreStashTabs(stash, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/background');
++
++    expect(calls).toEqual([
++      ['create', { active: false }],
++      ['update', restoredTab.id, { muted: true }],
++      ['discard', restoredTab.id],
++      ['update', restoredTab.id, { muted: false }],
++    ]);
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.complete).toBe(true);
++  });
++
++  test('never mutes a tab in non-discard mode', async () => {
++    const stash = makeStash([{ url: 'https://audio.test/loaded' }]);
++    const harness = installChromeMock();
++
++    const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
++
++    expect(harness.calls.tabs.update.filter(([, changes]) => changes.muted === true)).toEqual([]);
++    expect(harness.calls.tabs.discard).toEqual([]);
++    expect(result.complete).toBe(true);
++  });
++
++  test('keeps the first visible tab active and unmuted', async () => {
++    const stash = makeStash([
++      { url: 'https://visible.test/first' },
++      { url: 'https://visible.test/background' },
++    ]);
++    const harness = installChromeMock();
++
++    const result = await restoreStashTabs(stash, { mode: 'windows' });
++    const first = harness.snapshot().tabs.find((tab) => tab.url === 'https://visible.test/first');
++
++    expect(first).toEqual(expect.objectContaining({ active: true, discarded: false }));
++    expect(first.mutedInfo.muted).toBe(false);
++    expect(harness.calls.tabs.update).not.toContainEqual([first.id, { muted: true }]);
++    expect(result.complete).toBe(true);
++  });
++
++  test('unmutes through finally and reports a discard failure', async () => {
++    const stash = makeStash([{ url: 'https://audio.test/discard-failure' }]);
++    const harness = installChromeMock({
++      failures: { 'tabs.discard': new Error('synthetic discard failure') },
++    });
++    const calls = observeDiscardAudioOrder();
++
++    const result = await restoreStashTabs(stash, { mode: 'here' });
++    const restoredTab = harness.snapshot().tabs.find((tab) => tab.url === 'https://audio.test/discard-failure');
++
++    expect(calls).toEqual([
++      ['create', { active: false }],
++      ['update', restoredTab.id, { muted: true }],
++      ['update', restoredTab.id, { muted: false }],
++    ]);
++    expect(harness.calls.tabs.discard).toEqual([[restoredTab.id]]);
++    expect(restoredTab.mutedInfo.muted).toBe(false);
++    expect(result.errors).toEqual([{
++      scope: 'discard',
++      url: 'https://audio.test/discard-failure',
++      message: 'synthetic discard failure',
++    }]);
++    expect(result.complete).toBe(false);
++  });
++});
+diff --git a/tests/integration/stash-restore-handler.test.js b/tests/integration/stash-restore-handler.test.js
+new file mode 100644
+index 0000000..c3fe34e
+--- /dev/null
++++ b/tests/integration/stash-restore-handler.test.js
+@@ -0,0 +1,90 @@
++import { describe, expect, test } from 'bun:test';
++
++import { restoreStashTabs } from '../../core/stash-db.js';
++import { installChromeMock } from '../helpers/chrome-mock.js';
++
++function makeStash(id, tabs) {
++  return {
++    id,
++    name: id,
++    createdAt: 1,
++    tabCount: tabs.length,
++    windows: [{ tabCount: tabs.length, tabs }],
++  };
++}
++
++async function getDispositionHandler() {
++  const worker = await import('../../service-worker.js');
++  return worker.applyStashRestoreDisposition;
++}
++
++describe('restoreStash handler disposition', () => {
++  test('retains an unchanged stash when one saved URL is invalid', async () => {
++    const applyDisposition = await getDispositionHandler();
++    const stash = makeStash('invalid-url-stash', [
++      { url: 'https://restore.test/valid' },
++      { url: 'chrome://settings/' },
++    ]);
++    const original = structuredClone(stash);
++    const deleted = [];
++    const saved = [];
++
++    const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
++    await applyDisposition(stash, result, true, {
++      deleteSource: async (id) => deleted.push(id),
++      saveSource: async (record) => saved.push(record),
++    });
++
++    expect(result).toEqual({
++      requestedCount: 2,
++      restoredCount: 1,
++      skippedDuplicate: 0,
++      skippedInvalid: 1,
++      errors: [],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++    expect(deleted).toEqual([]);
++    expect(saved).toEqual([]);
++    expect(stash).toEqual(original);
++  });
++
++  test('retains an unchanged stash when one tab creation rejects', async () => {
++    const applyDisposition = await getDispositionHandler();
++    const stash = makeStash('create-error-stash', [
++      { url: 'https://restore.test/valid' },
++      { url: 'https://restore.test/failure' },
++    ]);
++    const original = structuredClone(stash);
++    const deleted = [];
++    const saved = [];
++    installChromeMock({
++      failures: { 'tabs.create': [null, new Error('synthetic create failure')] },
++    });
++
++    const result = await restoreStashTabs(stash, { mode: 'here', discarded: false });
++    await applyDisposition(stash, result, true, {
++      deleteSource: async (id) => deleted.push(id),
++      saveSource: async (record) => saved.push(record),
++    });
++
++    expect(result).toEqual({
++      requestedCount: 2,
++      restoredCount: 1,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [{
++        scope: 'create',
++        url: 'https://restore.test/failure',
++        message: 'synthetic create failure',
++      }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    });
++    expect(deleted).toEqual([]);
++    expect(saved).toEqual([]);
++    expect(stash).toEqual(original);
++  });
++});
+diff --git a/tests/sidepanel/restore-feedback.test.js b/tests/sidepanel/restore-feedback.test.js
+new file mode 100644
+index 0000000..3338c00
+--- /dev/null
++++ b/tests/sidepanel/restore-feedback.test.js
+@@ -0,0 +1,79 @@
++import { describe, expect, test } from 'bun:test';
++
++import { formatRestoreFeedback } from '../../sidepanel/restore-feedback.js';
++
++describe('restore feedback', () => {
++  test('an incomplete stash restore warns with every outcome count and recovery status', () => {
++    expect(formatRestoreFeedback({
++      requestedCount: 5,
++      restoredCount: 2,
++      skippedDuplicate: 1,
++      skippedInvalid: 1,
++      errors: [{ scope: 'create', url: 'https://failed.test/', message: 'failed' }],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    }, { source: 'stash' })).toEqual({
++      type: 'warning',
++      message: 'Restored 2 of 5 tabs — 1 duplicate skipped — 1 invalid — 1 failed. Stash kept for recovery.',
++    });
++  });
++
++  test('an incomplete session restore warns that the saved session remains recoverable', () => {
++    expect(formatRestoreFeedback({
++      requestedCount: 3,
++      restoredCount: 1,
++      skippedDuplicate: 0,
++      skippedInvalid: 2,
++      errors: [],
++      complete: false,
++      windowsCreated: 0,
++      groupsRestored: 0,
++    }, { source: 'session' })).toEqual({
++      type: 'warning',
++      message: 'Restored 1 of 3 tabs — 0 duplicates skipped — 2 invalid — 0 failed. Saved session remains available to retry.',
++    });
++  });
++
++  test('a complete restore retains the success details without a removal claim', () => {
++    expect(formatRestoreFeedback({
++      requestedCount: 3,
++      restoredCount: 2,
++      skippedDuplicate: 1,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++      windowsCreated: 1,
++      groupsRestored: 1,
++    }, { source: 'stash' })).toEqual({
++      type: 'success',
++      message: 'Restored 2 tabs in 1 window — 1 group restored — 1 duplicate skipped',
++    });
++  });
++
++  test('complete duplicate-only and empty outcomes remain informational', () => {
++    expect(formatRestoreFeedback({
++      requestedCount: 2,
++      restoredCount: 0,
++      skippedDuplicate: 2,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++    })).toEqual({
++      type: 'info',
++      message: 'All 2 tabs already open — nothing to restore',
++    });
++
++    expect(formatRestoreFeedback({
++      requestedCount: 0,
++      restoredCount: 0,
++      skippedDuplicate: 0,
++      skippedInvalid: 0,
++      errors: [],
++      complete: true,
++    })).toEqual({
++      type: 'info',
++      message: 'No tabs to restore',
++    });
++  });
++});

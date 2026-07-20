@@ -1,0 +1,2174 @@
+# Review package: 3906670..78e7628
+
+## Commits
+78e7628 fix: unify focus allowlist policy
+
+## Files changed
+ ARCHITECTURE.md                                    |   4 +
+ CHANGELOG.md                                       |  21 ++
+ GUIDE.md                                           |  17 +-
+ PROGRESS.md                                        |  13 +-
+ README.md                                          |   4 +-
+ VERSION                                            |   2 +-
+ core/focus-policy.js                               | 184 +++++++++++++
+ core/focus.js                                      | 192 +++++--------
+ docs/reports/2026-07-14-reliability-smoke.md       |  73 +++++
+ .../2026-07-14-tabkebab-reliability-hardening.md   |  26 +-
+ manifest.json                                      |   2 +-
+ service-worker.js                                  |  30 +-
+ sidepanel/components/focus-panel.js                |  70 +++--
+ tests/core/focus-policy.test.js                    | 265 ++++++++++++++++++
+ tests/core/focus-start.test.js                     | 306 +++++++++++++++++++++
+ tests/integration/focus-worker.test.js             | 203 ++++++++++++++
+ 16 files changed, 1230 insertions(+), 182 deletions(-)
+
+## Diff
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 8894422..0afe224 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -17,20 +17,24 @@ The service worker must not assume browser-document APIs are present. In particu
+ `sidepanel/panel.html` loads `sidepanel/panel.js` and the components under `sidepanel/components/`. The side panel owns user interaction, rendering, confirmations, and document-only capabilities such as Chrome Built-in AI.
+ 
+ Side-panel commands cross one checked runtime-message boundary. Background errors must become rejected operations before components display success.
+ 
+ ### Core modules
+ 
+ `core/` contains tab, session, stash, Focus Mode, Drive, export, settings, and command logic. `core/engine/` implements the snapshot, solver, planner, and executor grouping pipeline. `core/ai/` contains provider adapters, key handling, caching, and request scheduling.
+ 
+ `core/tab-restore.js` is the single session/stash restore coordinator. It clones saved inputs, preserves `{ savedTab, createdTab }` associations across settled batches, returns the fixed outcome from `core/restore-outcome.js`, and owns mute/discard/unmute cleanup. IndexedDB deletion remains in the service-worker boundary and is allowed only for a complete outcome.
+ 
++`core/focus-policy.js` is the pure source of truth for Focus allowlist construction, runtime Chrome-group rebinding, and deterministic blocking. Startup classification in `core/focus.js` and navigation interception in `service-worker.js` both delegate to its `isAllowed()` predicate. Domain entries match exact hosts or true subdomains, URL entries compare canonical exact URLs, and group preferences contain exact titles only.
++
++Focus startup queries live Chrome groups once before it reads or mutates tabs. The active runtime state receives fresh `groupIds` for every live exact-title match; profile preferences never receive numeric IDs. Active and paused runs rebind during service-worker initialization and immediately before resume. If initialization cannot query groups, persisted runtime IDs are stripped before navigation can use the run, while title preferences and the rest of the run remain recoverable.
++
+ Pure policy and merge decisions belong in core modules that can run without Chrome. Chrome API calls remain at explicit adapters and orchestration boundaries.
+ 
+ ## Persistence
+ 
+ - `chrome.storage.local`: sessions, settings, manual groups, Focus Mode preferences/history, Drive state, AI configuration, and sync metadata.
+ - `chrome.storage.session`: decrypted API-key cache only; Chrome clears it on browser restart, extension reload, update, or disable.
+ - IndexedDB: stashes and their window/tab metadata.
+ - Google Drive `drive.file`: profile-scoped canonical sync/settings files plus dated exports.
+ 
+ Credentials, decrypted keys, OAuth tokens, caches, and active Focus Mode state are never included in portable exports.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 45db9d7..7af3b13 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,16 +1,37 @@
+ # Changelog
+ 
+ All notable changes to TabKebab are documented in this file.
+ 
+ ---
+ 
++## [1.2.5] — 2026-07-14
++
++### Added
++
++- One pure Focus policy module for legacy/typed domains, canonical exact URLs, Chrome-group title rebinding, internal-page safety, and deterministic block decisions.
++- Focus policy, startup-action, resume, worker-initialization, navigation, AI-gate, and failed-group-query regression coverage.
++- URL entry construction in the Focus panel with visible validation and exact-match guidance.
++
++### Changed
++
++- Focus startup now resolves all live groups with an exact saved title before reading or mutating tabs, then stores numeric IDs only in the active runtime state.
++- Active and paused Focus runs rebind group titles during service-worker initialization and immediately before resume; profile preferences remain title-only.
++- Kebab and stash actions now affect only background non-focus tabs, group action receives only eligible focus tabs, and Chrome/extension pages are excluded from all startup actions.
++
++### Fixed
++
++- Applied the same domain, exact-URL, and rebound-group predicate at startup and navigation time, eliminating URL-prefix and stale scalar-group-ID allowance.
++- Made strict mode with an empty allowlist block every non-internal URL, including hostless and non-HTTP URLs.
++- Removed stale numeric group authority when worker-startup rebinding fails, while preserving the run and title-based preferences for recovery.
++- Prevented AI fallback from classifying internal or explicitly allowed pages.
++
+ ## [1.2.4] — 2026-07-14
+ 
+ ### Added
+ 
+ - One dependency-free restore coordinator and fixed outcome contract for session and stash restoration, including requested, restored, duplicate, invalid, failed, and complete state.
+ - Regression coverage for partial batch settlement, saved-record immutability, pinned/group association, discard audio ordering, cleanup retries, error scopes, retained stashes, and counted UI warnings.
+ - Redacted real-Chrome smoke evidence for a non-discarding session restore and a retained partial stash.
+ 
+ ### Changed
+ 
+diff --git a/GUIDE.md b/GUIDE.md
+index 371cf70..03ba72d 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -367,29 +367,34 @@ Choose from 4 preset profiles, each with suggested domains and duration:
+ | **Writing** | Purple | 25 min | docs.google.com, notion.so, grammarly.com |
+ | **Research** | Green | 45 min | (open browsing allowed) |
+ | **Meeting** | Blue | 60 min | meet.google.com, zoom.us, teams.microsoft.com, docs.google.com |
+ 
+ ### Setup Options
+ 
+ Before starting, configure:
+ 
+ 1. **Duration** — set minutes or check "Open-ended" for unlimited timer
+ 2. **Tab Action** — what happens to non-focus tabs when you start:
+-   - **Kebab** — discard tabs (they stay in tab strip but unload)
+-   - **Stash** — save and close tabs (auto-restored when session ends)
+-   - **Group** — create a Chrome tab group for focus tabs
++   - **Kebab** — discard background non-focus tabs (they stay in the tab strip but unload); the active tab is never discarded
++   - **Stash** — save and close background non-focus tabs (auto-restored when the session ends); the active tab is never closed
++   - **Group** — create a Chrome tab group containing only eligible focus tabs
+    - **None** — monitor only, don't touch tabs
+ 3. **Blocking Mode**:
+-   - **Strict Mode** — only whitelisted domains allowed
++   - **Strict Mode** — only allowlisted entries are permitted. With an empty allowlist, every non-internal URL is blocked.
+    - **Curated Categories** — select categories to block (Social, Video, Gaming, News, Shopping, Entertainment)
+    - **AI Detection** — AI categorizes unknown domains in real-time
+-4. **Allowlist** — add domains, URLs, or Chrome tab groups that are always permitted
++4. **Allowlist** — add entries that are always permitted:
++   - **Domain** — permits the exact host and true subdomains, but not lookalike suffixes
++   - **URL** — permits only the canonical exact URL; path, query, and fragment case is preserved and prefix extensions do not match
++   - **Chrome Group** — stores the group's exact title and rebinds it to every live group with that title when a run starts, the worker restarts, or a paused run resumes. Untitled groups cannot be saved.
++
++Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated.
+ 
+ ### The Focus HUD
+ 
+ Once started, the panel shows a colorful timer dashboard:
+ 
+ - **Profile-colored display** — the entire HUD glows in your profile's color with a subtle pulsing animation
+ - **Countdown timer** — large minutes:seconds display (or elapsed time if open-ended)
+ - **Progress bar** — visual progress toward your goal
+ - **Stats** — distractions blocked and focus tab count
+ - **Controls** — Pause, +5 min extend, End Session
+@@ -426,20 +431,22 @@ Click "Recent Sessions" to see your last 50 focus sessions with date, profile, d
+ ### Preferences Per Profile
+ 
+ TabKebab remembers your choices for each profile:
+ - Blocked categories
+ - Allowlist entries
+ - Strict mode / AI blocking toggles
+ - Duration and tab action
+ 
+ Switch profiles and your last configuration is restored.
+ 
++Chrome-group preferences remain title-only. Numeric Chrome group IDs are runtime data and are never saved as profile authority, so a browser restart cannot accidentally trust an ID that Chrome reused for another group.
++
+ ---
+ 
+ ## Bookmarks
+ 
+ TabKebab can create organized bookmarks from your current tabs in three formats.
+ 
+ ### Bookmark Formats
+ 
+ | Format | Hierarchy |
+ |--------|-----------|
+diff --git a/PROGRESS.md b/PROGRESS.md
+index 5981f6e..3733c89 100644
+--- a/PROGRESS.md
++++ b/PROGRESS.md
+@@ -1,35 +1,42 @@
+ # TabKebab Progress
+ 
+ ## Current state
+ 
+-- Repository version: `1.2.4`
++- Repository version: `1.2.5`
+ - Active initiative: reliability and data-safety hardening
+ - Design status: architecture and written specification approved on 2026-07-14
+ - Plan status: approved 15-task TDD implementation plan in progress
+-- Implementation status: Tasks 1–2 complete; restore outcomes, recoverable stash retention, and audio-safe discard cleanup established
++- Implementation status: Tasks 1–3 complete; restoration safety and one complete Focus allowlist policy established
+ 
+ ## Completed implementation slices
+ 
+ ### Task 1 — Bun regression and CI boundary (`1.2.3`)
+ 
+ - Added the pinned Bun preload, isolated Chrome API mock, syntax/version checks, and checked side-panel message client.
+ - Added the three-command GitHub Actions gate for pull requests, manual dispatches, and `main` pushes while excluding tag pushes.
+ - Kept the runtime dependency-free and directly loadable by Chrome; browser-only DOM, IndexedDB, lifecycle, OAuth, and Prompt API behavior remain real-Chrome gates.
+ 
+ ### Task 2 — Complete-or-recoverable restoration (`1.2.4`)
+ 
+ - Replaced divergent session/stash pipelines with one coordinator that clones saved records, settles each creation independently, and preserves saved-tab/created-tab associations for pinned state and groups.
+ - Added the fixed restore outcome and fail-closed stash deletion policy: incomplete outcomes retain the original IndexedDB record unchanged.
+ - Limited muting to background discard candidates, unmuted in `finally` after success or failure, retried pending cleanup, and kept the first visible/non-discarding tabs unmuted.
+ - Added focused orchestration, handler, audio-order, error-scope, and warning-feedback tests plus redacted Chrome 148 smoke evidence.
+ 
++### Task 3 — Complete Focus allowlist policy (`1.2.5`)
++
++- Added one pure policy for exact/subdomain host matching, canonical exact URLs, internal-page safety, strict-empty blocking, and exact-title Chrome-group rebinding.
++- Made startup and navigation share `isAllowed()`, limited destructive startup actions to background non-focus tabs, and excluded internal pages from every startup action.
++- Rebound active/paused runtime state at worker initialization and resume, removed stale IDs on lookup failure, and kept profile preferences title-only.
++- Added named pure/startup/worker regression coverage, including group ID `0`, two same-title groups, query failure, URL-prefix rejection, and the AI allowlist gate.
++
+ ## Confirmed remediation scope
+ 
+ The hardening initiative covers all thirteen findings from the 2026-07-14 code review:
+ 
+ 1. Preserve stashes after incomplete restores.
+ 2. Preserve canonical Google Drive sync and settings files during retention cleanup.
+ 3. Cancel stale Focus Mode actions and make teardown non-blocking.
+ 4. Apply URL, domain, and Chrome-group allowlists consistently, including strict-empty behavior.
+ 5. Match natural-language domain filters by exact host or subdomain.
+ 6. Preserve hash-routed pages during duplicate cleanup and make Undo complete.
+@@ -44,11 +51,11 @@ The hardening initiative covers all thirteen findings from the 2026-07-14 code r
+ ## Approved technical direction
+ 
+ - Deliver narrow, independently testable hardening slices instead of a large rewrite.
+ - Use Bun `1.3.11` and `bun:test` for zero-package unit and integration tests.
+ - Use explicit Chrome API test doubles for non-browser tests.
+ - Keep IndexedDB, DOM, extension-context messaging, and Prompt API verification in the real-Chrome smoke matrix.
+ - Preserve backward compatibility for existing local data, Drive sync version 1, and export version 1.
+ 
+ ## Next gate
+ 
+-Task 3 applies one complete Focus Mode allowlist policy at startup and navigation time.
++Task 4 binds every asynchronous Focus classification and side effect to its originating run and URL.
+diff --git a/README.md b/README.md
+index ae86dab..931a73e 100644
+--- a/README.md
++++ b/README.md
+@@ -87,24 +87,24 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
+ - **AI-assisted classification** suggests which domains to protect
+ - **Sleep by** domain, group, window, or everything at once
+ - **Auto-kebab** idle tabs after configurable hours (default: 3 hours)
+ 
+ ### Focus Mode
+ 
+ - **Time-bounded productivity sessions** with live countdown timer
+ - **4 built-in profiles**: Coding, Writing, Research, Meeting — each with preset allowed/blocked domains
+ - **Profile-colored HUD** — timer display glows in profile color (cyan, purple, green, blue)
+ - **Distraction blocking** with three modes:
+-  - **Strict Mode** — only allowlisted sites accessible
++  - **Strict Mode** — only allowlisted entries are accessible; an empty list blocks every non-internal URL
+   - **Curated Categories** — block Social, Video, Gaming, News, Shopping, Entertainment
+   - **AI Detection** — AI categorizes unknown domains in real-time
+-- **Flexible allowlist** — whitelist domains, specific URLs, or entire Chrome tab groups
++- **Complete allowlist policy** — exact hosts/true subdomains, canonical exact URLs, and Chrome groups rebound by exact title on each run
+ - **Tab actions on start** — Kebab, Stash, Group, or monitor-only
+ - **Session reports** — stats on duration, distractions blocked, focus tabs
+ - **Focus history** — review your last 50 sessions
+ - **Preferences saved per profile** — your category selections and settings remembered
+ - **Keyboard shortcut** — press `F` to start Focus Mode
+ 
+ ### Natural Language Commands
+ 
+ - **Multi-line textarea** command bar with provider label showing the active AI model
+ - Type commands like *"close YouTube tabs"*, *"find my GitHub tabs"*, *"group by project"*
+diff --git a/VERSION b/VERSION
+index e8ea05d..c813fe1 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.2.4
++1.2.5
+diff --git a/core/focus-policy.js b/core/focus-policy.js
+new file mode 100644
+index 0000000..96fbcde
+--- /dev/null
++++ b/core/focus-policy.js
+@@ -0,0 +1,184 @@
++// core/focus-policy.js — Pure Focus allowlist construction, rebinding, and evaluation
++
++import { checkAgainstBlocklists } from './focus-blocklists.js';
++
++function tabUrl(tabOrUrl) {
++  if (typeof tabOrUrl === 'string') return tabOrUrl;
++  return tabOrUrl?.url || tabOrUrl?.pendingUrl || '';
++}
++
++function canonicalUrl(value) {
++  if (typeof value !== 'string' || !value.trim()) return null;
++  try {
++    return new URL(value.trim()).href;
++  } catch {
++    return null;
++  }
++}
++
++function canonicalDomain(value) {
++  if (typeof value !== 'string' || !value.trim()) return null;
++  const candidate = value.trim();
++
++  try {
++    const parsed = new URL(`https://${candidate}`);
++    if (
++      parsed.username ||
++      parsed.password ||
++      parsed.port ||
++      parsed.pathname !== '/' ||
++      parsed.search ||
++      parsed.hash
++    ) {
++      return null;
++    }
++    return parsed.hostname.toLowerCase().replace(/\.+$/, '') || null;
++  } catch {
++    return null;
++  }
++}
++
++function urlHostname(value) {
++  const url = tabUrl(value);
++  if (!url) return null;
++  try {
++    return new URL(url).hostname.toLowerCase().replace(/\.+$/, '') || null;
++  } catch {
++    return null;
++  }
++}
++
++/** Return true for pages owned by Chrome or an installed extension. */
++export function isInternalUrl(value) {
++  const url = tabUrl(value).trim().toLowerCase();
++  return url.startsWith('chrome://') || url.startsWith('chrome-extension://');
++}
++
++/** Match legacy string and typed-domain entries by exact host or true subdomain. */
++export function domainMatches(url, allowList) {
++  if (!Array.isArray(allowList) || allowList.length === 0) return false;
++  const hostname = urlHostname(url);
++  if (!hostname) return false;
++
++  return allowList.some((entry) => {
++    const rawDomain = typeof entry === 'string'
++      ? entry
++      : entry?.type === 'domain' ? entry.value : null;
++    const domain = canonicalDomain(rawDomain);
++    return Boolean(domain && (hostname === domain || hostname.endsWith(`.${domain}`)));
++  });
++}
++
++/** Match typed URL entries after URL canonicalization, with no prefix behavior. */
++export function urlMatches(url, allowList) {
++  if (!Array.isArray(allowList) || allowList.length === 0) return false;
++  const candidate = canonicalUrl(tabUrl(url));
++  if (!candidate) return false;
++
++  return allowList.some((entry) => (
++    entry?.type === 'url' && canonicalUrl(entry.value) === candidate
++  ));
++}
++
++/** Match only current runtime group IDs produced by title rebinding. */
++export function groupMatches(tab, allowList) {
++  if (!tab || typeof tab !== 'object' || !Number.isInteger(tab.groupId) || tab.groupId < 0) {
++    return false;
++  }
++  if (!Array.isArray(allowList) || allowList.length === 0) return false;
++
++  return allowList.some((entry) => (
++    entry?.type === 'group' &&
++    Array.isArray(entry.groupIds) &&
++    entry.groupIds.includes(tab.groupId)
++  ));
++}
++
++/** Apply the complete Focus allowlist predicate to a tab or URL. */
++export function isAllowed(tabOrUrl, allowList) {
++  if (isInternalUrl(tabOrUrl)) return true;
++  if (!Array.isArray(allowList) || allowList.length === 0) return false;
++  if (domainMatches(tabOrUrl, allowList)) return true;
++  if (urlMatches(tabOrUrl, allowList)) return true;
++  return typeof tabOrUrl === 'object' && groupMatches(tabOrUrl, allowList);
++}
++
++/** Build one stable, title-based preference entry from panel input. */
++export function createAllowlistEntry(type, value, liveGroups = []) {
++  if (type === 'domain') {
++    const domain = canonicalDomain(value);
++    return domain ? { type: 'domain', value: domain } : null;
++  }
++
++  if (type === 'url') {
++    const url = canonicalUrl(value);
++    return url ? { type: 'url', value: url } : null;
++  }
++
++  if (type !== 'group' || !Array.isArray(liveGroups)) return null;
++
++  let groupId = null;
++  if (Number.isInteger(value)) {
++    groupId = value;
++  } else if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
++    groupId = Number(value.trim());
++  }
++  if (!Number.isInteger(groupId)) return null;
++
++  const group = liveGroups.find((candidate) => candidate?.id === groupId);
++  if (!group || typeof group.title !== 'string' || !group.title.trim()) return null;
++  return { type: 'group', value: group.title };
++}
++
++/** Resolve title-only group preferences to every matching live Chrome group ID. */
++export function resolveGroupAllowlist(allowList, liveGroups = []) {
++  if (!Array.isArray(allowList)) return [];
++  const groups = Array.isArray(liveGroups) ? liveGroups : [];
++
++  return allowList.map((entry) => {
++    if (!entry || typeof entry !== 'object') return entry;
++    if (entry.type !== 'group') return structuredClone(entry);
++
++    const groupIds = [...new Set(groups
++      .filter((group) => (
++        group?.title === entry.value && Number.isInteger(group.id) && group.id >= 0
++      ))
++      .map((group) => group.id))];
++
++    return { type: 'group', value: entry.value, groupIds };
++  });
++}
++
++/** Return a new runtime state whose group allowlist reflects current Chrome groups. */
++export function rebindFocusAllowlist(state, liveGroups) {
++  if (!state || typeof state !== 'object') return state ?? null;
++  return {
++    ...state,
++    allowedDomains: resolveGroupAllowlist(state.allowedDomains, liveGroups),
++  };
++}
++
++/** Evaluate deterministic Focus blocking in the approved priority order. */
++export function evaluateFocusPolicy(tabOrUrl, state) {
++  if (isInternalUrl(tabOrUrl) || isAllowed(tabOrUrl, state?.allowedDomains)) {
++    return { blocked: false, reason: null, category: null };
++  }
++
++  if (domainMatches(tabOrUrl, state?.blockedDomains)) {
++    return { blocked: true, reason: 'blocklist', category: 'Blocked Domain' };
++  }
++
++  if (state?.strictMode) {
++    return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
++  }
++
++  const hostname = urlHostname(tabOrUrl);
++  if (hostname && state?.blockedCategories?.length > 0) {
++    const result = checkAgainstBlocklists(hostname, state.blockedCategories);
++    if (result.blocked) {
++      return { blocked: true, reason: 'category', category: result.category };
++    }
++  }
++
++  return { blocked: false, reason: null, category: null };
++}
+diff --git a/core/focus.js b/core/focus.js
+index ba48b8c..68f2667 100644
+--- a/core/focus.js
++++ b/core/focus.js
+@@ -1,48 +1,59 @@
+ // core/focus.js — Focus engine: state machine, timer, badge, distraction detection, history
+ 
+ import { Storage } from './storage.js';
+ import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs } from './tabs-api.js';
+ import { saveStash, restoreStashTabs, getStash } from './stash-db.js';
+ import { getProfileById, getAllProfiles } from './focus-profiles.js';
+-import { checkAgainstBlocklists, BLOCKLIST_CATEGORIES } from './focus-blocklists.js';
++import {
++  evaluateFocusPolicy,
++  isAllowed,
++  isInternalUrl,
++  rebindFocusAllowlist,
++  resolveGroupAllowlist,
++} from './focus-policy.js';
+ 
+ const FOCUS_STATE_KEY = 'focusState';
+ const FOCUS_HISTORY_KEY = 'focusHistory';
+ const MAX_HISTORY = 50;
+ 
+ // Module-level cache for fast sync access
+ let _cachedState = null;
+ 
+ // Initialize cache from storage
+-(async () => {
+-  _cachedState = await Storage.get(FOCUS_STATE_KEY);
++const cacheReady = (async () => {
++  const storedState = await Storage.get(FOCUS_STATE_KEY);
++  _cachedState = storedState && (storedState.status === 'active' || storedState.status === 'paused')
++    ? rebindFocusAllowlist(storedState, [])
++    : storedState;
+ })();
+ 
+ // Keep cache in sync with storage changes
+ Storage.onChange((changes) => {
+   if (changes[FOCUS_STATE_KEY]) {
+     _cachedState = changes[FOCUS_STATE_KEY].newValue ?? null;
+   }
+ });
+ 
+ export function getCachedFocusState() {
+   return _cachedState;
+ }
+ 
+ export async function getFocusState() {
++  await cacheReady;
+   const state = await Storage.get(FOCUS_STATE_KEY);
+   _cachedState = state;
+   return state;
+ }
+ 
+ async function saveFocusState(state) {
++  await cacheReady;
+   _cachedState = state;
+   if (state) {
+     await Storage.set(FOCUS_STATE_KEY, state);
+   } else {
+     await Storage.remove(FOCUS_STATE_KEY);
+   }
+ }
+ 
+ // ── Timer helpers ──
+ 
+@@ -72,154 +83,50 @@ export function formatTimeRemaining(ms) {
+ 
+ export function formatBadgeTime(ms) {
+   if (ms === Infinity) return '';
+   const totalMin = Math.max(0, Math.ceil(ms / 60000));
+   if (totalMin >= 60) return `${Math.floor(totalMin / 60)}h`;
+   return `${totalMin}m`;
+ }
+ 
+ // ── Allowlist matching ──
+ 
+-/**
+- * Allowlist entry types:
+- * - { type: 'domain', value: 'github.com' }
+- * - { type: 'url', value: 'https://docs.google.com/...' }
+- * - { type: 'group', value: 'Work', groupId: 123 } // Chrome tab group
+- * - { type: 'custom', value: 'Project Alpha' } // TabKebab custom group
+- *
+- * Legacy support: plain strings are treated as domains
+- */
+-
+-function domainMatches(tabUrl, domainList) {
+-  if (!domainList || domainList.length === 0) return false;
+-  const hostname = extractDomain(tabUrl);
+-  if (!hostname || hostname === 'other') return false;
+-  return domainList.some(d => {
+-    const domain = typeof d === 'string' ? d : (d.type === 'domain' ? d.value : null);
+-    if (!domain) return false;
+-    return hostname === domain || hostname.endsWith('.' + domain);
+-  });
+-}
+-
+-function urlMatches(tabUrl, allowList) {
+-  if (!allowList || allowList.length === 0) return false;
+-  return allowList.some(entry => {
+-    if (typeof entry !== 'object' || entry.type !== 'url') return false;
+-    // Exact URL match or prefix match
+-    return tabUrl === entry.value || tabUrl.startsWith(entry.value);
+-  });
+-}
+-
+-/**
+- * Check if a tab is in an allowed Chrome group.
+- * @param {Object} tab - Tab object with groupId
+- * @param {Array} allowList - Allowlist entries
+- * @returns {boolean}
+- */
+-function groupMatches(tab, allowList) {
+-  if (!tab?.groupId || tab.groupId === -1) return false;
+-  if (!allowList || allowList.length === 0) return false;
+-  return allowList.some(entry => {
+-    if (typeof entry !== 'object' || entry.type !== 'group') return false;
+-    return entry.groupId === tab.groupId;
+-  });
+-}
+-
+-/**
+- * Check if tab is allowed by any entry in the allowlist.
+- * Supports domains (legacy strings), URLs, Chrome groups.
+- */
+-function isAllowed(tab, allowList) {
+-  if (!allowList || allowList.length === 0) return false;
+-  const url = tab?.url || tab;
+-
+-  // Check domains (including legacy string format)
+-  if (domainMatches(url, allowList)) return true;
+-
+-  // Check exact URLs
+-  if (urlMatches(url, allowList)) return true;
+-
+-  // Check Chrome groups
+-  if (typeof tab === 'object' && groupMatches(tab, allowList)) return true;
+-
+-  return false;
+-}
+-
+ /**
+  * Check if a tab/URL should be blocked based on current focus state.
+  * Blocking modes (in order of priority):
+  * 1. Allowed entries always pass (domains, URLs, groups)
+  * 2. Explicit blocked domains always block
+  * 3. Strict mode: block everything not in allowed list
+  * 4. Curated categories: block if in enabled category
+  * 5. AI mode: ask AI to categorize (async, handled separately)
+  *
+  * @param {string|Object} tabOrUrl - URL string or tab object
+  * @param {Object} state - Focus state object
+  * @returns {{ blocked: boolean, reason: string|null, category: string|null }}
+  */
+ export function isBlockedDomain(tabOrUrl, state) {
+-  const url = typeof tabOrUrl === 'string' ? tabOrUrl : tabOrUrl?.url;
+-  const hostname = extractDomain(url);
+-
+-  if (!hostname || hostname === 'other') {
+-    return { blocked: false, reason: null, category: null };
+-  }
+-
+-  // Chrome internal pages are never blocked
+-  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+-    return { blocked: false, reason: null, category: null };
+-  }
+-
+-  // 1. Check against allowlist (domains, URLs, groups)
+-  if (isAllowed(tabOrUrl, state?.allowedDomains)) {
+-    return { blocked: false, reason: null, category: null };
+-  }
+-
+-  // 2. Explicit blocked domains always block
+-  if (domainMatches(url, state?.blockedDomains)) {
+-    return { blocked: true, reason: 'blocklist', category: 'Blocked Domain' };
+-  }
+-
+-  // 3. Strict mode: block everything not in allowed list
+-  if (state?.strictMode) {
+-    const hasAllowlist = state?.allowedDomains?.length > 0;
+-    if (hasAllowlist) {
+-      return { blocked: true, reason: 'strict', category: 'Not in allowed list' };
+-    }
+-  }
+-
+-  // 4. Curated categories
+-  if (state?.blockedCategories?.length > 0) {
+-    const result = checkAgainstBlocklists(hostname, state.blockedCategories);
+-    if (result.blocked) {
+-      return { blocked: true, reason: 'category', category: result.category };
+-    }
+-  }
+-
+-  // 5. AI mode handled separately (async) - return not blocked here
+-  // The service worker will call checkWithAI if aiBlocking is enabled
+-
+-  return { blocked: false, reason: null, category: null };
++  return evaluateFocusPolicy(tabOrUrl, state);
+ }
+ 
+ /**
+  * Legacy compatibility wrapper - returns boolean
+  */
+ export function isBlockedDomainSimple(url, state) {
+   return isBlockedDomain(url, state).blocked;
+ }
+ 
+-function isFocusTab(tab, state) {
+-  // Allowed domains means "focus" tabs
+-  if (state.allowedDomains.length === 0) return true; // no filter = all are focus
+-  return domainMatches(tab.url, state.allowedDomains);
++export function isFocusTab(tab, state) {
++  if (isInternalUrl(tab)) return true;
++  if (!state?.strictMode && (!state?.allowedDomains || state.allowedDomains.length === 0)) {
++    return true;
++  }
++  return isAllowed(tab, state?.allowedDomains);
+ }
+ 
+ // ── Badge ──
+ 
+ export async function updateBadge(state) {
+   if (!state || !state.status) {
+     await chrome.action.setBadgeText({ text: '' });
+     return;
+   }
+   if (state.status === 'paused') {
+@@ -249,21 +156,23 @@ export async function flashBadgeDistraction() {
+ 
+ export async function startFocus({
+   profileId,
+   duration,
+   tabAction,
+   allowedDomains,
+   blockedDomains,
+   strictMode,
+   blockedCategories,
+   aiBlocking,
+-}) {
++}, {
++  saveStash: persistStash = saveStash,
++} = {}) {
+   const profile = getProfileById(profileId);
+   const profileName = profile?.name || profileId;
+   const profileColor = profile?.color || 'blue';
+ 
+   const state = {
+     status: 'active',
+     startedAt: Date.now(),
+     duration: duration || 0,
+     pausedAt: null,
+     pausedElapsed: 0,
+@@ -276,23 +185,29 @@ export async function startFocus({
+     // New blocking modes
+     strictMode: strictMode || false,
+     blockedCategories: blockedCategories || [],
+     aiBlocking: aiBlocking || false,
+     stashId: null,
+     focusGroupId: null,
+     distractionsBlocked: 0,
+     focusTabCount: 0,
+   };
+ 
++  // Resolve group titles before reading or mutating tabs. A failed query must
++  // leave both browser tabs and persisted Focus state untouched.
++  const liveGroups = await chrome.tabGroups.query({});
++  state.allowedDomains = resolveGroupAllowlist(state.allowedDomains, liveGroups);
++
+   const allTabs = await getAllTabs({ allWindows: true });
+-  const focusTabs = allTabs.filter(t => isFocusTab(t, state) && !t.url.startsWith('chrome://'));
+-  const nonFocusTabs = allTabs.filter(t => !isFocusTab(t, state) && !t.active && !t.url.startsWith('chrome://'));
++  const eligibleTabs = allTabs.filter((tab) => !isInternalUrl(tab));
++  const focusTabs = eligibleTabs.filter((tab) => isFocusTab(tab, state));
++  const nonFocusTabs = eligibleTabs.filter((tab) => !isFocusTab(tab, state) && !tab.active);
+   state.focusTabCount = focusTabs.length;
+ 
+   // Apply tab action
+   if (tabAction === 'kebab' && nonFocusTabs.length > 0) {
+     for (const tab of nonFocusTabs) {
+       if (tab.discarded) continue;
+       try { await chrome.tabs.discard(tab.id); } catch { /* tab may be active */ }
+     }
+   } else if (tabAction === 'stash' && nonFocusTabs.length > 0) {
+     const stashTabs = nonFocusTabs.map(t => ({
+@@ -301,21 +216,21 @@ export async function startFocus({
+     const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+     const stash = {
+       id: stashId,
+       name: `[Focus] ${profileName} session`,
+       source: 'domain',
+       sourceDetail: 'focus-mode',
+       createdAt: Date.now(),
+       tabCount: stashTabs.length,
+       windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
+     };
+-    await saveStash(stash);
++    await persistStash(stash);
+     state.stashId = stashId;
+     const closableIds = nonFocusTabs.map(t => t.id);
+     if (closableIds.length > 0) await closeTabs(closableIds);
+   } else if (tabAction === 'group' && focusTabs.length > 0) {
+     const focusTabIds = focusTabs.map(t => t.id);
+     const profileColor = profile?.color || 'blue';
+     const chromeColor = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'].includes(profileColor)
+       ? profileColor : 'blue';
+     try {
+       const groupId = await createNativeGroup(focusTabIds, profileName, chromeColor);
+@@ -397,30 +312,57 @@ export async function endFocus() {
+ export async function pauseFocus() {
+   const state = await getFocusState();
+   if (!state || state.status !== 'active') return null;
+   state.status = 'paused';
+   state.pausedAt = Date.now();
+   await updateBadge(state);
+   await saveFocusState(state);
+   return state;
+ }
+ 
++export async function rebindStoredFocusState() {
++  await cacheReady;
++  const state = await Storage.get(FOCUS_STATE_KEY);
++  if (!state || (state.status !== 'active' && state.status !== 'paused')) {
++    _cachedState = state;
++    return state;
++  }
++
++  // Never expose persisted runtime IDs while the current Chrome group query is pending.
++  const sanitized = rebindFocusAllowlist(state, []);
++  _cachedState = sanitized;
++  let liveGroups;
++  try {
++    liveGroups = await chrome.tabGroups.query({});
++  } catch (error) {
++    // Preserve the title preference and run metadata, but remove numeric authority
++    // that cannot be validated in this browser session.
++    await saveFocusState(sanitized);
++    throw error;
++  }
++  const rebound = rebindFocusAllowlist(state, liveGroups);
++  await saveFocusState(rebound);
++  return rebound;
++}
++
+ export async function resumeFocus() {
+   const state = await getFocusState();
+   if (!state || state.status !== 'paused') return null;
+-  const pauseDuration = Date.now() - state.pausedAt;
+-  state.pausedElapsed += pauseDuration;
+-  state.pausedAt = null;
+-  state.status = 'active';
+-  await updateBadge(state);
+-  await saveFocusState(state);
+-  return state;
++  const liveGroups = await chrome.tabGroups.query({});
++  const rebound = rebindFocusAllowlist(state, liveGroups);
++  const pauseDuration = Date.now() - rebound.pausedAt;
++  rebound.pausedElapsed += pauseDuration;
++  rebound.pausedAt = null;
++  rebound.status = 'active';
++  await updateBadge(rebound);
++  await saveFocusState(rebound);
++  return rebound;
+ }
+ 
+ // ── Extend ──
+ 
+ export async function extendFocus(minutes) {
+   const state = await getFocusState();
+   if (!state) return null;
+   state.duration += minutes;
+   await updateBadge(state);
+   await saveFocusState(state);
+diff --git a/docs/reports/2026-07-14-reliability-smoke.md b/docs/reports/2026-07-14-reliability-smoke.md
+index 372e880..cb03362 100644
+--- a/docs/reports/2026-07-14-reliability-smoke.md
++++ b/docs/reports/2026-07-14-reliability-smoke.md
+@@ -81,10 +81,83 @@ The synthetic page was silent, so the audio-safety assertion is Chrome's authori
+ The successful run reported:
+ 
+ ```text
+ DISPOSABLE_PROFILE_ENTRIES_BEFORE_CLEANUP=283
+ CLEANUP_PROFILE_REMOVED=1
+ CLEANUP_CHROME_PROCESSES=0
+ CLEANUP_XVFB_PROCESSES=0
+ ```
+ 
+ An earlier failed driver attempt also had its uniquely named profile audited and removed separately; it left zero matching Chrome or Xvfb processes. No browser process, X server, or disposable profile was left running.
++
++---
++
++Slice: Task 3, unified Focus allowlist policy
++
++Extension version: `1.2.5`
++
++## Task 3 browser boundary
++
++The Focus smoke used the same installed Chrome for Testing binary already accepted for the reliability campaign:
++
++```text
++Google Chrome for Testing 148.0.7778.96
++binary SHA-256: adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f
++Xvfb :[redacted] -screen 0 1280x900x24 -nolisten tcp
++/home/michel/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome \
++  --user-data-dir=/tmp/tabkebab-task3-focus.[redacted] \
++  --disable-extensions-except=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --load-extension=/home/michel/projects/tabkebab-chrome-ext/.worktrees/reliability-hardening \
++  --remote-debugging-port=0 --no-first-run --no-default-browser-check about:blank
++```
++
++The driver opened the real side-panel document for the unpacked extension, sent the production runtime actions, and inspected Chrome's real tab, tab-group, and extension-storage APIs. It then cleanly stopped Chrome and launched the same binary, extension path, and disposable profile again. That browser restart forced a cold extension/service-worker reload before the group-rebinding check.
++
++Earlier harness-development attempts that selected a bundled component worker, tried a dynamic import inside a service worker, depended on unflushed live Preferences, or called `chrome.runtime.reload()` on the command-line-loaded unpacked extension were treated as non-evidence. Each failed attempt used a uniquely named Task 3 profile and reported that its profile, matching Chrome processes, and Xvfb process were removed before the next attempt.
++
++## Task 3 redacted results
++
++Before the browser restart, strict mode with an empty allowlist reported zero focus tabs and removed a newly opened non-internal URL. With one canonical exact URL allowed, the exact URL remained open while a path-prefix extension was removed.
++
++```json
++{
++  "strictEmpty": {
++    "focusTabCount": 0,
++    "navigationRejected": true
++  },
++  "exactUrl": {
++    "exactTabRemained": true,
++    "prefixNavigationRejected": true
++  }
++}
++```
++
++The pre-restart fixture stored a paused run with a deliberately stale numeric group ID and title-only profile preferences. After the restart, cold worker initialization removed the scalar ID and resolved the runtime ID list to empty instead of trusting the stale value. The driver then created two current Chrome groups with the same exact title and resumed the run. Resume rebound that title to both and only the current live IDs; the profile preference remained title-only.
++
++```json
++{
++  "groupRebind": {
++    "liveGroupCount": 2,
++    "startupRuntimeIdCount": 0,
++    "startupStaleScalarRemoved": true,
++    "runtimeGroupIdCount": 2,
++    "runtimeIdsMatchLiveIds": true,
++    "staleScalarRemoved": true,
++    "staleRuntimeIdTrusted": false,
++    "profilePreferencesTitleOnly": true
++  }
++}
++```
++
++## Task 3 cleanup
++
++The successful two-phase run reported:
++
++```text
++SEED_EXIT=0
++VERIFY_EXIT=0
++CLEANUP_PROFILE_REMOVED=1
++CLEANUP_CHROME_PROCESSES=0
++CLEANUP_XVFB_PROCESSES=0
++```
++
++The driver also removed the two current grouped fixture tabs before the browser profile was deleted. No Task 3 browser process, X server, or disposable profile was left running.
+diff --git a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+index 91e18f2..5485b68 100644
+--- a/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
++++ b/docs/superpowers/plans/2026-07-14-tabkebab-reliability-hardening.md
+@@ -244,33 +244,33 @@ export function urlMatches(url, allowList);
+ export function groupMatches(tab, allowList);
+ export function isAllowed(tabOrUrl, allowList);
+ export function createAllowlistEntry(type, value, liveGroups);
+ export function resolveGroupAllowlist(allowList, liveGroups);
+ export function rebindFocusAllowlist(state, liveGroups);
+ export function evaluateFocusPolicy(tabOrUrl, state);
+ ```
+ 
+ `resolveGroupAllowlist()` must return new entries. A group entry retains `{ type: 'group', value: title }`, drops any persisted scalar `groupId`, and adds `groupIds` containing every live group whose title exactly equals `value`. `groupMatches()` consults only `groupIds`.
+ 
+-- [ ] Write `tests/core/focus-policy.test.js` first. Cover legacy domain strings, typed domains, exact/subdomain acceptance, lookalike rejection, exact URL acceptance, URL-prefix rejection, group title rebound to two live IDs, stale persisted ID rejection, internal URL allowance, and strict mode with an empty allowlist blocking every non-internal URL.
+-- [ ] Write `tests/core/focus-start.test.js` proving startup's `isFocusTab()` uses the same `isAllowed()` domain/exact-URL/rebound-group predicate that navigation evaluates before blocklists. Assert `kebab` and `stash` affect only non-focus tabs, while `group` groups only focus tabs. Non-strict empty allowlist treats all tabs as focus; strict empty allowlist treats every non-internal tab as non-focus.
+-- [ ] Run `bun test tests/core/focus-policy.test.js tests/core/focus-start.test.js` and preserve failures caused by domain-only `isFocusTab()`, prefix URL matching, stale group IDs, and strict-empty fall-through.
+-- [ ] Move allowlist parsing and block decisions from `core/focus.js` into `core/focus-policy.js`. `evaluateFocusPolicy()` must return `{ blocked, reason, category }` and preserve existing blocklist category behavior.
+-- [ ] At `startFocus()`, call `chrome.tabGroups.query({})` once, pass the result through `resolveGroupAllowlist()`, and persist the resolved entries only in the active run state. Keep profile preferences title-based so they survive browser restarts.
+-- [ ] Keep `rebindFocusAllowlist(state, liveGroups)` pure. In `core/focus.js`, query current Chrome groups and call it for an active/paused stored run during service-worker initialization and before resume. This replaces runtime `groupIds` from current exact-title matches after browser restart without changing profile preferences.
+-- [ ] Implement `isFocusTab()` as: internal URLs are focus; non-strict empty allowlist treats all tabs as focus; otherwise return `isAllowed(tab, state.allowedDomains)`. Strict empty therefore makes every non-internal tab non-focus and blockable.
+-- [ ] Use `isFocusTab()` for startup tab-action selection and `evaluateFocusPolicy()` for navigation. Both must delegate their allowlist step to the same `isAllowed()` function; do not duplicate allowlist logic in `service-worker.js`.
+-- [ ] Add `URL` to `#focus-add-type` in the Focus panel's generated markup. Make the panel delegate entry construction to pure `createAllowlistEntry()`: domains are lowercased/canonicalized; URLs use `new URL()` and store `{ type: 'url', value: parsed.href }` without whole-string lowercasing; groups store `{ type: 'group', value: exactTitle }` without numeric ID. Invalid input returns null and produces a visible error. Cover all three shapes in `focus-policy.test.js` without rendering DOM.
+-- [ ] Update Focus UI copy to state that URL entries are exact and Chrome groups are rebound by exact title at each run.
+-- [ ] Run `bun test tests/core/focus-policy.test.js tests/core/focus-start.test.js`, then the full three-command gate.
+-- [ ] In real Chrome, verify strict-empty, one exact URL, and two same-title Chrome groups. Reload the extension before the group check to prove stale numeric IDs are not trusted; append evidence to the smoke report.
+-- [ ] Update `GUIDE.md` and `ARCHITECTURE.md`, then close the task using the global chain.
++- [x] Write `tests/core/focus-policy.test.js` first. Cover legacy domain strings, typed domains, exact/subdomain acceptance, lookalike rejection, exact URL acceptance, URL-prefix rejection, group title rebound to two live IDs, stale persisted ID rejection, internal URL allowance, and strict mode with an empty allowlist blocking every non-internal URL.
++- [x] Write `tests/core/focus-start.test.js` proving startup's `isFocusTab()` uses the same `isAllowed()` domain/exact-URL/rebound-group predicate that navigation evaluates before blocklists. Assert `kebab` and `stash` affect only non-focus tabs, while `group` groups only focus tabs. Non-strict empty allowlist treats all tabs as focus; strict empty allowlist treats every non-internal tab as non-focus.
++- [x] Run `bun test tests/core/focus-policy.test.js tests/core/focus-start.test.js` and preserve failures caused by domain-only `isFocusTab()`, prefix URL matching, stale group IDs, and strict-empty fall-through.
++- [x] Move allowlist parsing and block decisions from `core/focus.js` into `core/focus-policy.js`. `evaluateFocusPolicy()` must return `{ blocked, reason, category }` and preserve existing blocklist category behavior.
++- [x] At `startFocus()`, call `chrome.tabGroups.query({})` once, pass the result through `resolveGroupAllowlist()`, and persist the resolved entries only in the active run state. Keep profile preferences title-based so they survive browser restarts.
++- [x] Keep `rebindFocusAllowlist(state, liveGroups)` pure. In `core/focus.js`, query current Chrome groups and call it for an active/paused stored run during service-worker initialization and before resume. This replaces runtime `groupIds` from current exact-title matches after browser restart without changing profile preferences.
++- [x] Implement `isFocusTab()` as: internal URLs are focus; non-strict empty allowlist treats all tabs as focus; otherwise return `isAllowed(tab, state.allowedDomains)`. Strict empty therefore makes every non-internal tab non-focus and blockable.
++- [x] Use `isFocusTab()` for startup tab-action selection and `evaluateFocusPolicy()` for navigation. Both must delegate their allowlist step to the same `isAllowed()` function; do not duplicate allowlist logic in `service-worker.js`.
++- [x] Add `URL` to `#focus-add-type` in the Focus panel's generated markup. Make the panel delegate entry construction to pure `createAllowlistEntry()`: domains are lowercased/canonicalized; URLs use `new URL()` and store `{ type: 'url', value: parsed.href }` without whole-string lowercasing; groups store `{ type: 'group', value: exactTitle }` without numeric ID. Invalid input returns null and produces a visible error. Cover all three shapes in `focus-policy.test.js` without rendering DOM.
++- [x] Update Focus UI copy to state that URL entries are exact and Chrome groups are rebound by exact title at each run.
++- [x] Run `bun test tests/core/focus-policy.test.js tests/core/focus-start.test.js`, then the full three-command gate.
++- [x] In real Chrome, verify strict-empty, one exact URL, and two same-title Chrome groups. Reload the extension before the group check to prove stale numeric IDs are not trusted; append evidence to the smoke report.
++- [x] Update `GUIDE.md` and `ARCHITECTURE.md`, then close the task using the global chain.
+ 
+ ### Task 4: Bind every asynchronous Focus action to its originating run and URL
+ 
+ **Finding:** 3
+ 
+ **Release checkpoint:** expected `v1.2.6`
+ 
+ **Files:**
+ 
+ - Create: `core/focus-ai.js`
+diff --git a/manifest.json b/manifest.json
+index 9234781..a2b5f34 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -1,14 +1,14 @@
+ {
+   "manifest_version": 3,
+   "name": "TabKebab",
+-  "version": "1.2.4",
++  "version": "1.2.5",
+   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
+ 
+   "permissions": [
+     "tabs",
+     "tabGroups",
+     "storage",
+     "sidePanel",
+     "identity",
+     "alarms",
+     "bookmarks"
+diff --git a/service-worker.js b/service-worker.js
+index 7c1335b..2080b92 100644
+--- a/service-worker.js
++++ b/service-worker.js
+@@ -5,21 +5,22 @@ import { findDuplicates, findEmptyPages } from './core/duplicates.js';
+ import { saveSession, restoreSession, listSessions, deleteSession } from './core/sessions.js';
+ import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
+ import { AIClient } from './core/ai/ai-client.js';
+ import { Prompts } from './core/ai/prompts.js';
+ import { filterTabs, executeNLAction } from './core/nl-executor.js';
+ import { Storage } from './core/storage.js';
+ import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
+ import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
+ import { getSettings, saveSettings } from './core/settings.js';
+ import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, writeSettingsFile } from './core/drive-client.js';
+-import { getCachedFocusState, getFocusState, isBlockedDomain, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles } from './core/focus.js';
++import { getCachedFocusState, getFocusState, handleDistraction, handleFocusTick, startFocus, endFocus, pauseFocus, resumeFocus, extendFocus, updateBadge, getFocusHistory, getAllProfiles, rebindStoredFocusState } from './core/focus.js';
++import { evaluateFocusPolicy, isAllowed, isInternalUrl } from './core/focus-policy.js';
+ 
+ // ── Keep Awake Defaults ──
+ 
+ const DEFAULT_KEEP_AWAKE_DOMAINS = [
+   'gmail.com', 'outlook.com', 'outlook.live.com', 'mail.yahoo.com', 'proton.me',
+   'calendar.google.com', 'outlook.office.com',
+   'claude.ai', 'chat.openai.com', 'aistudio.google.com', 'gemini.google.com', 'codex.openai.com',
+ ];
+ 
+ async function getKeepAwakeList() {
+@@ -750,46 +751,56 @@ chrome.alarms.onAlarm.addListener((alarm) => {
+     case ALARM_AUTO_STASH:     autoStashOldTabs(); break;
+     case ALARM_AUTO_SYNC_DRIVE: autoSyncDrive(); break;
+     case ALARM_RETENTION_CLEANUP: runRetentionCleanup(); break;
+     case ALARM_AUTO_BOOKMARK:  createBookmarks(); break;
+     case ALARM_FOCUS_TICK:     handleFocusTick(); break;
+   }
+ });
+ 
+ // Ensure alarms exist (service worker can restart)
+ (async () => {
++  // Rebind persisted group titles before any Focus listener can trust runtime IDs.
++  let focusState;
++  try {
++    focusState = await rebindStoredFocusState();
++  } catch (error) {
++    focusState = getCachedFocusState();
++    console.warn('[TabKebab] Focus group rebinding failed during worker startup:', error);
++  }
++
+   const alarm = await chrome.alarms.get(ALARM_AUTO_SAVE);
+   if (!alarm) await reconfigureAlarms();
+ 
+   // Restore focus alarm + badge if a session was active before SW restart
+-  const focusState = await getFocusState();
+   if (focusState?.status === 'active') {
+     const existing = await chrome.alarms.get(ALARM_FOCUS_TICK);
+     if (!existing) await chrome.alarms.create(ALARM_FOCUS_TICK, { periodInMinutes: 1 });
+     await updateBadge(focusState);
+   }
+ })();
+ 
+ // Open side panel when extension icon is clicked
+ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+ 
+ // Notify side panel when tabs change
+ function notifyPanel() {
+   chrome.runtime.sendMessage({ type: 'tabsChanged' }).catch(() => {
+     // Side panel not open — ignore
+   });
+ }
+ 
+ // AI-based domain categorization for focus mode
+ const aiCheckCache = new Map(); // Cache AI results to avoid repeated calls
+-async function checkWithAI(tabId, url, state) {
++async function checkWithAI(tabId, url, state, tabOrUrl = url) {
+   try {
++    if (isInternalUrl(tabOrUrl) || isAllowed(tabOrUrl, state?.allowedDomains)) return;
++
+     const available = await AIClient.isAvailable();
+     if (!available) return;
+ 
+     const hostname = extractDomain(url);
+     if (!hostname || hostname === 'other') return;
+ 
+     // Check cache first
+     if (aiCheckCache.has(hostname)) {
+       const cached = aiCheckCache.get(hostname);
+       if (cached.distraction) {
+@@ -827,46 +838,47 @@ Respond with JSON only: {"distraction": true/false, "category": "category name",
+ 
+ chrome.tabs.onCreated.addListener(async (tab) => {
+   notifyPanel();
+   // Focus mode: intercept new tabs opened to blocked URLs
+   if (tab.pendingUrl || tab.url) {
+     const url = tab.pendingUrl || tab.url;
+     const state = getCachedFocusState();
+     if (state?.status === 'active') {
+       // Pass full tab object to check group membership
+       const tabWithUrl = { ...tab, url };
+-      const result = isBlockedDomain(tabWithUrl, state);
++      const result = evaluateFocusPolicy(tabWithUrl, state);
+       if (result.blocked) {
+         handleDistraction(tab.id, url, state, result.category);
+-      } else if (state.aiBlocking && !result.blocked) {
++      } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
+         // Try AI categorization for unknown domains
+-        checkWithAI(tab.id, url, state);
++        checkWithAI(tab.id, url, state, tabWithUrl);
+       }
+     }
+   }
+ });
+ chrome.tabs.onRemoved.addListener(notifyPanel);
+ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+   if (changeInfo.status === 'complete' || changeInfo.url) {
+     notifyPanel();
+   }
+   // Focus mode: intercept navigation to blocked domains
+   if (changeInfo.url) {
+     const state = getCachedFocusState();
+     if (state?.status === 'active') {
+       // Pass full tab object to check group membership
+-      const result = isBlockedDomain(tab, state);
++      const tabWithUrl = { ...tab, url: changeInfo.url };
++      const result = evaluateFocusPolicy(tabWithUrl, state);
+       if (result.blocked) {
+         handleDistraction(tabId, changeInfo.url, state, result.category);
+-      } else if (state.aiBlocking && !result.blocked) {
++      } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
+         // Try AI categorization for unknown domains
+-        checkWithAI(tabId, changeInfo.url, state);
++        checkWithAI(tabId, changeInfo.url, state, tabWithUrl);
+       }
+     }
+   }
+ });
+ 
+ // Message handler — side panel communicates via chrome.runtime.sendMessage
+ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+   handleMessage(message).then(sendResponse).catch(err => {
+     console.warn(`[TabKebab] handler error (${message?.action}):`, err);
+     sendResponse({ error: err?.message || String(err) });
+diff --git a/sidepanel/components/focus-panel.js b/sidepanel/components/focus-panel.js
+index 8934792..cfbb3e3 100644
+--- a/sidepanel/components/focus-panel.js
++++ b/sidepanel/components/focus-panel.js
+@@ -1,13 +1,14 @@
+ // sidepanel/components/focus-panel.js — Focus Mode UI: setup, timer HUD, report, history
+ 
+ import { showToast } from './toast.js';
++import { createAllowlistEntry } from '../../core/focus-policy.js';
+ 
+ const PROFILE_PREFS_KEY = 'focusProfilePrefs';
+ 
+ export class FocusPanel {
+   constructor(rootEl) {
+     this.root = rootEl;
+     this.container = rootEl.querySelector('#focus-container');
+     this.state = null;
+     this.profiles = [];
+     this.timerInterval = null;
+@@ -82,41 +83,42 @@ export class FocusPanel {
+             <label><input type="radio" name="focus-action" value="none" ${defaultAction === 'none' ? 'checked' : ''}> Do nothing (monitor only)</label>
+           </div>
+         </div>
+ 
+         <div class="focus-blocking-section">
+           <label class="focus-label">Blocking Mode</label>
+           <div class="focus-blocking-options">
+             <label class="focus-toggle-row">
+               <input type="checkbox" id="focus-strict-mode">
+               <span class="focus-toggle-label">Strict Mode</span>
+-              <span class="focus-toggle-hint">Block everything except allowed domains</span>
++              <span class="focus-toggle-hint">Block everything except allowed entries</span>
+             </label>
+             <label class="focus-toggle-row" id="focus-ai-row" hidden>
+               <input type="checkbox" id="focus-ai-blocking">
+               <span class="focus-toggle-label">AI Detection</span>
+               <span class="focus-toggle-hint">Use AI to identify distracting sites</span>
+             </label>
+           </div>
+           <div class="focus-categories">
+             <label class="focus-label">Block Categories</label>
+             <div class="focus-category-chips" id="focus-category-chips"></div>
+           </div>
+         </div>
+ 
+         <div class="focus-allowlist-section">
+           <label class="focus-label">Allowed (whitelist)</label>
+-          <p class="focus-hint">Tabs matching these will never be blocked</p>
++          <p class="focus-hint">Domains include true subdomains, URLs are exact, and Chrome groups rebind by exact title at each run.</p>
+           <div class="focus-allowlist-tags" id="focus-allowlist-tags"></div>
+           <div class="focus-allowlist-add">
+             <select id="focus-add-type" class="input focus-add-type-select">
+               <option value="domain">Domain</option>
++              <option value="url">URL</option>
+               <option value="group">Chrome Group</option>
+             </select>
+             <input type="text" id="focus-add-value" class="input" placeholder="e.g. github.com">
+             <select id="focus-add-group" class="input" hidden></select>
+             <button class="action-btn secondary focus-add-btn" id="btn-add-allowlist">+</button>
+           </div>
+         </div>
+ 
+         <div class="focus-domains-section">
+           <div class="focus-domain-group">
+@@ -152,103 +154,115 @@ export class FocusPanel {
+ 
+     // Load saved preferences for default profile (overrides defaults)
+     await this._loadProfilePrefs(profile.id);
+ 
+     // Update UI with loaded preferences
+     const strictCb = this.container.querySelector('#focus-strict-mode');
+     const aiCb = this.container.querySelector('#focus-ai-blocking');
+     if (strictCb) strictCb.checked = this._strictMode;
+     if (aiCb) aiCb.checked = this._aiBlocking;
+ 
+-    this._loadChromeGroups();
++    await this._loadChromeGroups();
+     this._renderAllowlistTags();
+     this._renderDomainTags();
+     this._renderCategoryChips();
+     this._checkAIAvailability();
+     this._wireSetupEvents();
+     this._loadHistory();
+   }
+ 
+   async _loadChromeGroups() {
+     try {
+       const groups = await chrome.tabGroups.query({});
+       this._chromeGroups = groups.map(g => ({
+         id: g.id,
+-        title: g.title || `Group ${g.id}`,
++        title: g.title || '',
++        displayTitle: g.title || `Group ${g.id} (untitled)`,
+         color: g.color,
+       }));
+       this._updateGroupDropdown();
+     } catch {
+       this._chromeGroups = [];
++      this._updateGroupDropdown();
+     }
+   }
+ 
+   _updateGroupDropdown() {
+     const select = this.container.querySelector('#focus-add-group');
+     if (!select) return;
+     select.innerHTML = this._chromeGroups.length === 0
+       ? '<option value="">No groups available</option>'
+       : this._chromeGroups.map(g =>
+-          `<option value="${g.id}">${this._esc(g.title)}</option>`
++          `<option value="${g.id}">${this._esc(g.displayTitle)}</option>`
+         ).join('');
+   }
+ 
+   async _loadAllProfilePrefs() {
+     try {
+       const result = await chrome.storage.local.get(PROFILE_PREFS_KEY);
+       this._profilePrefs = result[PROFILE_PREFS_KEY] || {};
+     } catch {
+       this._profilePrefs = {};
+     }
+   }
+ 
+   async _loadProfilePrefs(profileId) {
+     await this._loadAllProfilePrefs();
+     const prefs = this._profilePrefs[profileId];
+     if (!prefs) return;
+ 
+     // Apply saved preferences
+     if (prefs.blockedCategories) this._blockedCategories = [...prefs.blockedCategories];
+-    if (prefs.allowlist) this._allowlist = [...prefs.allowlist];
++    if (prefs.allowlist) {
++      this._allowlist = prefs.allowlist.map((entry) => (
++        typeof entry === 'string'
++          ? { type: 'domain', value: entry }
++          : { type: entry.type, value: entry.value }
++      ));
++    }
+     if (prefs.blockedDomains) this._blockedDomains = [...prefs.blockedDomains];
+     if (prefs.strictMode !== undefined) this._strictMode = prefs.strictMode;
+     if (prefs.aiBlocking !== undefined) this._aiBlocking = prefs.aiBlocking;
+     if (prefs.duration !== undefined) {
+       const durInput = this.container.querySelector('#focus-duration');
+       if (durInput) durInput.value = prefs.duration;
+     }
+     if (prefs.tabAction) {
+       const radio = this.container.querySelector(`input[name="focus-action"][value="${prefs.tabAction}"]`);
+       if (radio) radio.checked = true;
+     }
+   }
+ 
+   async _saveProfilePrefs(profileId) {
+     const prefs = {
+       blockedCategories: this._blockedCategories,
+-      allowlist: this._allowlist,
++      allowlist: this._allowlist.map((entry) => (
++        typeof entry === 'string'
++          ? { type: 'domain', value: entry }
++          : { type: entry.type, value: entry.value }
++      )),
+       blockedDomains: this._blockedDomains,
+       strictMode: this._strictMode,
+       aiBlocking: this._aiBlocking,
+       duration: parseInt(this.container.querySelector('#focus-duration')?.value) || 25,
+       tabAction: this.container.querySelector('input[name="focus-action"]:checked')?.value || 'none',
+     };
+     this._profilePrefs[profileId] = prefs;
+     await chrome.storage.local.set({ [PROFILE_PREFS_KEY]: this._profilePrefs });
+   }
+ 
+   _renderAllowlistTags() {
+     const container = this.container.querySelector('#focus-allowlist-tags');
+     if (!container) return;
+ 
+     if (this._allowlist.length === 0) {
+-      container.innerHTML = '<span class="focus-domain-empty">No items - all domains allowed (use blocklist/categories)</span>';
++      container.innerHTML = '<span class="focus-domain-empty">No items — non-strict allows all; strict blocks every non-internal page.</span>';
+       return;
+     }
+ 
+     container.innerHTML = this._allowlist.map((entry, idx) => {
+       const icon = entry.type === 'group' ? '📁' : entry.type === 'url' ? '🔗' : '🌐';
+       const label = entry.type === 'group' ? entry.value : entry.value;
+       return `
+         <span class="focus-allowlist-tag" data-type="${entry.type}">
+           <span class="focus-tag-icon">${icon}</span>
+           <span>${this._esc(label)}</span>
+@@ -391,43 +405,53 @@ export class FocusPanel {
+ 
+     // Allowlist type toggle
+     const addTypeSelect = this.container.querySelector('#focus-add-type');
+     const addValueInput = this.container.querySelector('#focus-add-value');
+     const addGroupSelect = this.container.querySelector('#focus-add-group');
+     if (addTypeSelect && addValueInput && addGroupSelect) {
+       addTypeSelect.addEventListener('change', () => {
+         const isGroup = addTypeSelect.value === 'group';
+         addValueInput.hidden = isGroup;
+         addGroupSelect.hidden = !isGroup;
+-        addValueInput.placeholder = isGroup ? '' : 'e.g. github.com';
++        addValueInput.placeholder = isGroup
++          ? ''
++          : addTypeSelect.value === 'url' ? 'https://example.com/exact-path' : 'e.g. github.com';
+       });
+     }
+ 
+     // Add to allowlist
+     const addAllowlistBtn = this.container.querySelector('#btn-add-allowlist');
+     addAllowlistBtn?.addEventListener('click', () => {
+       const type = addTypeSelect?.value || 'domain';
+-      if (type === 'group') {
+-        const groupId = parseInt(addGroupSelect?.value);
+-        const group = this._chromeGroups.find(g => g.id === groupId);
+-        if (group && !this._allowlist.some(e => e.type === 'group' && e.groupId === groupId)) {
+-          this._allowlist.push({ type: 'group', value: group.title, groupId });
+-          this._renderAllowlistTags();
+-        }
+-      } else {
+-        const val = addValueInput?.value.trim().toLowerCase();
+-        if (val && !this._allowlist.some(e => e.type === 'domain' && e.value === val)) {
+-          this._allowlist.push({ type: 'domain', value: val });
+-          addValueInput.value = '';
+-          this._renderAllowlistTags();
+-        }
++      const value = type === 'group' ? addGroupSelect?.value : addValueInput?.value;
++      const entry = createAllowlistEntry(type, value, this._chromeGroups);
++      if (!entry) {
++        showToast(
++          type === 'group'
++            ? 'Select a titled Chrome group.'
++            : `Enter a valid ${type === 'url' ? 'absolute URL' : 'domain'}.`,
++          'error',
++        );
++        return;
++      }
++
++      const duplicate = this._allowlist.some((candidate) => (
++        candidate?.type === entry.type && candidate?.value === entry.value
++      ));
++      if (duplicate) {
++        showToast('That allowlist entry already exists.', 'error');
++        return;
+       }
++
++      this._allowlist.push(entry);
++      if (type !== 'group') addValueInput.value = '';
++      this._renderAllowlistTags();
+     });
+ 
+     // Add blocked domain
+     const addBlocked = this.container.querySelector('#btn-add-blocked');
+     const blockedInput = this.container.querySelector('#focus-add-blocked');
+     const addBlockedDomain = () => {
+       const val = blockedInput?.value.trim().toLowerCase();
+       if (val && !this._blockedDomains.includes(val)) {
+         this._blockedDomains.push(val);
+         blockedInput.value = '';
+diff --git a/tests/core/focus-policy.test.js b/tests/core/focus-policy.test.js
+new file mode 100644
+index 0000000..ad9db0c
+--- /dev/null
++++ b/tests/core/focus-policy.test.js
+@@ -0,0 +1,265 @@
++import { describe, expect, test } from 'bun:test';
++
++async function loadPolicy() {
++  return import('../../core/focus-policy.js');
++}
++
++describe('Focus allowlist policy', () => {
++  test('legacy strings and typed domains allow exact hosts and true subdomains', async () => {
++    const { domainMatches } = await loadPolicy();
++    const allowlist = ['legacy.test', { type: 'domain', value: 'Typed.Test' }];
++
++    expect(domainMatches('https://legacy.test/path', allowlist)).toBe(true);
++    expect(domainMatches('https://deep.legacy.test/path', allowlist)).toBe(true);
++    expect(domainMatches('https://typed.test/path', allowlist)).toBe(true);
++    expect(domainMatches('https://child.typed.test/path', allowlist)).toBe(true);
++  });
++
++  test('domain matching rejects sibling and suffix lookalikes', async () => {
++    const { domainMatches } = await loadPolicy();
++    const allowlist = [{ type: 'domain', value: 'example.com' }];
++
++    expect(domainMatches('https://example.com.evil.test/', allowlist)).toBe(false);
++    expect(domainMatches('https://notexample.com/', allowlist)).toBe(false);
++    expect(domainMatches('https://example.co/', allowlist)).toBe(false);
++  });
++
++  test('URL entries match only the canonical exact URL, never a prefix', async () => {
++    const { urlMatches } = await loadPolicy();
++    const allowlist = [{ type: 'url', value: 'https://example.test/allowed' }];
++
++    expect(urlMatches('https://example.test/allowed', allowlist)).toBe(true);
++    expect(urlMatches('https://example.test/allowed/extra', allowlist)).toBe(false);
++    expect(urlMatches('https://example.test/allowed?extra=1', allowlist)).toBe(false);
++  });
++
++  test('URL matching preserves path, query, and fragment case', async () => {
++    const { urlMatches } = await loadPolicy();
++    const allowlist = [{ type: 'url', value: 'https://example.test/Path?Q=One#Part' }];
++
++    expect(urlMatches('https://EXAMPLE.test/Path?Q=One#Part', allowlist)).toBe(true);
++    expect(urlMatches('https://example.test/path?Q=One#Part', allowlist)).toBe(false);
++    expect(urlMatches('https://example.test/Path?q=One#Part', allowlist)).toBe(false);
++    expect(urlMatches('https://example.test/Path?Q=One#part', allowlist)).toBe(false);
++  });
++
++  test('group matching uses rebound groupIds, including Chrome group ID zero', async () => {
++    const { groupMatches } = await loadPolicy();
++    const allowlist = [{ type: 'group', value: 'Deep Work', groupId: 9, groupIds: [0, 4] }];
++
++    expect(groupMatches({ groupId: 0 }, allowlist)).toBe(true);
++    expect(groupMatches({ groupId: 4 }, allowlist)).toBe(true);
++    expect(groupMatches({ groupId: 9 }, allowlist)).toBe(false);
++    expect(groupMatches({ groupId: -1 }, allowlist)).toBe(false);
++  });
++
++  test('same-title Chrome groups all rebind by exact title', async () => {
++    const { resolveGroupAllowlist } = await loadPolicy();
++    const resolved = resolveGroupAllowlist(
++      [{ type: 'group', value: 'Deep Work', groupId: 88 }],
++      [
++        { id: 0, title: 'Deep Work' },
++        { id: 7, title: 'Deep Work' },
++        { id: 8, title: 'deep work' },
++      ],
++    );
++
++    expect(resolved).toEqual([{ type: 'group', value: 'Deep Work', groupIds: [0, 7] }]);
++  });
++
++  test('rebinding replaces stale scalar and runtime IDs without mutating input', async () => {
++    const { resolveGroupAllowlist } = await loadPolicy();
++    const input = [
++      'legacy.test',
++      { type: 'domain', value: 'typed.test' },
++      { type: 'group', value: 'Writing', groupId: 91, groupIds: [92] },
++    ];
++    const before = structuredClone(input);
++
++    const resolved = resolveGroupAllowlist(input, [{ id: 3, title: 'Writing' }]);
++
++    expect(resolved).toEqual([
++      'legacy.test',
++      { type: 'domain', value: 'typed.test' },
++      { type: 'group', value: 'Writing', groupIds: [3] },
++    ]);
++    expect(resolved).not.toBe(input);
++    expect(resolved[1]).not.toBe(input[1]);
++    expect(resolved[2]).not.toBe(input[2]);
++    expect(input).toEqual(before);
++  });
++
++  test('state rebinding is pure and replaces only runtime allowlist bindings', async () => {
++    const { rebindFocusAllowlist } = await loadPolicy();
++    const state = {
++      status: 'paused',
++      strictMode: true,
++      allowedDomains: [{ type: 'group', value: 'Research', groupIds: [70], groupId: 71 }],
++      blockedDomains: ['blocked.test'],
++    };
++    const before = structuredClone(state);
++
++    const rebound = rebindFocusAllowlist(state, [{ id: 5, title: 'Research' }]);
++
++    expect(rebound).toEqual({
++      status: 'paused',
++      strictMode: true,
++      allowedDomains: [{ type: 'group', value: 'Research', groupIds: [5] }],
++      blockedDomains: ['blocked.test'],
++    });
++    expect(rebound).not.toBe(state);
++    expect(state).toEqual(before);
++  });
++
++  test('internal Chrome and extension pages are always allowed', async () => {
++    const { isAllowed, isInternalUrl } = await loadPolicy();
++
++    expect(isInternalUrl('chrome://settings/')).toBe(true);
++    expect(isInternalUrl('chrome-extension://extension-id/panel.html')).toBe(true);
++    expect(isInternalUrl('about:blank')).toBe(false);
++    expect(isAllowed('chrome://newtab/', [])).toBe(true);
++    expect(isAllowed({ url: 'chrome-extension://extension-id/panel.html' }, [])).toBe(true);
++  });
++
++  test('isAllowed delegates domain, exact URL, and group entries to one predicate', async () => {
++    const { isAllowed } = await loadPolicy();
++    const allowlist = [
++      { type: 'domain', value: 'domain.test' },
++      { type: 'url', value: 'https://url.test/Exact' },
++      { type: 'group', value: 'Group', groupIds: [6] },
++    ];
++
++    expect(isAllowed({ url: 'https://sub.domain.test/' }, allowlist)).toBe(true);
++    expect(isAllowed({ url: 'https://url.test/Exact' }, allowlist)).toBe(true);
++    expect(isAllowed({ url: 'https://other.test/', groupId: 6 }, allowlist)).toBe(true);
++    expect(isAllowed({ url: 'https://url.test/Exact/extra', groupId: -1 }, allowlist)).toBe(false);
++  });
++
++  test('policy evaluation allows internal pages before every blocking mode', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++    const state = {
++      strictMode: true,
++      allowedDomains: [],
++      blockedDomains: ['settings'],
++      blockedCategories: ['social'],
++    };
++
++    expect(evaluateFocusPolicy('chrome://settings/', state)).toEqual({
++      blocked: false,
++      reason: null,
++      category: null,
++    });
++  });
++
++  test('allowlist entries win over explicit and curated blocklists', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++    const state = {
++      strictMode: true,
++      allowedDomains: ['reddit.com'],
++      blockedDomains: ['reddit.com'],
++      blockedCategories: ['social'],
++    };
++
++    expect(evaluateFocusPolicy('https://reddit.com/r/focus', state)).toEqual({
++      blocked: false,
++      reason: null,
++      category: null,
++    });
++  });
++
++  test('explicit blocked domains preserve their reason and category', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++
++    expect(evaluateFocusPolicy('https://child.blocked.test/', {
++      allowedDomains: [],
++      blockedDomains: ['blocked.test'],
++      strictMode: false,
++      blockedCategories: [],
++    })).toEqual({ blocked: true, reason: 'blocklist', category: 'Blocked Domain' });
++  });
++
++  test('strict mode with an empty allowlist blocks every non-internal URL', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++    const state = {
++      allowedDomains: [],
++      blockedDomains: [],
++      strictMode: true,
++      blockedCategories: [],
++    };
++
++    for (const url of ['https://ordinary.test/', 'about:blank', 'mailto:person@example.test']) {
++      expect(evaluateFocusPolicy(url, state)).toEqual({
++        blocked: true,
++        reason: 'strict',
++        category: 'Not in allowed list',
++      });
++    }
++  });
++
++  test('curated category matches preserve the existing category result', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++
++    expect(evaluateFocusPolicy('https://old.reddit.com/r/focus', {
++      allowedDomains: [],
++      blockedDomains: [],
++      strictMode: false,
++      blockedCategories: ['social'],
++    })).toEqual({ blocked: true, reason: 'category', category: 'Social Media' });
++  });
++
++  test('non-strict unmatched URLs remain unblocked', async () => {
++    const { evaluateFocusPolicy } = await loadPolicy();
++
++    expect(evaluateFocusPolicy('about:blank', {
++      allowedDomains: [],
++      blockedDomains: [],
++      strictMode: false,
++      blockedCategories: [],
++    })).toEqual({ blocked: false, reason: null, category: null });
++  });
++
++  test('domain entry construction canonicalizes valid hosts and rejects invalid input', async () => {
++    const { createAllowlistEntry } = await loadPolicy();
++
++    expect(createAllowlistEntry('domain', '  Example.COM.  ', [])).toEqual({
++      type: 'domain',
++      value: 'example.com',
++    });
++    expect(createAllowlistEntry('domain', 'localhost', [])).toEqual({
++      type: 'domain',
++      value: 'localhost',
++    });
++    expect(createAllowlistEntry('domain', '', [])).toBeNull();
++    expect(createAllowlistEntry('domain', 'not a domain', [])).toBeNull();
++    expect(createAllowlistEntry('domain', 'example.com/path', [])).toBeNull();
++    expect(createAllowlistEntry('domain', 'example.com:8443', [])).toBeNull();
++  });
++
++  test('URL entry construction uses canonical href without lowercasing path data', async () => {
++    const { createAllowlistEntry, urlMatches } = await loadPolicy();
++
++    expect(createAllowlistEntry('url', 'HTTPS://Example.COM/Path?Q=One#Part', [])).toEqual({
++      type: 'url',
++      value: 'https://example.com/Path?Q=One#Part',
++    });
++    expect(createAllowlistEntry('url', 'relative/path', [])).toBeNull();
++    expect(createAllowlistEntry('url', '', [])).toBeNull();
++    expect(urlMatches('not a URL', [{ type: 'url', value: 'https://example.com/' }])).toBe(false);
++  });
++
++  test('group entry construction stores an exact live title and rejects missing or untitled groups', async () => {
++    const { createAllowlistEntry } = await loadPolicy();
++    const groups = [
++      { id: 0, title: 'Deep Work' },
++      { id: 4, title: '' },
++    ];
++
++    expect(createAllowlistEntry('group', '0', groups)).toEqual({
++      type: 'group',
++      value: 'Deep Work',
++    });
++    expect(createAllowlistEntry('group', 4, groups)).toBeNull();
++    expect(createAllowlistEntry('group', 99, groups)).toBeNull();
++    expect(createAllowlistEntry('unknown', 'value', groups)).toBeNull();
++  });
++});
+diff --git a/tests/core/focus-start.test.js b/tests/core/focus-start.test.js
+new file mode 100644
+index 0000000..3d338af
+--- /dev/null
++++ b/tests/core/focus-start.test.js
+@@ -0,0 +1,306 @@
++import { describe, expect, test } from 'bun:test';
++
++import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
++
++let importNonce = 0;
++
++async function loadFocus(overrides = {}) {
++  const harness = installChromeMock(overrides);
++  const focus = await import(`../../core/focus.js?focus-start=${++importNonce}`);
++  return { focus, harness };
++}
++
++function makeStartOptions(overrides = {}) {
++  return {
++    profileId: 'coding',
++    duration: 25,
++    tabAction: 'none',
++    allowedDomains: [],
++    blockedDomains: [],
++    strictMode: false,
++    blockedCategories: [],
++    aiBlocking: false,
++    ...overrides,
++  };
++}
++
++describe('Focus startup policy and tab actions', () => {
++  test('startup classifies legacy domain, exact URL, and every rebound same-title group through one allowlist', async () => {
++    const preferences = {
++      coding: {
++        allowlist: [
++          'work.test',
++          { type: 'url', value: 'https://exact.test/Path?Q=One#Part' },
++          { type: 'group', value: 'Deep Work' },
++        ],
++      },
++    };
++    const allowlist = [
++      'work.test',
++      { type: 'url', value: 'https://exact.test/Path?Q=One#Part' },
++      { type: 'group', value: 'Deep Work', groupId: 99, groupIds: [98] },
++    ];
++    const originalAllowlist = structuredClone(allowlist);
++    const { focus, harness } = await loadFocus({
++      local: { focusProfilePrefs: preferences },
++      windows: [{ id: 1, focused: true }],
++      groups: [
++        { id: 0, windowId: 1, title: 'Deep Work' },
++        { id: 7, windowId: 1, title: 'Deep Work' },
++        { id: 8, windowId: 1, title: 'deep work' },
++      ],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://work.test/' },
++        { id: 2, windowId: 1, url: 'https://sub.work.test/' },
++        { id: 3, windowId: 1, url: 'https://exact.test/Path?Q=One#Part' },
++        { id: 4, windowId: 1, url: 'https://exact.test/Path?Q=One#Part/extra' },
++        { id: 5, windowId: 1, url: 'https://other.test/', groupId: 0 },
++        { id: 6, windowId: 1, url: 'https://other.test/', groupId: 7 },
++        { id: 7, windowId: 1, url: 'https://other.test/', groupId: 8 },
++        { id: 8, windowId: 1, url: 'https://notwork.test/' },
++      ],
++    });
++
++    const state = await focus.startFocus(makeStartOptions({ allowedDomains: allowlist }));
++
++    expect(state.focusTabCount).toBe(5);
++    expect(state.allowedDomains).toEqual([
++      'work.test',
++      { type: 'url', value: 'https://exact.test/Path?Q=One#Part' },
++      { type: 'group', value: 'Deep Work', groupIds: [0, 7] },
++    ]);
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++    expect(allowlist).toEqual(originalAllowlist);
++    expect(readStorageArea('local').focusProfilePrefs).toEqual(preferences);
++  });
++
++  test('kebab discards only background non-focus tabs after live groups resolve', async () => {
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://focus.test/', active: true },
++        { id: 2, windowId: 1, url: 'https://blocked.test/background' },
++        { id: 3, windowId: 1, url: 'https://blocked.test/active', active: true },
++        { id: 4, windowId: 1, url: 'chrome://settings/' },
++        { id: 5, windowId: 1, url: 'chrome-extension://extension-id/panel.html' },
++      ],
++    });
++    const order = [];
++    const queryGroups = chrome.tabGroups.query.bind(chrome.tabGroups);
++    const queryTabs = chrome.tabs.query.bind(chrome.tabs);
++    const discardTab = chrome.tabs.discard.bind(chrome.tabs);
++    chrome.tabGroups.query = async (...args) => {
++      order.push('groups');
++      return queryGroups(...args);
++    };
++    chrome.tabs.query = async (...args) => {
++      order.push('tabs');
++      return queryTabs(...args);
++    };
++    chrome.tabs.discard = async (...args) => {
++      order.push(`discard:${args[0]}`);
++      return discardTab(...args);
++    };
++
++    const state = await focus.startFocus(makeStartOptions({
++      tabAction: 'kebab',
++      allowedDomains: ['focus.test'],
++    }));
++
++    expect(order).toEqual(['groups', 'tabs', 'discard:2']);
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++    expect(harness.calls.tabs.discard).toEqual([[2]]);
++    expect(state.focusTabCount).toBe(1);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 3)?.discarded).toBe(false);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 4)?.discarded).toBe(false);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 5)?.discarded).toBe(false);
++  });
++
++  test('stash persists and closes only background non-focus tabs through the injected persistence adapter', async () => {
++    const saved = [];
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://focus.test/', active: true },
++        { id: 2, windowId: 1, url: 'https://blocked.test/one', title: 'One', pinned: true },
++        { id: 3, windowId: 1, url: 'https://blocked.test/two', title: 'Two' },
++        { id: 4, windowId: 1, url: 'https://blocked.test/active', active: true },
++        { id: 5, windowId: 1, url: 'chrome://settings/' },
++      ],
++    });
++
++    const state = await focus.startFocus(
++      makeStartOptions({ tabAction: 'stash', allowedDomains: ['focus.test'] }),
++      { saveStash: async (stash) => saved.push(structuredClone(stash)) },
++    );
++
++    expect(saved).toHaveLength(1);
++    expect(saved[0]).toEqual(expect.objectContaining({
++      id: state.stashId,
++      source: 'domain',
++      sourceDetail: 'focus-mode',
++      tabCount: 2,
++      windows: [{
++        tabCount: 2,
++        tabs: [
++          expect.objectContaining({ url: 'https://blocked.test/one', pinned: true }),
++          expect.objectContaining({ url: 'https://blocked.test/two', pinned: false }),
++        ],
++      }],
++    }));
++    expect(harness.calls.tabs.remove).toEqual([[[2, 3]]]);
++    expect(harness.snapshot().tabs.map(({ id }) => id)).toEqual([1, 4, 5]);
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++  });
++
++  test('group action groups only eligible focus tabs and excludes internal pages', async () => {
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      groups: [{ id: 12, windowId: 1, title: 'Allowed Group' }],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://focus.test/', active: true },
++        { id: 2, windowId: 1, url: 'https://other.test/', groupId: 12 },
++        { id: 3, windowId: 1, url: 'https://blocked.test/' },
++        { id: 4, windowId: 1, url: 'chrome://settings/' },
++        { id: 5, windowId: 1, url: 'chrome-extension://extension-id/panel.html' },
++      ],
++    });
++
++    const state = await focus.startFocus(makeStartOptions({
++      tabAction: 'group',
++      allowedDomains: [
++        { type: 'domain', value: 'focus.test' },
++        { type: 'group', value: 'Allowed Group' },
++      ],
++    }));
++
++    expect(harness.calls.tabs.group).toHaveLength(1);
++    expect(harness.calls.tabs.group[0][0].tabIds).toEqual([1, 2]);
++    expect(state.focusTabCount).toBe(2);
++    expect(state.focusGroupId).toBeNumber();
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++  });
++
++  test('non-strict empty allowlist treats every eligible non-internal tab as focus', async () => {
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://one.test/' },
++        { id: 2, windowId: 1, url: 'about:blank' },
++        { id: 3, windowId: 1, url: 'chrome://settings/' },
++        { id: 4, windowId: 1, url: 'chrome-extension://extension-id/panel.html' },
++      ],
++    });
++
++    const state = await focus.startFocus(makeStartOptions({
++      tabAction: 'kebab',
++      strictMode: false,
++      allowedDomains: [],
++    }));
++
++    expect(state.focusTabCount).toBe(2);
++    expect(harness.calls.tabs.discard).toEqual([]);
++  });
++
++  test('strict empty allowlist makes every non-internal tab non-focus while preserving the active tab', async () => {
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      tabs: [
++        { id: 1, windowId: 1, url: 'https://one.test/' },
++        { id: 2, windowId: 1, url: 'about:blank' },
++        { id: 3, windowId: 1, url: 'https://active.test/', active: true },
++        { id: 4, windowId: 1, url: 'chrome://settings/' },
++        { id: 5, windowId: 1, url: 'chrome-extension://extension-id/panel.html' },
++      ],
++    });
++
++    const state = await focus.startFocus(makeStartOptions({
++      tabAction: 'kebab',
++      strictMode: true,
++      allowedDomains: [],
++    }));
++
++    expect(state.focusTabCount).toBe(0);
++    expect(harness.calls.tabs.discard).toEqual([[1], [2]]);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 3)?.discarded).toBe(false);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 4)?.discarded).toBe(false);
++    expect(harness.snapshot().tabs.find(({ id }) => id === 5)?.discarded).toBe(false);
++  });
++
++  test('a live-group query failure aborts before tab classification, mutation, or focus-state persistence', async () => {
++    const { focus, harness } = await loadFocus({
++      windows: [{ id: 1, focused: true }],
++      tabs: [{ id: 1, windowId: 1, url: 'https://blocked.test/' }],
++      failures: { 'tabGroups.query': new Error('synthetic group query failure') },
++    });
++
++    await expect(focus.startFocus(makeStartOptions({
++      tabAction: 'kebab',
++      strictMode: true,
++    }))).rejects.toThrow('synthetic group query failure');
++
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++    expect(harness.calls.tabs.query).toEqual([]);
++    expect(harness.calls.tabs.discard).toEqual([]);
++    expect(harness.calls.tabs.remove).toEqual([]);
++    expect(harness.calls.tabs.group).toEqual([]);
++    expect(harness.calls.alarms.create).toEqual([]);
++    expect(harness.calls.action.setBadgeText).toEqual([]);
++    expect(readStorageArea('local').focusState).toBeUndefined();
++  });
++});
++
++describe('Focus runtime group rebinding', () => {
++  test('resume replaces paused-state group bindings from one fresh query before persisting active state', async () => {
++    const paused = {
++      status: 'paused',
++      startedAt: Date.now() - 10_000,
++      duration: 25,
++      pausedAt: Date.now() - 2_000,
++      pausedElapsed: 0,
++      allowedDomains: [{ type: 'group', value: 'Deep Work', groupId: 90, groupIds: [91] }],
++      distractionsBlocked: 0,
++    };
++    const prefs = {
++      coding: { allowlist: [{ type: 'group', value: 'Deep Work' }] },
++    };
++    const { focus, harness } = await loadFocus({
++      local: { focusState: paused, focusProfilePrefs: prefs },
++      groups: [
++        { id: 0, title: 'Deep Work' },
++        { id: 6, title: 'Deep Work' },
++      ],
++    });
++
++    const state = await focus.resumeFocus();
++
++    expect(state.status).toBe('active');
++    expect(state.allowedDomains).toEqual([
++      { type: 'group', value: 'Deep Work', groupIds: [0, 6] },
++    ]);
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++    expect(readStorageArea('local').focusState.allowedDomains).toEqual(state.allowedDomains);
++    expect(readStorageArea('local').focusProfilePrefs).toEqual(prefs);
++  });
++
++  test('resume leaves paused state unchanged when fresh group rebinding fails', async () => {
++    const paused = {
++      status: 'paused',
++      startedAt: Date.now() - 10_000,
++      duration: 25,
++      pausedAt: Date.now() - 2_000,
++      pausedElapsed: 0,
++      allowedDomains: [{ type: 'group', value: 'Deep Work', groupIds: [91] }],
++      distractionsBlocked: 0,
++    };
++    const { focus, harness } = await loadFocus({
++      local: { focusState: paused },
++      failures: { 'tabGroups.query': new Error('resume group query failed') },
++    });
++
++    await expect(focus.resumeFocus()).rejects.toThrow('resume group query failed');
++
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++    expect(readStorageArea('local').focusState).toEqual(paused);
++  });
++});
+diff --git a/tests/integration/focus-worker.test.js b/tests/integration/focus-worker.test.js
+new file mode 100644
+index 0000000..8f4a867
+--- /dev/null
++++ b/tests/integration/focus-worker.test.js
+@@ -0,0 +1,203 @@
++import { describe, expect, test } from 'bun:test';
++
++import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
++
++let importNonce = 0;
++
++async function importWorker() {
++  return import(`../../service-worker.js?focus-worker=${++importNonce}`);
++}
++
++async function waitFor(assertion, message) {
++  for (let attempt = 0; attempt < 100; attempt++) {
++    if (assertion()) return;
++    await Bun.sleep(1);
++  }
++  throw new Error(message);
++}
++
++function runtimeState(overrides = {}) {
++  return {
++    status: 'active',
++    startedAt: Date.now(),
++    duration: 25,
++    pausedAt: null,
++    pausedElapsed: 0,
++    profileId: 'coding',
++    profileName: 'Coding',
++    profileColor: 'cyan',
++    tabAction: 'none',
++    allowedDomains: [],
++    blockedDomains: [],
++    strictMode: false,
++    blockedCategories: [],
++    aiBlocking: false,
++    stashId: null,
++    focusGroupId: null,
++    distractionsBlocked: 0,
++    focusTabCount: 0,
++    ...overrides,
++  };
++}
++
++describe('Focus service-worker integration', () => {
++  test('worker initialization rebinds a paused run and leaves title-only preferences unchanged', async () => {
++    const preferences = {
++      coding: { allowlist: [{ type: 'group', value: 'Deep Work' }] },
++    };
++    const harness = installChromeMock({
++      local: {
++        focusState: runtimeState({
++          status: 'paused',
++          pausedAt: Date.now(),
++          allowedDomains: [{
++            type: 'group',
++            value: 'Deep Work',
++            groupId: 90,
++            groupIds: [91],
++          }],
++        }),
++        focusProfilePrefs: preferences,
++      },
++      groups: [
++        { id: 0, title: 'Deep Work' },
++        { id: 6, title: 'Deep Work' },
++      ],
++    });
++
++    await importWorker();
++    await waitFor(
++      () => readStorageArea('local').focusState?.allowedDomains?.[0]?.groupIds?.length === 2,
++      'worker initialization did not persist rebound group IDs',
++    );
++
++    expect(readStorageArea('local').focusState.allowedDomains).toEqual([
++      { type: 'group', value: 'Deep Work', groupIds: [0, 6] },
++    ]);
++    expect(readStorageArea('local').focusProfilePrefs).toEqual(preferences);
++    expect(harness.calls.tabGroups.query).toEqual([[{}]]);
++  });
++
++  test('worker initialization rejects stale runtime group IDs when the live query fails', async () => {
++    const preferences = {
++      coding: { allowlist: [{ type: 'group', value: 'Deep Work' }] },
++    };
++    const harness = installChromeMock({
++      local: {
++        focusState: runtimeState({
++          strictMode: true,
++          allowedDomains: [{
++            type: 'group',
++            value: 'Deep Work',
++            groupId: 90,
++            groupIds: [91],
++          }],
++        }),
++        focusProfilePrefs: preferences,
++      },
++      windows: [{ id: 1, focused: true }],
++      tabs: [{ id: 1, windowId: 1, url: 'https://blocked.test/', groupId: 91 }],
++      failures: { 'tabGroups.query': new Error('synthetic startup group query failure') },
++    });
++
++    const warnings = [];
++    const originalWarn = console.warn;
++    console.warn = (...args) => warnings.push(args);
++    try {
++      await importWorker();
++      await waitFor(
++        () => readStorageArea('local').focusState?.allowedDomains?.[0]?.groupIds?.length === 0,
++        'failed group lookup did not remove stale runtime authority',
++      );
++      await Bun.sleep(1);
++    } finally {
++      console.warn = originalWarn;
++    }
++
++    expect(readStorageArea('local').focusState.allowedDomains).toEqual([
++      { type: 'group', value: 'Deep Work', groupIds: [] },
++    ]);
++    expect(readStorageArea('local').focusProfilePrefs).toEqual(preferences);
++    expect(warnings).toHaveLength(1);
++    expect(warnings[0][0]).toContain('Focus group rebinding failed');
++
++    await chrome.tabs.onUpdated.dispatch(1, { url: 'https://blocked.test/next' }, {
++      ...harness.snapshot().tabs[0],
++      url: 'https://blocked.test/next',
++    });
++    await waitFor(
++      () => harness.calls.tabs.goBack.length === 1,
++      'navigation trusted a stale group ID after startup query failure',
++    );
++    expect(harness.calls.tabs.goBack).toEqual([[1]]);
++  });
++
++  test('navigation applies exact URL and rebound group policy without prefix matching', async () => {
++    const exactUrl = 'https://docs.test/Exact?Q=One#Part';
++    const harness = installChromeMock({
++      local: {
++        focusState: runtimeState({
++          strictMode: true,
++          aiBlocking: true,
++          allowedDomains: [
++            { type: 'url', value: exactUrl },
++            { type: 'group', value: 'Deep Work', groupId: 91, groupIds: [92] },
++          ],
++        }),
++      },
++      windows: [{ id: 1, focused: true }],
++      groups: [{ id: 0, windowId: 1, title: 'Deep Work' }],
++      tabs: [
++        { id: 1, windowId: 1, url: exactUrl, active: true },
++        { id: 2, windowId: 1, url: 'https://other.test/', groupId: 0 },
++        { id: 3, windowId: 1, url: 'chrome://settings/' },
++      ],
++    });
++
++    await importWorker();
++    await waitFor(
++      () => readStorageArea('local').focusState?.allowedDomains?.[1]?.groupIds?.[0] === 0,
++      'active Focus state did not rebind before navigation assertions',
++    );
++
++    const aiSettingsReadCount = () => harness.calls.storage.local.get
++      .filter(([key]) => key === 'aiSettings')
++      .length;
++    const aiReadsBeforeAllowedNavigation = aiSettingsReadCount();
++
++    await chrome.tabs.onUpdated.dispatch(1, { url: exactUrl }, {
++      ...harness.snapshot().tabs.find(({ id }) => id === 1),
++      url: exactUrl,
++    });
++    await Bun.sleep(1);
++    expect(harness.calls.tabs.goBack).toEqual([]);
++    expect(aiSettingsReadCount()).toBe(aiReadsBeforeAllowedNavigation);
++
++    const prefixExtension = `${exactUrl}/extra`;
++    await chrome.tabs.onUpdated.dispatch(1, { url: prefixExtension }, {
++      ...harness.snapshot().tabs.find(({ id }) => id === 1),
++      url: prefixExtension,
++    });
++    await waitFor(
++      () => harness.calls.tabs.goBack.length === 1,
++      'strict navigation did not reject the URL prefix extension',
++    );
++    expect(harness.calls.tabs.goBack).toEqual([[1]]);
++
++    await chrome.tabs.onUpdated.dispatch(2, { url: 'https://blocked.test/' }, {
++      ...harness.snapshot().tabs.find(({ id }) => id === 2),
++      url: 'https://blocked.test/',
++    });
++    await Bun.sleep(1);
++    expect(harness.calls.tabs.goBack).toEqual([[1]]);
++    expect(aiSettingsReadCount()).toBe(aiReadsBeforeAllowedNavigation);
++
++    await chrome.tabs.onUpdated.dispatch(3, { url: 'chrome://settings/' }, {
++      ...harness.snapshot().tabs.find(({ id }) => id === 3),
++      url: 'chrome://settings/',
++    });
++    await Bun.sleep(1);
++    expect(harness.calls.tabs.goBack).toEqual([[1]]);
++    expect(aiSettingsReadCount()).toBe(aiReadsBeforeAllowedNavigation);
++  });
++});

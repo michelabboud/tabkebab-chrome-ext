@@ -1,1 +1,6 @@
 * text=auto eol=lf
+
+# Preserve the byte-identical historical SDD snapshot, including patch syntax
+# whose added blank lines intentionally contain the diff marker plus a space.
+docs/reports/reliability-hardening-sdd/** -whitespace
+docs/reports/reliability-hardening-sdd/README.md whitespace

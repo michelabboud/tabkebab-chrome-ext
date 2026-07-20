@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabKebab",
-  "version": "1.2.17",
+  "version": "1.2.18",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwCRQJ1TYzrPLzXBtfnUk7FV5kSWxF5o4Ojax8L8P7jOgL+6s5klv5INp5Bno4smtf57bzwt8AGDXSp3fAiCIuDdFXgiFdCLaXpxOawuzkSCHg/I4rxL92X0NqfrSV2eIb0iuUXbXvTSvSM2VXv9ZKQNflJaMKiYVoolEdGEg7mL3xZ8Btw05EuhzT/lp398NKHIz7ZFo3tw6BhuCUlELNWDFLDrfj9YSZW0/qKwCgqryLGwCwYAAoa5hmNQRcW4UYfcXHNFzTEJ4w7oMMLJ7Y28XAvM5et9k8H/vkH4eNbUHa6C0W+TjmmfUmZcUJaGEcvYy4mtstP4/j9BdJU50uQIDAQAB",
   "description": "Stack and Organize Tabs — group by domain or AI, save sessions, close duplicates, and organize with drag-and-drop.",
 

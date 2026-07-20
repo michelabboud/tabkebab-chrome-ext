@@ -2,14 +2,14 @@
 
 ## Current state
 
-- Repository version: `1.2.17`
+- Repository version: `1.2.18`
 - Active initiative: reliability and data-safety hardening
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
 - Implementation status: Tasks 1–14 implemented and independently code-reviewed; Chrome Built-in AI now executes only in the side-panel document through a bounded named-port protocol while preserving Task 13 cleanup-before-settlement
 - Phase 1 release status: `v1.2.8` was explicitly authorized by the repository owner on 2026-07-19 with the real Chrome/Drive fixture waived as a release prerequisite; the fixture remains unpassed and is not represented by mock evidence
 - Phase 2 release status: `v1.2.13` is committed, tagged, pushed, exact-commit CI-green, and published as a GitHub release
-- Phase 3 status: Tasks 12–14 are released as exact-commit CI-green `v1.2.14`–`v1.2.16`; Task 14 commit `13cc0d5442789abb5269558a28ee3b727a251b2e`, tag `v1.2.16`, remote `main`, and CI run `29692667393` match. Task 15 packaging, owner-approved production identity pinning, exact-artifact guidance, and final documentation are in progress at `1.2.17`. Final publication remains blocked until all eleven package-matrix rows pass, including live Drive OAuth and an available Prompt model.
+- Phase 3 status: Tasks 12–14 are released as exact-commit CI-green `v1.2.14`–`v1.2.16`. Task 15 is committed, tagged, pushed, and exact-commit CI-green at `v1.2.17`; GitHub release publication remains blocked until all eleven package-matrix rows pass, including live Drive OAuth and an available Prompt model. The complete gitdir-local SDD evidence set is now tracked on `main` at `1.2.18` so auxiliary-worktree cleanup cannot discard it.
 
 ## Completed implementation slices
 
@@ -169,6 +169,23 @@
   final-matrix success claim: exact CI, artifact inspection, live Drive,
   available-model Chrome AI, and every other row remain controller gates after
   the Task 15 commit is pushed.
+
+### Evidence archive checkpoint (`1.2.18`)
+
+- Tracks all 47 previously gitdir-local reliability-hardening SDD files under
+  `docs/reports/reliability-hardening-sdd/`, including Task 1–15 briefs and
+  reports, smoke harnesses, review diffs, progress state, and historical release
+  notes.
+- Preserves byte-identical source content with documented provenance, byte
+  count, and aggregate SHA-256. The source worktree remains intact until its
+  cleanup is separately approved.
+- Keeps historical task artifacts explicitly subordinate to the consolidated
+  reliability smoke report and exact-package matrix; archiving them does not
+  convert any pending live-browser row into release evidence.
+- Full and coverage verification passes `854 / 0 / 4813`; syntax passes
+  `2 / 0 / 125`. Canonical Markdown links, workflow YAML, matrix static checks,
+  version parity, whitespace, zero-dependency metadata, and secret scanning are
+  clean.
 
 ## Confirmed remediation scope
 
