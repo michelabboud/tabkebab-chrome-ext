@@ -1,16 +1,29 @@
 # TabKebab post-codex-hardening review — Fable, 2026-07-20
 
 Verification-grade review of the repository state at `a670f77` (v1.2.18), focused on
-(1) whether the recent codex hardening waves are actually sound, and (2) ranked
-improvement suggestions. Method: full read of the security-critical modules
-(`core/ai/*`, `core/drive-*`, `core/export-*`, `core/sessions.js`, `core/stash-db.js`,
-`core/tab-restore.js`, `core/state-mutation-lock.js`, broker pair, side-panel rendering
-surfaces, `service-worker.js` handler/coordinator sections, `manifest.json`), claim
-tracing against `ARCHITECTURE.md`/`CHANGELOG.md`, and one full local test run.
+(1) whether the recent codex hardening waves are actually sound, (2) ranked
+improvement suggestions, and — per the owner's addendum — (3) **update safety** for
+users on older versions and (4) **Chrome Web Store compliance**. Calibration, per the
+owner: the extension is published on the Chrome Web Store but has **almost no users
+yet**, so migration gaps are graded on intrinsic severity (not Critical-by-default),
+awkward stored-data shapes are flagged as *fix-now-while-nobody's-installed*
+opportunities, and improvements are ranked toward what makes a **new** user install,
+succeed in the first five minutes, and stay.
+
+Method: full read of the security-critical modules (`core/ai/*`, `core/drive-*`,
+`core/export-*`, `core/sessions.js`, `core/stash-db.js`, `core/tab-restore.js`,
+`core/state-mutation-lock.js`, broker pair, side-panel rendering surfaces,
+`service-worker.js` handler/coordinator sections, `manifest.json`), claim tracing
+against `ARCHITECTURE.md`/`CHANGELOG.md`/`PRIVACY.md`, one full local test run, and
+one targeted reproduction script for the new F10 finding.
 
 **Overall verdict: strong.** The codex hardening is real, not theater — six of seven
-headline fixes verify as SOUND, one as SOUND-WITH-GAPS. No Critical findings. The one
-High finding is a slow-fuse correctness time bomb (tombstone cap), not an exploit.
+headline fixes verify as SOUND, one as SOUND-WITH-GAPS. No Critical findings. Update
+safety: **no missing migration found** — every shipped storage-shape change has a
+verified read path for old data. Store compliance: **clean** on remote-code policy
+and permission minimality; privacy policy matches actual data flows on every major
+claim, with two one-sentence gaps. Two High findings, both long-fuse correctness
+bombs in the same core loop (save/delete/sync), one of them attacker-triggerable.
 
 Test evidence (run locally during this review, Bun 1.3.11):
 
@@ -18,7 +31,8 @@ Test evidence (run locally during this review, Bun 1.3.11):
 bun test → 854 pass / 0 fail / 4813 expect() calls, 40 files, 10.25s
 ```
 
-This matches the v1.2.18 changelog claim exactly.
+This matches the v1.2.18 changelog claim exactly. F10 additionally reproduced with a
+standalone script against `core/drive-sync.js` (output shown in F10 below).
 
 ---
 
@@ -37,10 +51,20 @@ This matches the v1.2.18 changelog claim exactly.
 | Side-panel Chrome AI broker (`13cc0d5`) | **SOUND** |
 | Exact tab URL identity (`533a86e`) | **SOUND** |
 
+### New-scope verdicts
+
+| Dimension | Verdict |
+|---|---|
+| Update safety (old-version data → v1.2.18 code) | **PASS** — all shape changes have verified migrations/defaults; opportunity flags below |
+| MV3 remote-code policy | **PASS** — zero eval/`new Function`/`importScripts`/script injection; no CSP relaxation |
+| Privacy policy vs actual data flows | **PASS with two one-sentence gaps** (favicon traffic, see Store compliance) |
+| Permission minimality | **PASS** — all 7 permissions + 3 host permissions verifiably used |
+
 ### Findings
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
+| F10 | Capture paths store unbounded page-controlled strings (title/favicon); one >16 KiB value poisons storage — every later delete, auto-save cleanup, Drive sync, and export throws, with no in-product recovery | High | VERIFIED (reproduced) |
 | F1 | Deletion tombstones accumulate forever against a hard 10,000 cap; at the cap, all session/group deletion permanently fails | High | VERIFIED |
 | F2 | Portable import is compensating-rollback, not atomic: SW death between the two store writes commits a silent partial import | Medium | VERIFIED (code path) |
 | F3 | Device-mode key encryption is obfuscation-level (install ID stored beside ciphertext); PBKDF2 100k iterations below current OWASP guidance | Medium | VERIFIED |
@@ -51,7 +75,7 @@ This matches the v1.2.18 changelog claim exactly.
 | F8 | `importStashes()` awaits between IndexedDB requests inside one transaction (fragile pattern) | Low | VERIFIED |
 | F9 | `focus-panel` interpolates quote-unsafe-escaped values into attribute context (not exploitable today; defense-in-depth) | Info | VERIFIED |
 
-**Counts: 0 Critical / 1 High / 2 Medium / 5 Low / 1 Info.**
+**Counts: 0 Critical / 2 High / 2 Medium / 5 Low / 1 Info.**
 
 Explicitly checked and clean:
 
@@ -77,11 +101,84 @@ Explicitly checked and clean:
   `externally_connectable` in `manifest.json`, so web pages and other extensions
   cannot reach `onMessage`/`onConnect`. The broker port additionally requires the
   exact name `tabkebab:chrome-ai` (`service-worker.js:892-900`).
-- **Permission minimality: pass.** All seven permissions and all three AI
-  host permissions map to used features; no `<all_urls>`, no scripting.
 - **Exports/Drive payloads** contain sessions/stashes/bookmarks by design (documented
   in PRIVACY.md); credentials, tokens, install IDs, caches, and active Focus state are
   excluded (verified against `export-schema.js` allowlists).
+
+---
+
+## Update safety audit (owner addendum 1)
+
+Every storage-shape change shipped across the fix waves was traced to a read path
+that tolerates the old shape. Inventory:
+
+| Stored data | Old shape | New-code handling | Verdict |
+|---|---|---|---|
+| Sessions (`chrome.storage.local`) | v1 flat `tabs` array | `migrateV1toV2()` at every read (`sessions.js:88-117`); Drive canonicalization counts both `tabs` and `windows` shapes (`drive-sync.js:167-186`) | SAFE (read-time, non-destructive) |
+| Drive sync document | missing-version / v1, no tombstones | `migrateDriveSyncDocument()` → v2 with empty tombstone maps (`drive-sync.js:366-413`) | SAFE |
+| `driveSyncTombstones` key | absent on old installs | every reader defaults to `emptyDriveTombstones()` (`sessions.js:239,272`) | SAFE |
+| Settings | legacy missing/v1 envelope, missing keys | `validateSettingsPatch()` fills defaults per-key (`settings.js:120-132,161-164`) | SAFE |
+| Portable exports | v1 full/partial, legacy Drive `savedAt` settings, unversioned dated backups | parser normalizes all to v2 in memory (`export-schema.js`, verified against ARCHITECTURE claims) | SAFE |
+| Focus history | pre-`runId` records | separate legacy `id` namespace (documented + tested, `tests/core/focus-lifecycle.test.js`) | SAFE |
+| AI response cache | pre-v1.2.14 weakly-scoped entries | cleared on install/update (`service-worker.js:916-922`) | SAFE (deliberate discard of disposable data) |
+| Encrypted key blobs | — | blob shape `{ciphertext,salt,iv,usesPassphrase}` unchanged since the initial commit (`crypto.js:87-92`); no plaintext-key era exists in history; malformed blobs degrade to "re-enter key", not a crash (`ai-client.js:367-371`) | SAFE |
+| `chrome.storage.session` key cache | cleared by Chrome on update | by design: keys relock (passphrase) or re-derive (device); documented in PRIVACY.md | SAFE |
+| Stash IndexedDB | `DB_VERSION 1` | unchanged since initial commit; `onupgradeneeded` only creates (`stash-db.js:19-25`) | SAFE |
+
+**No missing migration found.** A v1.2.x → v1.2.18 update does not brick or silently
+discard stashes, sessions, settings, or keys.
+
+**Fix-now-while-nobody's-installed opportunities** (cheapest they will ever be):
+
+- **O1 — persist the session v1→v2 migration once.** Today v1 records live in
+  storage forever and every reader pays the migration; a one-time locked rewrite
+  would let the v1 branch be deleted eventually.
+- **O2 — version the encrypted key blob.** The blob has no `version`/`iterations`
+  field (`isEncryptedBlob` requires exactly 4 keys, `ai-client.js:336-349`), so
+  raising PBKDF2 iterations (F3) later will need shape gymnastics. Add
+  `version: 2, iterations: N` now with a legacy-default read path.
+- **O3 — unify ID generation.** Sessions use `Date.now().toString(36)+random`
+  (`sessions.js:80-82`) while everything modern uses `crypto.randomUUID()`.
+  Standardize before IDs are in anyone's Drive.
+- **O4 — give tombstones a pruning horizon field now** (pairs with F1), so the
+  pruning policy ships as part of the schema rather than as a later migration.
+
+---
+
+## Store compliance audit (owner addendum 2)
+
+**Remote code (MV3 policy): CLEAN.** No `eval`, `new Function`, `importScripts`,
+dynamic `<script>` creation, or remote script URLs anywhere in `core/`, `sidepanel/`,
+or `service-worker.js` (grep-verified). The manifest declares no `content_security_policy`
+override and no `web_accessible_resources`. The Windows packager's positive allowlist
+(`manifest.json`, `service-worker.js`, `core/`, `sidepanel/`, `icons/`) keeps the
+site-verification HTML and all repo docs out of the shipped zip.
+
+**Privacy policy vs actual data flows: MATCHES on every major claim.**
+
+- The policy's key promise — AI providers receive "tab titles, simplified URLs
+  (hostname + path)" — is true in code: `simplifyUrl()` strips protocol, query, and
+  fragment and caps the path at 50 chars (`prompts.js:7-14`); titles cap at 80 chars;
+  the Focus distraction check sends domain only (`prompts.js:142`). No page content,
+  cookies, or history is ever read (the extension has no host access to pages at all).
+- Gemini's header-auth claim, custom-endpoint HTTPS/loopback rules, Drive `drive.file`
+  scope, session-storage key semantics, and the encryption description all match the
+  implementation exactly. The only runtime endpoints in code are the three declared
+  AI hosts plus `www.googleapis.com` (Drive); the remaining URLs are help links.
+- **Two one-sentence gaps** (low takedown risk, cheap to close): (1) exported
+  bookmark HTML embeds `https://www.google.com/s2/favicons?...` image URLs, so
+  *opening the exported file* pings Google with visited domains
+  (`service-worker.js:472`) — not extension runtime traffic, but worth declaring;
+  (2) the side panel loads stored favicon URLs from arbitrary hosts when rendering
+  stash previews (F5) — runtime traffic the policy doesn't mention.
+
+**Permission minimality: PASS.** All seven permissions are load-bearing —
+`bookmarks` and `identity` were specifically checked (16 real call sites:
+`chrome.bookmarks.create` tree export, `chrome.identity.getAuthToken`/
+`removeCachedAuthToken` for Drive). Host permissions are exactly the three AI APIs.
+Note for the listing rather than the manifest: the `tabs` permission produces the
+"Read your browsing history" install warning — unavoidable for a tab manager, but
+the Store listing should preempt it explicitly (see improvement G4).
 
 ---
 
@@ -197,6 +294,44 @@ extensions cannot create those tabs anyway.
 
 ## Findings detail
 
+### F10 — HIGH: unbounded capture poisons the delete/sync/export pipeline (reproduced)
+
+Evidence: `saveSession()` stores `tab.title` and `tab.favIconUrl` **raw** — no
+truncation, no validation (`sessions.js:146-151`); stash capture does the same. But
+every deletion canonicalizes *all* stored sessions through the Drive validator
+before deleting *any* (`deleteSessions` → `canonicalizeLocalSessions`,
+`sessions.js:231`), and that validator hard-fails any string over
+`MAX_DRIVE_STRING_LENGTH = 16_384` (`drive-sync.js:62`). Drive sync
+(`readLocalDriveSyncDocument`) and portable export (same ceiling in
+`export-schema.js`) validate identically. The existing `sanitizeTab()` truncation
+runs only on the **restore** path (`tab-restore.js:31-52`), never at capture.
+
+Reproduced against the real module:
+
+```
+$ bun brick-test.mjs   # session with a 20,000-char title / favicon data-URI
+THROWS → Invalid Drive sync document: root.sessions[0].windows[0].tabs[0].title string exceeds the length limit
+favicon THROWS → Invalid Drive sync document: root.sessions[0].windows[0].tabs[0].favIconUrl string exceeds the length limit
+```
+
+Failure scenario: any webpage sets a >16 KiB `document.title` (trivially
+attacker-controlled, also occurs organically) or declares a large `data:` favicon
+(multi-size icons routinely exceed 16 KiB base64). Hourly/daily **auto-save**
+captures it with no user action. From that moment: every manual session delete
+errors in the UI, auto-save cleanup fails silently forever (so auto-sessions
+accumulate unboundedly), Drive sync fails, and full portable export fails — and the
+poisoned session **cannot be deleted through the product**, because deletion
+validates the whole collection before removing anything. Recovery requires DevTools
+storage surgery.
+
+Fix direction: apply capture-time sanitization symmetrical with the validator —
+truncate titles (the restore path already picked 500 chars), cap or drop oversized
+favicon values (scheme-allowlist them at the same time, which also closes F5), and
+make `canonicalizeLocalSessions` degrade per-entity (sanitize-or-skip with a warning)
+instead of failing the whole document, so one bad record can never hold the
+collection hostage. Effort: small; the validator constants and the truncation helper
+both already exist.
+
 ### F1 — HIGH: tombstone accumulation bricks deletion at the 10,000 cap
 
 Evidence: `recordDeletionTombstones` throws when a new deletion would exceed
@@ -213,17 +348,17 @@ cap is reached in about 14 months. From that point, **every** `deleteSessions` c
 for a not-yet-tombstoned ID throws: auto-save cleanup fails silently every hour
 (`console.warn` only) so auto-sessions accumulate unboundedly, and the user's manual
 "Delete" button errors with no recovery path in the product. At the default 24 h
-interval the fuse is ~27 years — so this is a real-user issue mainly for
-high-frequency configurations, but the failure mode is permanent and undiagnosable
-from the UI, hence High. The same fixed cap also means the sync document carries up
-to 10k dead IDs per kind forever.
+interval the fuse is ~27 years — so this mainly threatens high-frequency
+configurations, but the failure mode is permanent and undiagnosable from the UI,
+hence High. The same fixed cap also means the sync document carries up to 10k dead
+IDs per kind forever.
 
 Fix direction: prune tombstones older than a horizon that safely exceeds any
 realistic offline period of another profile (e.g. 180 days) during the locked sync
 coordinator and during local deletion when near capacity. Pruning a tombstone only
 risks resurrecting an entity from a device that has been offline longer than the
 horizon — an acceptable, documentable trade-off, and the standard one for
-tombstone-based CRDTs.
+tombstone-based CRDTs. See opportunity O4: add the horizon field to the schema now.
 
 ### F2 — MEDIUM: portable import crash window (detailed under fix #4 above)
 
@@ -243,8 +378,8 @@ with real key-compromise concerns choose passphrase mode. Separately,
 `PBKDF2_ITERATIONS = 100_000` (`crypto.js:9`) is below OWASP's current
 recommendation for PBKDF2-HMAC-SHA256 (600k); for the passphrase path this materially
 lowers brute-force cost. Raising it is a one-line change plus transparent re-encrypt
-on next successful unlock/save (blob already carries its own salt/IV; add an
-`iterations` field with a legacy default of 100k).
+on next successful unlock/save — cheapest if the blob gains a version/iterations
+field now (opportunity O2).
 
 ### F4 — LOW: no sender assertion on the runtime message/port surface
 
@@ -265,7 +400,9 @@ restrict `img-src`. Scenario: a stashed or imported tab carries
 `favIconUrl: "https://tracker.example/p.gif"` → opening the Stash view pings the
 remote host with the user's IP whenever the panel renders. `sanitizeTab()` already
 implements the right allowlist (`tab-restore.js:38-48`) but runs only on the restore
-path — apply it at stash-save and import-validation time too, or at render.
+path — apply it at stash-save and import-validation time too (same change as F10's
+capture-time sanitization), or at render. Also a PRIVACY.md declaration gap (see
+Store compliance).
 
 ### F6 — LOW: bookmark HTML export lacks href scheme filtering
 
@@ -303,34 +440,51 @@ usage. Add quote escaping to `_esc`/`escapeHtml` once, repo-wide.
 
 ---
 
-## Ranked improvements
+## Ranked improvements (growth-first calibration)
 
-1. **Tombstone pruning/compaction (fixes F1).** Effort: S–M (pure function in
-   `drive-sync.js` + call from the locked sync coordinator and the deletion path +
-   tests). Highest correctness value per line of any change available; removes the
-   only High finding.
-2. **Pending-import journal (fixes F2).** Effort: M. Closes the last real gap in the
-   import story and makes the "transactional" claim true; also covers the
-   analogous SW-death window for any future multi-store writes.
-3. **Credential hardening pass (fixes F3, plus F4).** Effort: S–M. 600k PBKDF2 with
-   versioned blobs + transparent re-encrypt; one sender-assertion guard on the
-   message/port surface; one PRIVACY.md paragraph on device-vs-passphrase threat
-   model. Cheap, and it is the trust-sensitive surface for a BYO-key Web Store
-   product.
-4. **i18n + a11y pass on the side panel.** Effort: M–L. No `_locales/` exists — every
-   string is hardcoded English — and ARIA usage is nearly absent outside
-   `panel.html` (19 attrs) and global search; toasts have no `aria-live`, overlays no
-   focus trap. For a Chrome Web Store audience this is the biggest reach/perception
-   lever after correctness, and `chrome.i18n` retrofits get more expensive the longer
-   they wait.
-5. **Input-hygiene sweep (fixes F5, F6, F7, F8).** Effort: S. Scheme-allowlist
-   favicons at save/import, scheme-filter bookmark-HTML hrefs, cap `Retry-After`,
-   route the two remaining list endpoints through the bounded reader, rewrite
-   `importStashes`. Mechanical, well-testable, and closes every remaining Low.
-6. **Sync scale telemetry (supports 1).** Effort: S. Surface counts
-   (sessions/tombstones/doc bytes vs caps) in the Drive sync UI so users approaching
-   any 10k/25 MiB ceiling see it before hard failure — today every cap is invisible
-   until it throws.
+Ranking principle per the owner: (1) what makes the core loop bulletproof and
+obviously trustworthy for the *next* user, (2) Store standing, (3) polish. Data-loss
+prevention still leads — a new user who loses a stash in week one never comes back.
+
+1. **G1 — Capture-time sanitization (fixes F10, closes F5 in the same change).**
+   Effort: S. The single highest-leverage fix in the repo: one pathological webpage
+   must never be able to poison save/delete/sync/export. Truncate titles, allowlist
+   and cap favicons at capture, and make collection canonicalization degrade
+   per-entity instead of failing whole. Includes a regression test with a >16 KiB
+   title.
+2. **G2 — First-run experience.** Effort: M. Today install auto-opens the panel
+   (`service-worker.js:925-931`) and then leaves the user alone; help hides behind
+   `?`. There is no first-run tour, and empty states are inert text. A one-time
+   3-step card (Group your tabs now → Stash a window → Sessions have your back) plus
+   empty-state CTAs is the biggest install→retained-user conversion lever available.
+3. **G3 — AI-less excellence.** Effort: S–M. Most new installs will have no API key.
+   Today a no-key "Smart Group" click surfaces a raw error toast
+   (`tab-list.js:540-542` → "Smart grouping failed: …") with no path to setup. Every
+   AI touchpoint should degrade to an inviting one-tap "Set up AI (1 min) — or use
+   Chrome's built-in, no key needed" state; auto-detecting an available Chrome
+   built-in model and offering it as the zero-config default is the differentiator
+   most worth polishing.
+4. **G4 — Store trust package.** Effort: S. Preempt the `tabs`-permission install
+   warning in the listing copy ("we never read page content — here's why a tab
+   manager needs this"), add the two missing PRIVACY.md sentences (favicon service in
+   exported HTML; stash-preview favicon fetches), and ship core-loop screenshots.
+   Cheap insurance for a small extension's Store standing.
+5. **G5 — Tombstone pruning (fixes F1) + opportunity O4.** Effort: S–M. Removes the
+   second High; do it now while changing tombstone schema affects nobody.
+6. **G6 — Schema opportunities O1–O3** (persisted session migration, versioned key
+   blobs, unified IDs). Effort: S each. Pure "cheapest now" plays — every week of
+   delay converts these from a code change into a migration.
+7. **G7 — Pending-import journal (fixes F2).** Effort: M. Real but rare crash
+   window; demoted under the no-install-base calibration.
+8. **G8 — Credential hardening (F3) + sender guard (F4).** Effort: S–M. 600k PBKDF2
+   via versioned blobs (after G6/O2), one sender assertion, one PRIVACY.md
+   threat-model paragraph.
+9. **G9 — i18n + a11y pass.** Effort: M–L. No `_locales/` exists — every string is
+   hardcoded English — and ARIA is nearly absent outside `panel.html` and global
+   search; toasts lack `aria-live`, overlays lack focus traps. Retrofit cost only
+   grows; still behind the first-five-minutes items for a near-zero install base.
+10. **G10 — Input-hygiene sweep (F6, F7, F8, F9).** Effort: S. Mechanical,
+    well-testable, closes every remaining Low.
 
 ## What I did not review
 
@@ -340,13 +494,20 @@ usage. Add quote escaping to `_esc`/`escapeHtml` once, repo-wide.
   lifecycle claims in ARCHITECTURE.md are extensively documented and test-covered
   (`tests/core/focus-*.test.js`, `tests/integration/focus-*.test.js`) but I did not
   independently re-derive that state machine.
-- Runtime behavior in real Chrome: this is a static review plus the Bun suite. OAuth
-  flows, Prompt API behavior, IndexedDB timing (F8), and the SW-death windows (F2)
-  were traced in code, not reproduced live.
+- Runtime behavior in real Chrome: this is a static review plus the Bun suite and
+  one targeted reproduction script (F10). OAuth flows, Prompt API behavior, IndexedDB
+  timing (F8), and the SW-death windows (F2) were traced in code, not reproduced
+  live.
+- The live Chrome Web Store listing itself (copy, screenshots, declared-data form) —
+  compliance was audited against the repo's PRIVACY.md/TERMS.md/store/ files and the
+  code, not the dashboard. The published Store version was not confirmed; update
+  safety was audited from the earliest tagged shapes (v1.2.5+) and the initial
+  commit.
 - The CI workflow, Windows packager internals, and the archived SDD evidence set
   (verified by v1.2.17/18 changelog gates, not re-executed).
 - Provider adapters were checked for signal threading, auth-header placement, and
   key-reflection scanning — not for API-contract correctness against current
   OpenAI/Anthropic/Gemini schemas.
 
-— Fable (pinned review subagent), 2026-07-20
+— Fable (pinned review subagent), 2026-07-20 (updated same day for the
+published-extension addendum and the near-zero-users recalibration)
