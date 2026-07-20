@@ -3,85 +3,38 @@
 - **Date:** 2026-07-21 · **Author:** Fable (orchestrator) · **Executor:** codex (headless lane)
 - **Spec source (READ FIRST):** `docs/reports/2026-07-20-fable-review-post-codex-hardening.md`
   — the Fable review that defined G1–G6 (F10 reproduction evidence is in there).
-- **Base:** branch `feat/growth-wave-g1-g4` off current `main` (1.2.18). Commit per logical
+- **Base:** branch `feat/growth-wave-g2-g4` off current `main` (v1.2.19, includes G1). Commit per logical
   change, conventional messages matching the repo's log style. **Do NOT push. Do NOT merge.**
   Fable reviews the branch before merge.
 
-## Scope — four tasks, in order
+## Scope — G1 follow-ups + three tasks, in order
 
-### G1 — Capture-time sanitization (fixes F10 HIGH + F5 LOW) — BUILD TO THIS SPEC
+### G1 — DONE, do not redo (build on it)
 
-This spec was produced by a Fable implementation pass that was reverted for lane-ownership
-reasons — the analysis is verified (its variant went 867/0 on the full suite). Follow it
-exactly; deviations need a stated reason in your report.
+G1 (capture-time sanitization, F10+F5) shipped on `main` at v1.2.19 (`864698d`), built by a
+Fable lane and independently reviewed CLEAN-WITH-NOTES (867/0 across three runs). Your branch
+starts on top of it. **Do not touch** `core/tab-restore.js` sanitizers, the `sessions.js`
+heal, the service-worker stash capture sites, or `tests/core/capture-sanitization.test.js`
+except where a G1 follow-up below explicitly says so.
 
-**Root cause:** capture stores page-controlled strings raw; every delete/sync/export
-canonicalizes ALL stored sessions against `MAX_DRIVE_STRING_LENGTH` (16,384, drive-sync.js)
-BEFORE mutating anything, so one oversized title/favicon/URL bricks delete, cleanup, sync,
-and export with no in-product recovery. Reproduced: `canonicalizeLocalDriveSyncDocument`
-throws "string exceeds the length limit" on a 20,000-char title or favicon.
-
-**Capture call sites to sanitize** (all five build the same raw `{url, title, favIconUrl,
-pinned}` literal):
-- `sessions.js` `saveSession` (~:146-151) — also bound the session name (500) and Chrome
-  group-meta titles (200, matching the existing `createTabGroup` handler bound), and skip
-  windows left empty after filtering
-- `service-worker.js` auto-stash (~:232)
-- `service-worker.js` `stashWindow` (~:1958)
-- `service-worker.js` `stashGroup` (~:2003) — group title also feeds the stash NAME here
-- `service-worker.js` `stashDomain` (~:2049)
-- Manual groups need NOTHING: the handler already bounds URLs via `requireRuntimeUrl` at 16,384.
-
-**Sanitizer contract** (put it in `core/tab-restore.js` next to the existing restore-path
-`sanitizeTab()` and REUSE it — same title truncation at 500, same favicon scheme allowlist):
-- URL: trim; if empty or >16,384 chars the tab is UNREPRESENTABLE — return null / skip the
-  tab (never truncate a URL)
-- title: truncate to 500 (existing restore constant); normalize non-string to `''`
-- favIconUrl: scheme allowlist `{http, https, chrome, data}` (identical to existing
-  `sanitizeTab` — do not invent a new policy) PLUS length ≤ 16,384 (exactly the
-  canonicalization contract, so nothing storable is rejected and nothing stored can poison);
-  violations become `''` (cosmetic — never drop the tab over a favicon); normalize
-  non-string to `''`
-- emit a COMPLETE shape: no field may be `undefined` (chrome.storage drops undefined but the
-  test mock and the contract must not depend on that)
-
-**Two safety invariants — keep them:**
-- Stash paths must NEVER close a tab that was not captured into the stash (track captured
-  originals; close only those, still excluding `chrome://`)
-- A stash that would contain zero representable tabs → return an error, don't save an empty
-  stash
-
-**Pre-existing-poison heal (BUILD it — proved small, ~50 lines + 4 tests):** in `sessions.js`
-`canonicalizeLocalSessions`, heal each stored session BEFORE validation, touching ONLY values
-that would fail the canonical bound: >16,384 titles re-bounded to 500, >16,384 favicons →
-`''`, unrepresentable-URL tabs dropped, >16,384 group titles → 200, >16,384 names → 500.
-CRITICAL: values BETWEEN the capture and canonical bounds (e.g. a legal legacy 2,000-char
-title) must stay byte-identical — heal repairs poison, it does not retroactively re-police
-old data. Handle both v2 (`windows[].tabs`) and v1 (flat `tabs`) shapes. The healed shape
-persists on the next deletion write-back, which also un-bricks Drive sync. Follow-up only
-(do NOT build now): symmetric heal for `manualGroups` inside drive-sync.js.
-
-**F5 (same task):** gate the stash-view favicon render (`sidepanel/components/stash-list.js`
-img.src) with the SAME two constraints (scheme allowlist + length) so stored and rendered
-policies match.
-
-**Regression tests** (failure paths first; `tests/core/capture-sanitization.test.js`):
-1. Capture a live tab with a 20,000-char title → stored title ≤500, then the FULL chain
-   succeeds: `readLocalDriveSyncDocument` resolves, `buildPortableExportPayload('sessions')`
-   resolves, `deleteSessions` deletes
-2. Oversized `data:`-URI favicon (>16,384) → stored `''` while the tab survives
-3. `javascript:` favicon → `''` (also test `ftp:` rejected, valid `data:` kept)
-4. Tab with >16,384-char URL → skipped at capture, sibling tab survives, sync doc still valid
-5. Oversized session name → bounded at 500
-6. Pre-existing poisoned stored session + clean session: deleting the CLEAN one succeeds and
-   the write-back persists the healed poisoned record (title 500, favicon `''`)
-7. The poisoned session itself is deletable
-8. Pre-existing tab with unrepresentable URL → dropped by heal, not fatal
-9. Legal legacy 2,000-char title survives heal byte-identical
-10. Pure sanitizer unit rows: null/array/missing-url/whitespace-url/oversized-url → null;
-    `pinned` coerced to boolean; `groupId` and exact URL (incl. hash) preserved
-Chrome-mock note: the mock preserves undefined-valued properties where real chrome.storage
-drops them — that's why the complete-shape rule exists.
+**G1 follow-ups (from the independent review — build these as part of this wave):**
+1. **Read-path heal (MEDIUM-LOW, demonstrated):** pre-existing poisoned records still brick
+   `readLocalDriveSyncDocument()` (core/drive-sync.js:541) and
+   `buildPortableExportPayload('sessions')` until the first successful delete triggers the
+   heal write-back (`deleteSessions` early-returns without write-back when nothing was
+   deleted). Fix: apply the same heal (reuse `canonicalizeLocalSessions`' logic — do NOT
+   fork it) on the sync-read and export-read paths so a sync/export-only user un-bricks
+   without ever deleting. Tests: poisoned store → sync read resolves, export resolves,
+   healed shape persists.
+2. **Invariant tests:** the never-close-uncaptured-tab invariant across all 4 service-worker
+   stash sites and the `safeFaviconUrl` render gate have zero direct test coverage (verified
+   by manual trace only). Add failure-path tests: capture rejected → tab NOT closed;
+   zero-representable stash → error, no save, nothing closed; render gate rejects
+   `javascript:`/oversized, passes valid http/data.
+3. **LOW cosmetic:** heal drops unrepresentable-URL tabs without updating `window.tabCount`
+   → recompute tabCount during heal.
+4. **LOW consistency:** `saveSession` with all tabs unrepresentable stores `windows: []` —
+   reject with the same error shape the stash paths use.
 
 ### G2 — First-run experience (the growth lever)
 
