@@ -2,6 +2,7 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { MAX_DRIVE_STRING_LENGTH } from '../../core/drive-sync.js';
 import { Storage } from '../../core/storage.js';
 import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
@@ -10,6 +11,27 @@ import {
   formatPortableImportSummary,
   portableImportToastType,
 } from '../portable-import-summary.js';
+
+const SAFE_FAVICON_SCHEMES = new Set(['http', 'https', 'chrome', 'data']);
+
+// Render only favicon URLs that satisfy the capture-time policy; stored
+// records may predate capture sanitization or arrive through portable import.
+function safeFaviconUrl(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_DRIVE_STRING_LENGTH
+  ) {
+    return null;
+  }
+  let scheme;
+  try {
+    scheme = new URL(value).protocol.replace(/:$/, '').toLowerCase();
+  } catch {
+    return null;
+  }
+  return SAFE_FAVICON_SCHEMES.has(scheme) ? value : null;
+}
 
 export class StashList {
   constructor(rootEl) {
@@ -133,7 +155,7 @@ export class StashList {
     for (const tab of shown) {
       const img = document.createElement('img');
       img.className = 'stash-preview-favicon';
-      img.src = tab.favIconUrl || fallbackSvg;
+      img.src = safeFaviconUrl(tab.favIconUrl) || fallbackSvg;
       img.alt = '';
       img.addEventListener('error', () => { img.src = fallbackSvg; }, { once: true });
       preview.appendChild(img);

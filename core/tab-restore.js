@@ -1,3 +1,4 @@
+import { MAX_DRIVE_STRING_LENGTH } from './drive-sync.js';
 import { normalizeUrl } from './duplicates.js';
 import { createRestoreOutcome, finalizeRestoreOutcome } from './restore-outcome.js';
 import { getAllTabs } from './tabs-api.js';
@@ -49,6 +50,42 @@ function sanitizeTab(tab) {
 
   tab.pinned = Boolean(tab.pinned);
   return tab;
+}
+
+const MAX_CAPTURED_GROUP_TITLE_LENGTH = 200;
+
+/**
+ * Bound one captured Chrome group title to the same 200-character limit the
+ * runtime group handlers enforce; non-string titles become an empty title.
+ */
+export function sanitizeCapturedGroupTitle(title) {
+  return typeof title === 'string' ? title.slice(0, MAX_CAPTURED_GROUP_TITLE_LENGTH) : '';
+}
+
+/**
+ * Sanitize one tab at capture time so stored sessions and stashes always
+ * satisfy the canonical Drive/export string bound. Chrome does not bound
+ * page-controlled title/favicon values, but canonicalization rejects any
+ * string over MAX_DRIVE_STRING_LENGTH, so an unsanitized capture can block
+ * every later delete, sync, and export. Returns null when the tab cannot be
+ * represented at all: a missing URL, or a URL beyond the canonical limit,
+ * cannot round-trip through sync or export.
+ */
+export function sanitizeCapturedTab(tab) {
+  if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
+  const url = typeof tab.url === 'string' ? tab.url.trim() : '';
+  if (url.length === 0 || url.length > MAX_DRIVE_STRING_LENGTH) return null;
+  const captured = sanitizeTab({ ...tab, url });
+  // Capture emits a complete bounded shape: no field is ever undefined, so
+  // stored records never depend on the storage layer dropping undefined.
+  if (typeof captured.title !== 'string') captured.title = '';
+  if (
+    typeof captured.favIconUrl !== 'string' ||
+    captured.favIconUrl.length > MAX_DRIVE_STRING_LENGTH
+  ) {
+    captured.favIconUrl = '';
+  }
+  return captured;
 }
 
 function isRestorableUrl(url) {

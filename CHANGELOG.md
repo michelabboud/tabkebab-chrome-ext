@@ -4,6 +4,55 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.19] — 2026-07-21
+
+### Fixed
+
+- Session and stash capture now sanitize page-controlled strings before
+  storage. Chrome does not bound `document.title` or favicon URLs, but every
+  later canonicalization (delete, Drive sync, portable export) rejects strings
+  over the 16,384-character canonical limit — so one pathological page,
+  captured automatically by auto-save, could permanently block deleting any
+  session, silently fail auto-save cleanup, and fail sync and export, with the
+  poisoned record itself undeletable. Capture now truncates titles to 500
+  characters, bounds and scheme-allowlists favicon values (`http`, `https`,
+  `chrome`, `data`; oversized or unsafe values become empty), bounds captured
+  group titles to the existing 200-character runtime limit, bounds session
+  names, and skips a tab whose URL cannot be represented within the canonical
+  limit. Capture always emits a complete bounded tab shape with no undefined
+  fields.
+- Stash capture never closes a tab that was not captured into the stash, and
+  a stash that would contain zero representable tabs is rejected instead of
+  saved empty.
+- Pre-existing sessions captured by older versions heal during local
+  canonicalization: only values that would fail the canonical bound are
+  repaired (oversized titles re-bounded, oversized favicons dropped,
+  unrepresentable-URL tabs removed), so one poisoned record can no longer
+  block deleting the whole collection; the healed shape persists on the next
+  deletion write-back. Legal legacy values within the canonical bound are
+  untouched.
+- The stash-view favicon preview renders only favicon URLs that satisfy the
+  capture policy (bounded length, allowlisted scheme); anything else falls
+  back to the built-in placeholder icon. Well-formed http/https favicon URLs
+  still load from their original hosts by design — the gate blocks unsafe
+  schemes (javascript:, filesystem:, etc.) and oversized values, not remote
+  images as such.
+
+### Verification note
+
+- The failure was first reproduced against the real module: a session
+  containing one 20,000-character title or favicon made
+  `canonicalizeLocalDriveSyncDocument()` throw
+  `Invalid Drive sync document: … string exceeds the length limit`, which is
+  the exact guard every delete/sync/export path runs before mutating anything.
+- New regressions in `tests/core/capture-sanitization.test.js` (13 tests,
+  failure paths first): oversized title/favicon/URL and `javascript:` favicon
+  at capture, the full delete/sync/export chain over a poisoned capture,
+  pre-existing poisoned records becoming deletable with healed write-back,
+  legal legacy values staying untouched, and the pure sanitizer contract.
+- Full and coverage runs pass `867 tests / 0 failures` under Bun `1.3.11`;
+  syntax/version-parity gate passes at `1.2.19`.
+
 ## [1.2.18] — 2026-07-20
 
 ### Added

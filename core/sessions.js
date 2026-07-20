@@ -2,7 +2,11 @@
 
 import { getAllTabs } from './tabs-api.js';
 import { Storage } from './storage.js';
-import { restoreTabWindows } from './tab-restore.js';
+import {
+  restoreTabWindows,
+  sanitizeCapturedGroupTitle,
+  sanitizeCapturedTab,
+} from './tab-restore.js';
 import {
   DRIVE_TOMBSTONES_KEY,
   MAX_DRIVE_STRING_LENGTH,
@@ -52,11 +56,78 @@ function sanitizeLegacySessionTimestamps(value) {
   return output;
 }
 
+const MAX_CAPTURED_SESSION_NAME_LENGTH = 500;
+
+function healCapturedTab(tab) {
+  if (!isPlainRecord(tab)) return tab;
+  if (typeof tab.url === 'string' && tab.url.length > MAX_DRIVE_STRING_LENGTH) return null;
+  let healed = tab;
+  if (typeof tab.title === 'string' && tab.title.length > MAX_DRIVE_STRING_LENGTH) {
+    healed = { ...healed, title: tab.title.slice(0, MAX_CAPTURED_SESSION_NAME_LENGTH) };
+  }
+  if (typeof tab.favIconUrl === 'string' && tab.favIconUrl.length > MAX_DRIVE_STRING_LENGTH) {
+    healed = healed === tab ? { ...tab } : healed;
+    healed.favIconUrl = '';
+  }
+  return healed;
+}
+
+function healCapturedTabList(tabs) {
+  const healed = [];
+  for (const tab of tabs) {
+    const captured = healCapturedTab(tab);
+    if (captured !== null) healed.push(captured);
+  }
+  return healed;
+}
+
+function healCapturedGroupList(groups) {
+  return groups.map((group) => (
+    isPlainRecord(group) &&
+    typeof group.title === 'string' &&
+    group.title.length > MAX_DRIVE_STRING_LENGTH
+      ? { ...group, title: sanitizeCapturedGroupTitle(group.title) }
+      : group
+  ));
+}
+
+/**
+ * Repair a stored session whose captured strings predate capture-time
+ * sanitization. Only values that would fail the canonical string bound are
+ * touched: oversized titles/favicons are re-bounded to the capture policy and
+ * a tab whose URL cannot be represented is dropped, so one poisoned record
+ * can never block deletion or canonicalization of the whole collection.
+ */
+function healCapturedSessionStrings(session) {
+  if (!isPlainRecord(session)) return session;
+  const healed = { ...session };
+  if (typeof healed.name === 'string' && healed.name.length > MAX_DRIVE_STRING_LENGTH) {
+    healed.name = healed.name.slice(0, MAX_CAPTURED_SESSION_NAME_LENGTH);
+  }
+  if (Array.isArray(healed.tabs)) healed.tabs = healCapturedTabList(healed.tabs);
+  if (Array.isArray(healed.windows)) {
+    healed.windows = healed.windows.map((window) => {
+      if (!isPlainRecord(window)) return window;
+      const healedWindow = { ...window };
+      if (Array.isArray(healedWindow.tabs)) {
+        healedWindow.tabs = healCapturedTabList(healedWindow.tabs);
+      }
+      if (Array.isArray(healedWindow.groups)) {
+        healedWindow.groups = healCapturedGroupList(healedWindow.groups);
+      }
+      return healedWindow;
+    });
+  }
+  return healed;
+}
+
 function canonicalizeLocalSessions(value) {
   if (!Array.isArray(value)) throw new TypeError('Stored sessions must be an array');
   return migrateDriveSyncDocument({
     version: 1,
-    sessions: value.map(sanitizeLegacySessionTimestamps),
+    sessions: value.map((session) => sanitizeLegacySessionTimestamps(
+      healCapturedSessionStrings(session),
+    )),
     manualGroups: {},
   }).sessions;
 }
@@ -119,6 +190,9 @@ function migrateV1toV2(session) {
 // ── Save ──
 
 export async function saveSession(name, allWindows = true) {
+  const sessionName = typeof name === 'string'
+    ? name.slice(0, MAX_CAPTURED_SESSION_NAME_LENGTH)
+    : name;
   const tabs = await getAllTabs({ allWindows });
 
   // Query all Chrome tab groups for group metadata
@@ -131,7 +205,7 @@ export async function saveSession(name, allWindows = true) {
   const groupMeta = new Map();
   for (const g of chromeGroups) {
     groupMeta.set(g.id, {
-      title: g.title || '',
+      title: sanitizeCapturedGroupTitle(g.title),
       color: g.color || 'grey',
       collapsed: g.collapsed || false,
     });
@@ -143,12 +217,15 @@ export async function saveSession(name, allWindows = true) {
     if (!windowMap.has(t.windowId)) windowMap.set(t.windowId, { tabs: [], groupIds: new Set() });
     const entry = windowMap.get(t.windowId);
 
-    const savedTab = {
+    const savedTab = sanitizeCapturedTab({
       url: t.url,
       title: t.title,
       favIconUrl: t.favIconUrl,
       pinned: t.pinned || false,
-    };
+    });
+    // A tab whose URL cannot satisfy the canonical string bound cannot be
+    // stored without poisoning later canonicalization; skip it.
+    if (!savedTab) continue;
 
     // Save group membership (groupId -1 means ungrouped)
     if (t.groupId !== undefined && t.groupId !== -1) {
@@ -161,6 +238,7 @@ export async function saveSession(name, allWindows = true) {
 
   const windows = [];
   for (const [, entry] of windowMap) {
+    if (entry.tabs.length === 0) continue;
     const winObj = { tabCount: entry.tabs.length, tabs: entry.tabs };
 
     // Save group metadata for groups referenced by tabs in this window
@@ -179,7 +257,7 @@ export async function saveSession(name, allWindows = true) {
 
   const session = {
     id: generateId(),
-    name,
+    name: sessionName,
     version: 2,
     createdAt: Date.now(),
     modifiedAt: Date.now(),

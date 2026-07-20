@@ -77,6 +77,10 @@ standalone script against `core/drive-sync.js` (output shown in F10 below).
 
 **Counts: 0 Critical / 2 High / 2 Medium / 5 Low / 1 Info.**
 
+> **Status update 2026-07-21:** G1 was authorized and implemented — F10 and F5
+> are **FIXED (pending independent diff review and commit)**. See the
+> [G1 implementation addendum](#g1-implementation-addendum-2026-07-21) below.
+
 Explicitly checked and clean:
 
 - **XSS via tab titles/URLs in the side panel: not found.** All attacker-controlled
@@ -437,6 +441,81 @@ context; `_esc` (div/textContent trick, `:764-768`) does not escape quotes. Not
 exploitable today because domain entries pass `canonicalHostname()` (URL parsing
 rejects quotes) before storage — but the escaping helper's contract doesn't match its
 usage. Add quote escaping to `_esc`/`escapeHtml` once, repo-wide.
+
+---
+
+## G1 implementation addendum (2026-07-21)
+
+Owner-authorized scope: implement G1 (capture-time sanitization), fixing F10
+(High) and F5 (Low). Implemented, tested, and version-bumped; **not committed**
+— the diff awaits independent review.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `core/tab-restore.js` (+37) | New exported `sanitizeCapturedTab()` (delegates to the existing restore-path `sanitizeTab()` and the canonical `MAX_DRIVE_STRING_LENGTH` constant; emits a complete bounded shape with no undefined fields; returns `null` for unrepresentable URLs) and `sanitizeCapturedGroupTitle()` (200-char bound matching the existing runtime group handler). |
+| `core/sessions.js` (+90/-5) | `saveSession()` routes every captured tab through `sanitizeCapturedTab()`, bounds the session name (500), bounds group-meta titles, and skips empty windows. `canonicalizeLocalSessions()` heals pre-existing records before validation (see decision below). |
+| `service-worker.js` (+78/-33) | All four stash capture sites (auto-stash, `stashWindow`, `stashGroup`, `stashDomain`) route tabs through `sanitizeCapturedTab()` and bound group titles. New invariant: **a tab that was not captured into the stash is never closed**, and a stash that would contain zero representable tabs is rejected instead of saved empty. |
+| `sidepanel/components/stash-list.js` (+24/-1) | F5: `safeFaviconUrl()` gate on the stash-preview `img.src` — bounded length + `{http, https, chrome, data}` scheme allowlist (imported canonical constant), fallback icon otherwise. |
+| `tests/core/capture-sanitization.test.js` (new, 13 tests) | Failure paths first: oversized title/favicon/URL and `javascript:` favicon at capture; the full reproduced delete/sync/export chain over a poisoned capture; pre-existing poisoned records healing and becoming deletable; legal legacy values untouched; pure sanitizer contract. |
+| `VERSION`, `manifest.json`, `CHANGELOG.md` | `1.2.19` per the repo's per-fix release convention, with a full changelog entry and verification note. |
+
+### Favicon policy chosen
+
+Scheme allowlist `{http, https, chrome, data}` (identical to the existing
+restore-path `sanitizeTab()` allowlist — no new policy invented), plus a length
+bound of `MAX_DRIVE_STRING_LENGTH` (16,384) — exactly the canonicalization
+contract, so nothing storable is rejected and nothing stored can poison. An
+oversized or unsafe favicon becomes `''` (favicons are cosmetic; the UI has a
+fallback icon), never a dropped tab. The render-side gate in the stash view
+applies the same two constraints, so stored and rendered constraints match.
+
+### Pre-existing-poison decision: heal-on-canonicalize, sessions-side (built)
+
+Chosen and implemented, because it turned out genuinely small (~50 lines + 4
+tests). `canonicalizeLocalSessions()` in `core/sessions.js` now heals each
+stored session before validation — **touching only values that would fail the
+canonical bound**: titles/favicons over 16,384 are re-bounded to the capture
+policy, and a tab whose URL cannot be represented is dropped. Values between
+the capture bound and the canonical bound (e.g. a legal legacy 2,000-char
+title) are deliberately untouched — healing repairs poison, it does not
+retroactively re-police old data (regression-tested). The healed shape
+persists on the next deletion write-back, which also un-bricks Drive sync
+(sync reads the same storage the write-back repaired). Not built (follow-up,
+noted): the symmetric heal inside `drive-sync.js`'s
+`canonicalizeLocalDriveSyncDocument()` for the manual-groups kind — manual
+group URLs are already bounded at the runtime handler (`requireRuntimeUrl`,
+16,384), so no capture gap exists there today.
+
+### Verification evidence
+
+```
+bun test tests/core/capture-sanitization.test.js → 13 pass / 0 fail / 39 assertions
+bun test            → 867 pass / 0 fail / 4853 expect() calls, 41 files, 7.68s
+bun test --coverage → 867 pass / 0 fail
+bun test tests/syntax.test.js → 2 pass / 0 fail / 126 assertions (parity at 1.2.19)
+```
+
+(Previous baseline: 854 tests; the 13 new tests account for the difference.)
+
+### Proposed commit (not executed)
+
+```
+fix: sanitize page-controlled strings at capture
+
+Chrome does not bound document.title or favicon URLs, but every delete,
+Drive sync, and export canonicalizes stored sessions against the
+16,384-character canonical limit before mutating anything — so one
+pathological page captured by auto-save could permanently block deletion,
+cleanup, sync, and export. Session and stash capture now truncate titles,
+bound and scheme-allowlist favicons, bound group titles and session names,
+and skip unrepresentable URLs; stash capture never closes an uncaptured
+tab. Pre-existing poisoned records heal during local canonicalization, and
+the stash preview renders only capture-policy favicons.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+```
 
 ---
 

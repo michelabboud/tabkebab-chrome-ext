@@ -12,6 +12,7 @@ import { Prompts } from './core/ai/prompts.js';
 import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
+import { sanitizeCapturedGroupTitle, sanitizeCapturedTab } from './core/tab-restore.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings, validateSettingsPatch } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
@@ -229,23 +230,32 @@ async function autoStashOldTabsUnlocked() {
     for (const [, oldTabs] of windowBuckets) {
       if (oldTabs.length === 0) continue;
 
-      const stashTabs = oldTabs.map(t => ({
-        url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
-      }));
+      const stashTabs = [];
+      const capturedTabs = [];
+      for (const t of oldTabs) {
+        const saved = sanitizeCapturedTab({
+          url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
+        });
+        if (!saved) continue;
+        stashTabs.push(saved);
+        capturedTabs.push(t);
+      }
+      // Never close a tab that was not captured into the stash.
+      if (stashTabs.length === 0) continue;
 
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `[Auto-stash] ${oldTabs.length} idle tabs`,
+        name: `[Auto-stash] ${stashTabs.length} idle tabs`,
         source: 'auto',
         sourceDetail: 'auto-stash',
         createdAt: Date.now(),
-        tabCount: oldTabs.length,
+        tabCount: stashTabs.length,
         windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
       };
 
       await saveStash(stash);
-      await closeTabs(oldTabs.map(t => t.id));
+      await closeTabs(capturedTabs.map(t => t.id));
     }
   } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
 }
@@ -1949,19 +1959,23 @@ export async function handleMessage(msg, options = {}) {
 
       const groupMeta = new Map();
       for (const g of chromeGroups) {
-        groupMeta.set(g.id, { title: g.title || '', color: g.color || 'grey', collapsed: g.collapsed || false });
+        groupMeta.set(g.id, { title: sanitizeCapturedGroupTitle(g.title), color: g.color || 'grey', collapsed: g.collapsed || false });
       }
 
       const stashTabs = [];
       const groupIds = new Set();
+      const capturedTabs = [];
       for (const t of windowTabs) {
-        const saved = { url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false };
+        const saved = sanitizeCapturedTab({ url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false });
+        if (!saved) continue;
         if (t.groupId !== undefined && t.groupId !== -1) {
           saved.groupId = t.groupId;
           groupIds.add(t.groupId);
         }
         stashTabs.push(saved);
+        capturedTabs.push(t);
       }
+      if (stashTabs.length === 0) return { error: 'No stashable tabs in window' };
 
       const groups = [];
       for (const gid of groupIds) {
@@ -1972,16 +1986,17 @@ export async function handleMessage(msg, options = {}) {
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `Window ${msg.windowNumber || '?'} (${windowTabs.length} tabs)`,
+        name: `Window ${msg.windowNumber || '?'} (${stashTabs.length} tabs)`,
         source: 'window',
         sourceDetail: String(msg.windowId),
         createdAt: Date.now(),
-        tabCount: windowTabs.length,
+        tabCount: stashTabs.length,
         windows: [{ tabCount: stashTabs.length, tabs: stashTabs, ...(groups.length > 0 ? { groups } : {}) }],
       };
 
       await saveStash(stash);
-      const closableIds = windowTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
+      // Never close a tab that was not captured into the stash.
+      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
       if (closableIds.length > 0) await closeTabs(closableIds);
 
       // Auto-bookmark on stash if enabled
@@ -2002,22 +2017,30 @@ export async function handleMessage(msg, options = {}) {
       let groupInfo = { title: 'Untitled', color: 'grey', collapsed: false };
       try {
         const g = await chrome.tabGroups.get(msg.groupId);
-        groupInfo = { title: g.title || 'Untitled', color: g.color || 'grey', collapsed: g.collapsed || false };
+        groupInfo = { title: sanitizeCapturedGroupTitle(g.title) || 'Untitled', color: g.color || 'grey', collapsed: g.collapsed || false };
       } catch (e) { console.warn('[TabKebab] stash failed:', e); }
 
-      const stashTabs = groupTabs.map(t => ({
-        url: t.url, title: t.title, favIconUrl: t.favIconUrl,
-        pinned: t.pinned || false, groupId: msg.groupId,
-      }));
+      const stashTabs = [];
+      const capturedTabs = [];
+      for (const t of groupTabs) {
+        const saved = sanitizeCapturedTab({
+          url: t.url, title: t.title, favIconUrl: t.favIconUrl,
+          pinned: t.pinned || false, groupId: msg.groupId,
+        });
+        if (!saved) continue;
+        stashTabs.push(saved);
+        capturedTabs.push(t);
+      }
+      if (stashTabs.length === 0) return { error: 'No stashable tabs in group' };
 
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `${groupInfo.title} [group] (${groupTabs.length} tabs)`,
+        name: `${groupInfo.title} [group] (${stashTabs.length} tabs)`,
         source: 'group',
         sourceDetail: groupInfo.title,
         createdAt: Date.now(),
-        tabCount: groupTabs.length,
+        tabCount: stashTabs.length,
         windows: [{
           tabCount: stashTabs.length,
           tabs: stashTabs,
@@ -2026,7 +2049,8 @@ export async function handleMessage(msg, options = {}) {
       };
 
       await saveStash(stash);
-      const closableIds = groupTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
+      // Never close a tab that was not captured into the stash.
+      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
       if (closableIds.length > 0) await closeTabs(closableIds);
 
       return { success: true, stash };
@@ -2040,12 +2064,17 @@ export async function handleMessage(msg, options = {}) {
       if (domainTabs.length === 0) return { error: 'No tabs for domain' };
 
       const windowMap = new Map();
+      const capturedTabs = [];
       for (const t of domainTabs) {
-        if (!windowMap.has(t.windowId)) windowMap.set(t.windowId, []);
-        windowMap.get(t.windowId).push({
+        const saved = sanitizeCapturedTab({
           url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
         });
+        if (!saved) continue;
+        if (!windowMap.has(t.windowId)) windowMap.set(t.windowId, []);
+        windowMap.get(t.windowId).push(saved);
+        capturedTabs.push(t);
       }
+      if (capturedTabs.length === 0) return { error: 'No stashable tabs for domain' };
 
       const windows = [];
       for (const [, wTabs] of windowMap) {
@@ -2055,16 +2084,17 @@ export async function handleMessage(msg, options = {}) {
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `${msg.domain} (${domainTabs.length} tabs)`,
+        name: `${msg.domain} (${capturedTabs.length} tabs)`,
         source: 'domain',
         sourceDetail: msg.domain,
         createdAt: Date.now(),
-        tabCount: domainTabs.length,
+        tabCount: capturedTabs.length,
         windows,
       };
 
       await saveStash(stash);
-      const closableIds = domainTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
+      // Never close a tab that was not captured into the stash.
+      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
       if (closableIds.length > 0) await closeTabs(closableIds);
 
       return { success: true, stash };
