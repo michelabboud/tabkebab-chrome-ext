@@ -16,6 +16,7 @@ import { showToast } from './components/toast.js';
 import { routePanelFocusMessage } from './focus-events.js';
 import { sendOrThrow } from './message-client.js';
 import { startChromeAIBroker } from './chrome-ai-broker.js';
+import { FirstRunWalkthrough } from './components/first-run-walkthrough.js';
 
 // Chrome's Prompt API is document-only. Keep one named broker alive for this
 // panel document and permanently stop reconnecting when the document exits.
@@ -46,11 +47,15 @@ const settingsManagerCtrl = new SettingsManager(settingsRoot);
 
 const controllers = {
   tabs: new TabList(document.getElementById('sub-domains')),
-  sessions: new SessionManager(document.getElementById('view-sessions')),
+  sessions: new SessionManager(document.getElementById('view-sessions'), {
+    navigate: navigatePanel,
+  }),
   duplicates: new DuplicateFinder(document.getElementById('sub-duplicates')),
   groups: new GroupEditor(document.getElementById('sub-groups')),
   windows: new WindowList(document.getElementById('view-windows')),
-  stash: new StashList(document.getElementById('view-stash')),
+  stash: new StashList(document.getElementById('view-stash'), {
+    navigate: navigatePanel,
+  }),
   settings: {
     async refresh() {
       await Promise.all([
@@ -76,6 +81,25 @@ const subControllers = { domains: 'tabs', groups: 'groups', duplicates: 'duplica
 const navButtons = document.querySelectorAll('.tab-nav [role="tab"]');
 const views = document.querySelectorAll('.view');
 const settingsBtn = document.getElementById('btn-settings');
+
+function navigatePanel({ view, sectionId } = {}) {
+  if (view === 'settings') {
+    settingsBtn.click();
+  } else if (view === 'focus') {
+    showFocusView();
+  } else {
+    document.querySelector(`.tab-nav [data-view="${view}"]`)?.click();
+  }
+
+  if (sectionId) {
+    requestAnimationFrame(() => {
+      document.getElementById(sectionId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  }
+}
 
 navButtons.forEach(btn => {
   btn.addEventListener('click', () => {
@@ -120,6 +144,17 @@ settingsBtn.addEventListener('click', () => {
   views.forEach(v => v.classList.toggle('hidden', v.id !== 'view-settings'));
   void refreshController(controllers.settings, 'settings');
 });
+
+// --- First-run walkthrough ---
+const walkthroughRoot = document.getElementById('first-run-walkthrough');
+const walkthrough = new FirstRunWalkthrough(walkthroughRoot, {
+  navigate: navigatePanel,
+});
+document.getElementById('btn-relaunch-walkthrough').addEventListener('click', () => {
+  walkthrough.launch();
+  walkthroughRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+void walkthrough.startIfNeeded();
 
 // --- Focus panel ---
 const focusPanel = new FocusPanel(document.getElementById('view-focus'), {

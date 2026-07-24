@@ -8,11 +8,13 @@ import {
   formatPortableImportSummary,
   portableImportToastType,
 } from '../portable-import-summary.js';
+import { renderActionableEmptyState } from './actionable-empty-state.js';
 
 export class SessionManager {
-  constructor(rootEl) {
+  constructor(rootEl, { navigate = () => {} } = {}) {
     this.root = rootEl;
     this.notify = showToast;
+    this.navigate = navigate;
     this.savedListEl = rootEl.querySelector('#session-list-saved');
     this.autoListEl = rootEl.querySelector('#session-list-auto');
     this.activeRestoreId = null;
@@ -120,8 +122,8 @@ export class SessionManager {
     this.autoListEl.innerHTML = '';
 
     if (!sessions || sessions.length === 0) {
-      this.savedListEl.innerHTML = '<p class="empty-state">No saved sessions yet.</p>';
-      this.autoListEl.innerHTML = '<p class="empty-state">No auto-saved sessions yet.</p>';
+      this.renderSavedEmptyState();
+      this.renderAutoEmptyState();
       return;
     }
 
@@ -129,7 +131,7 @@ export class SessionManager {
     const auto = sessions.filter(s => s.name.startsWith('[Auto] '));
 
     if (saved.length === 0) {
-      this.savedListEl.innerHTML = '<p class="empty-state">No saved sessions yet.</p>';
+      this.renderSavedEmptyState();
     } else {
       for (const session of saved) {
         this.savedListEl.appendChild(this.createSessionCard(session, false));
@@ -137,7 +139,7 @@ export class SessionManager {
     }
 
     if (auto.length === 0) {
-      this.autoListEl.innerHTML = '<p class="empty-state">No auto-saved sessions yet.</p>';
+      this.renderAutoEmptyState();
     } else {
       for (const session of auto) {
         this.autoListEl.appendChild(this.createSessionCard(session, true));
@@ -156,6 +158,25 @@ export class SessionManager {
         autoBadge.appendChild(count);
       }
     }
+  }
+
+  renderSavedEmptyState() {
+    renderActionableEmptyState(this.savedListEl, {
+      message: 'Save all open windows as a session you can restore later.',
+      actionLabel: 'Name a session',
+      onAction: () => this.root.querySelector('#session-name')?.focus(),
+    });
+  }
+
+  renderAutoEmptyState() {
+    renderActionableEmptyState(this.autoListEl, {
+      message: 'Automatic snapshots appear here after auto-save runs.',
+      actionLabel: 'Set up auto-save',
+      onAction: () => this.navigate({
+        view: 'settings',
+        sectionId: 'settings-automation-section',
+      }),
+    });
   }
 
   createSessionCard(session, isAutoSave) {

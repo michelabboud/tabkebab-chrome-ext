@@ -114,6 +114,22 @@
   </div>
 
   <main class="view-container">
+    <section id="first-run-walkthrough" class="first-run-walkthrough" aria-labelledby="walkthrough-title" hidden>
+      <div class="walkthrough-header">
+        <span class="walkthrough-kicker">Getting started</span>
+        <span id="walkthrough-step" class="walkthrough-step">1 of 4</span>
+      </div>
+      <h2 id="walkthrough-title" class="walkthrough-title">Welcome to TabKebab</h2>
+      <p id="walkthrough-description" class="walkthrough-description"></p>
+      <div class="walkthrough-actions">
+        <button id="walkthrough-action" type="button" class="action-btn secondary" hidden></button>
+        <span class="walkthrough-spacer"></span>
+        <button id="walkthrough-dismiss" type="button" class="action-btn secondary">Skip tour</button>
+        <button id="walkthrough-back" type="button" class="action-btn secondary" hidden>Back</button>
+        <button id="walkthrough-next" type="button" class="action-btn">Next</button>
+      </div>
+    </section>
+
     <!-- Sessions view -->
     <section id="view-sessions" class="view hidden">
       <div class="toolbar">
@@ -376,6 +392,13 @@
               <option value="dark">Dark</option>
             </select>
           </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Getting started</span>
+              <span class="setting-hint">Replay the four-step guide to grouping, stashing, and restoring tabs</span>
+            </div>
+            <button id="btn-relaunch-walkthrough" type="button" class="action-btn secondary">Replay guide</button>
+          </div>
           <div class="setting-divider"></div>
           <div class="toolbar">
             <button id="btn-export-settings" class="action-btn secondary">Export Settings</button>
@@ -412,7 +435,7 @@
       </div>
 
       <!-- ─── Automation ─── -->
-      <div class="settings-section settings-card">
+      <div class="settings-section settings-card" id="settings-automation-section">
         <div class="settings-card-header">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <h3 class="settings-card-title">Automation</h3>

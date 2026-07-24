@@ -11,6 +11,7 @@ import {
   formatPortableImportSummary,
   portableImportToastType,
 } from '../portable-import-summary.js';
+import { renderActionableEmptyState } from './actionable-empty-state.js';
 
 const SAFE_FAVICON_SCHEMES = new Set(['http', 'https', 'chrome', 'data']);
 
@@ -34,9 +35,10 @@ export function safeFaviconUrl(value) {
 }
 
 export class StashList {
-  constructor(rootEl) {
+  constructor(rootEl, { navigate = () => {} } = {}) {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#stash-list');
+    this.navigate = navigate;
     this.driveConnected = false;
     this.activeRestoreId = null;
 
@@ -106,7 +108,11 @@ export class StashList {
     this.listEl.innerHTML = '';
 
     if (!stashes || stashes.length === 0) {
-      this.listEl.innerHTML = '<p class="empty-state">No stashed tabs yet. Stash a window, group, or domain to save and close tabs.</p>';
+      renderActionableEmptyState(this.listEl, {
+        message: 'Stash a window, group, or domain to save it and close those tabs.',
+        actionLabel: 'Find tabs to stash',
+        onAction: () => this.navigate({ view: 'tabs' }),
+      });
       return;
     }
 

@@ -17,11 +17,13 @@ const COMPONENTS = [
 ];
 
 const AUDITED_SIDE_PANEL_FILES = [
+  'sidepanel/components/actionable-empty-state.js',
   'sidepanel/components/ai-settings.js',
   'sidepanel/components/command-bar.js',
   'sidepanel/components/confirm-dialog.js',
   'sidepanel/components/drive-sync.js',
   'sidepanel/components/duplicate-finder.js',
+  'sidepanel/components/first-run-walkthrough.js',
   'sidepanel/components/focus-panel.js',
   'sidepanel/components/global-search.js',
   'sidepanel/components/group-editor.js',
