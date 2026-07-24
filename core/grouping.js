@@ -6,6 +6,11 @@ import { Phase, WINDOW_CAP } from './engine/types.js';
 import { takeSnapshot } from './engine/snapshot.js';
 import { solve } from './engine/solver.js';
 import { solveWithAI } from './engine/solver-ai.js';
+import { AIClient } from './ai/ai-client.js';
+import {
+  classifySmartGroupFailure,
+  selectSmartGroupRoute,
+} from './ai/smart-group-route.js';
 import { plan } from './engine/planner.js';
 import { execute, moveTabsInBatches } from './engine/executor.js';
 import {
@@ -122,20 +127,49 @@ export async function applySmartGroupsToChrome(onProgress) {
   report(Phase.SNAPSHOT, 'Reading all tabs and windows...');
   const snapshot = await takeSnapshot();
 
-  // Phase 2: AI Solver (with deterministic fallback)
+  // Phase 2: AI Solver. Failure returns a fixed, actionable fallback outcome;
+  // the panel owns the user's one-click decision to run deterministic grouping.
   report(Phase.SOLVER, 'Analyzing tabs with AI...');
+  let route;
+  try {
+    route = selectSmartGroupRoute(await AIClient.getPublicSettings());
+  } catch (error) {
+    return {
+      aiApplied: false,
+      aiSource: 'configured',
+      aiFailure: classifySmartGroupFailure(error),
+      fallbackAction: 'domain',
+    };
+  }
+
   let desiredState;
   try {
-    desiredState = await solveWithAI(snapshot, (detail) => {
-      report(Phase.SOLVER, detail);
-    });
-  } catch (err) {
-    report(Phase.SOLVER, 'AI unavailable, falling back to domain grouping...');
+    const complete = route.mode === 'zero-config'
+      ? (request) => AIClient.completeWithChromeAI(request)
+      : (request) => AIClient.complete(request);
+    desiredState = await solveWithAI(
+      snapshot,
+      (detail) => report(Phase.SOLVER, detail),
+      { complete },
+    );
+  } catch (error) {
+    report(Phase.SOLVER, 'AI could not finish. Domain grouping is ready instead.');
+    return {
+      aiApplied: false,
+      aiSource: route.mode,
+      aiFailure: classifySmartGroupFailure(error),
+      fallbackAction: 'domain',
+    };
   }
 
   if (!desiredState) {
-    report(Phase.SOLVER, `Falling back: computing layout for ${snapshot.tabs.length} tabs...`);
-    desiredState = solve(snapshot);
+    report(Phase.SOLVER, 'AI returned no usable groups. Domain grouping is ready instead.');
+    return {
+      aiApplied: false,
+      aiSource: route.mode,
+      aiFailure: 'failed',
+      fallbackAction: 'domain',
+    };
   }
 
   // Phase 3: Planner
@@ -150,6 +184,8 @@ export async function applySmartGroupsToChrome(onProgress) {
   if (nothingToDo) {
     report(Phase.EXECUTOR, 'Already organized — no moves needed.');
     return {
+      aiApplied: true,
+      aiSource: route.mode,
       tabsMoved: 0,
       windowsCreated: 0,
       groupsCreated: 0,
@@ -190,7 +226,12 @@ export async function applySmartGroupsToChrome(onProgress) {
   const cleanedUp = await cleanupStragglerWindows(desiredState, report);
   result.tabsMoved += cleanedUp;
 
-  return { ...result, alreadyOrganized: false };
+  return {
+    aiApplied: true,
+    aiSource: route.mode,
+    ...result,
+    alreadyOrganized: false,
+  };
 }
 
 /**

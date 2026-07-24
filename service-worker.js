@@ -254,14 +254,45 @@ async function autoStashOldTabsUnlocked() {
         windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
       };
 
-      await saveStash(stash);
-      await closeTabs(capturedTabs.map(t => t.id));
+      await persistCapturedStash({
+        stash,
+        capturedTabs,
+        emptyError: 'No stashable old tabs',
+      });
     }
   } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
 }
 
 export async function autoStashOldTabs() {
   return withStateMutationLock(() => autoStashOldTabsUnlocked());
+}
+
+/**
+ * Commit a fully captured stash before closing only the represented source
+ * tabs. Every stash path shares this boundary so a rejected write or an empty
+ * capture can never destroy a tab that is not recoverable from the stash.
+ */
+export async function persistCapturedStash({
+  stash,
+  capturedTabs,
+  emptyError,
+  save = saveStash,
+  close = closeTabs,
+}) {
+  if (!Array.isArray(capturedTabs) || capturedTabs.length === 0) {
+    return { error: emptyError };
+  }
+
+  await save(stash);
+  const closableIds = capturedTabs
+    .filter((tab) => (
+      Number.isInteger(tab?.id) &&
+      typeof tab.url === 'string' &&
+      !tab.url.startsWith('chrome://')
+    ))
+    .map((tab) => tab.id);
+  if (closableIds.length > 0) await close(closableIds);
+  return { success: true, stash };
 }
 
 async function exportDriveSubfolders({ scheduled = false } = {}) {
@@ -1975,8 +2006,6 @@ export async function handleMessage(msg, options = {}) {
         stashTabs.push(saved);
         capturedTabs.push(t);
       }
-      if (stashTabs.length === 0) return { error: 'No stashable tabs in window' };
-
       const groups = [];
       for (const gid of groupIds) {
         const meta = groupMeta.get(gid);
@@ -1994,10 +2023,12 @@ export async function handleMessage(msg, options = {}) {
         windows: [{ tabCount: stashTabs.length, tabs: stashTabs, ...(groups.length > 0 ? { groups } : {}) }],
       };
 
-      await saveStash(stash);
-      // Never close a tab that was not captured into the stash.
-      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
-      if (closableIds.length > 0) await closeTabs(closableIds);
+      const committed = await persistCapturedStash({
+        stash,
+        capturedTabs,
+        emptyError: 'No stashable tabs in window',
+      });
+      if (committed.error) return committed;
 
       // Auto-bookmark on stash if enabled
       const settings = await getSettings();
@@ -2005,7 +2036,7 @@ export async function handleMessage(msg, options = {}) {
         try { await createBookmarksUnlocked(); } catch (e) { console.warn('[TabKebab] auto-bookmark on stash failed:', e); }
       }
 
-      return { success: true, stash };
+      return committed;
       });
     }
 
@@ -2031,8 +2062,6 @@ export async function handleMessage(msg, options = {}) {
         stashTabs.push(saved);
         capturedTabs.push(t);
       }
-      if (stashTabs.length === 0) return { error: 'No stashable tabs in group' };
-
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
@@ -2048,12 +2077,11 @@ export async function handleMessage(msg, options = {}) {
         }],
       };
 
-      await saveStash(stash);
-      // Never close a tab that was not captured into the stash.
-      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
-      if (closableIds.length > 0) await closeTabs(closableIds);
-
-      return { success: true, stash };
+      return await persistCapturedStash({
+        stash,
+        capturedTabs,
+        emptyError: 'No stashable tabs in group',
+      });
       });
     }
 
@@ -2074,8 +2102,6 @@ export async function handleMessage(msg, options = {}) {
         windowMap.get(t.windowId).push(saved);
         capturedTabs.push(t);
       }
-      if (capturedTabs.length === 0) return { error: 'No stashable tabs for domain' };
-
       const windows = [];
       for (const [, wTabs] of windowMap) {
         windows.push({ tabCount: wTabs.length, tabs: wTabs });
@@ -2092,12 +2118,11 @@ export async function handleMessage(msg, options = {}) {
         windows,
       };
 
-      await saveStash(stash);
-      // Never close a tab that was not captured into the stash.
-      const closableIds = capturedTabs.filter(t => !t.url.startsWith('chrome://')).map(t => t.id);
-      if (closableIds.length > 0) await closeTabs(closableIds);
-
-      return { success: true, stash };
+      return await persistCapturedStash({
+        stash,
+        capturedTabs,
+        emptyError: 'No stashable tabs for domain',
+      });
       });
     }
 

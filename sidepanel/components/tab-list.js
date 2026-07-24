@@ -3,6 +3,7 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { sendOrThrow } from '../message-client.js';
+import { SmartGroupFallback } from './smart-group-fallback.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -14,7 +15,7 @@ const PHASE_LABELS = {
 const PHASE_INDEX = { snapshot: 1, solver: 2, planner: 3, executor: 4 };
 
 export class TabList {
-  constructor(rootEl) {
+  constructor(rootEl, { navigate = () => {} } = {}) {
     this.root = rootEl;
     this.listEl = rootEl.querySelector('#tab-list');
     this.collapsed = new Set();
@@ -35,6 +36,13 @@ export class TabList {
 
     // Smart Group (AI) button
     this.smartGroupBtn = rootEl.querySelector('#btn-smart-group');
+    this.smartGroupFallback = new SmartGroupFallback(
+      rootEl.querySelector('#smart-group-fallback'),
+      {
+        onDomainFallback: () => this.groupByDomain(),
+        navigate,
+      },
+    );
 
     this.groupBtn.addEventListener('click', () => this.groupByDomain());
     if (this.smartGroupBtn) {
@@ -510,10 +518,23 @@ export class TabList {
     if (this.smartGroupBtn) this.smartGroupBtn.disabled = true;
     this.groupBtn.disabled = true;
     this.ungroupBtn.disabled = true;
+    this.smartGroupFallback?.hide();
     this.showProgress();
 
     try {
       const result = await this.send({ action: 'applySmartGroups' });
+      if (
+        result?.aiApplied === false &&
+        result?.fallbackAction === 'domain'
+      ) {
+        this.hideProgress();
+        this.smartGroupFallback?.show({
+          reason: result.aiFailure,
+          source: result.aiSource,
+        });
+        return;
+      }
+
       try {
         await this.refresh();
       } catch (err) {
@@ -531,7 +552,12 @@ export class TabList {
         if (result.groupsCreated > 0) parts.push(`${result.groupsCreated} groups created`);
         const summary = parts.length > 0 ? parts.join(', ') : 'Done';
         this.showDone(summary);
-        showToast('Tabs smart-grouped by AI', 'success');
+        showToast(
+          result.aiSource === 'zero-config'
+            ? "Tabs smart-grouped privately with Chrome's built-in AI"
+            : 'Tabs smart-grouped by AI',
+          'success',
+        );
       } else {
         this.hideProgress();
         showToast('Tabs smart-grouped by AI', 'success');
@@ -539,7 +565,10 @@ export class TabList {
 
     } catch (err) {
       this.hideProgress();
-      showToast('Smart grouping failed: ' + err.message, 'error');
+      this.smartGroupFallback?.show({
+        reason: 'failed',
+        source: 'configured',
+      });
     } finally {
       if (this.smartGroupBtn) this.smartGroupBtn.disabled = false;
       this.groupBtn.disabled = false;

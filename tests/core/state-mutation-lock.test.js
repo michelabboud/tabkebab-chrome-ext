@@ -36,7 +36,7 @@ function session(id, timestamp = 1) {
     version: 2,
     createdAt: timestamp,
     modifiedAt: timestamp,
-    windows: [{ tabs: [] }],
+    windows: [{ tabCount: 0, tabs: [] }],
   };
 }
 

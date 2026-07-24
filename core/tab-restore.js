@@ -1,4 +1,8 @@
 import { MAX_DRIVE_STRING_LENGTH } from './drive-sync.js';
+import {
+  MAX_CAPTURED_GROUP_TITLE_LENGTH,
+  MAX_CAPTURED_TEXT_LENGTH,
+} from './capture-limits.js';
 import { normalizeUrl } from './duplicates.js';
 import { createRestoreOutcome, finalizeRestoreOutcome } from './restore-outcome.js';
 import { getAllTabs } from './tabs-api.js';
@@ -32,8 +36,8 @@ function cloneSavedTab(tab) {
 function sanitizeTab(tab) {
   if (typeof tab.url === 'string') tab.url = tab.url.trim();
 
-  if (typeof tab.title === 'string' && tab.title.length > 500) {
-    tab.title = tab.title.slice(0, 500);
+  if (typeof tab.title === 'string' && tab.title.length > MAX_CAPTURED_TEXT_LENGTH) {
+    tab.title = tab.title.slice(0, MAX_CAPTURED_TEXT_LENGTH);
   }
 
   if (typeof tab.favIconUrl === 'string' && tab.favIconUrl) {
@@ -51,8 +55,6 @@ function sanitizeTab(tab) {
   tab.pinned = Boolean(tab.pinned);
   return tab;
 }
-
-const MAX_CAPTURED_GROUP_TITLE_LENGTH = 200;
 
 /**
  * Bound one captured Chrome group title to the same 200-character limit the

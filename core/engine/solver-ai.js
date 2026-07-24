@@ -18,7 +18,11 @@ const BATCH_SIZE = 100; // Max tabs per AI request
  * @param {function} [onProgress] - Progress callback (detail string)
  * @returns {Promise<Object|null>} DesiredState or null
  */
-export async function solveWithAI(snapshot, onProgress) {
+export async function solveWithAI(
+  snapshot,
+  onProgress,
+  { complete = (request) => AIClient.complete(request) } = {},
+) {
   // Filter to real tabs (skip chrome://, extension pages, etc.)
   const tabs = snapshot.tabs.filter(t => {
     const url = t.url || '';
@@ -44,7 +48,7 @@ export async function solveWithAI(snapshot, onProgress) {
 
     const batch = batches[i];
 
-    const response = await AIClient.complete({
+    const response = await complete({
       systemPrompt: Prompts.smartGrouping.system,
       userPrompt: Prompts.smartGrouping.buildUserPrompt(batch),
       maxTokens: 1024,

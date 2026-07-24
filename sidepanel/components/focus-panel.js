@@ -4,17 +4,22 @@ import { showToast } from './toast.js';
 import { createAllowlistEntry, normalizeAllowlistPreferences } from '../../core/focus-policy.js';
 import { createFocusRunCommand, handleFocusPanelMessage } from '../focus-events.js';
 import { sendOrThrow } from '../message-client.js';
+import { renderActionableEmptyState } from './actionable-empty-state.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
 
 export class FocusPanel {
-  constructor(rootEl, { listenForRuntimeEvents = true } = {}) {
+  constructor(rootEl, {
+    listenForRuntimeEvents = true,
+    notify = showToast,
+  } = {}) {
     this.root = rootEl;
     this.container = rootEl.querySelector('#focus-container');
     this.state = null;
     this.profiles = [];
     this.timerInterval = null;
     this._profilePrefs = {};
+    this.notify = notify;
 
     // Listen for focus events from service worker
     if (listenForRuntimeEvents) {
@@ -43,6 +48,24 @@ export class FocusPanel {
   // ── Setup View ──
 
   async _renderSetup() {
+    if (!this.profiles.length) {
+      renderActionableEmptyState(this.container, {
+        message: 'Focus profiles are unavailable, so a focus session cannot start yet.',
+        actionLabel: 'Retry profiles',
+        onAction: async () => {
+          try {
+            await this.refresh();
+          } catch (error) {
+            this.notify(
+              `Failed to load focus profiles: ${error?.message || String(error)}`,
+              'error',
+            );
+          }
+        },
+      });
+      return;
+    }
+
     const settings = this.settings || {};
     const defaultProfile = settings.focusDefaultProfile || 'coding';
     const defaultDuration = settings.focusDefaultDuration || 25;

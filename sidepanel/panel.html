@@ -114,6 +114,22 @@
   </div>
 
   <main class="view-container">
+    <section id="first-run-walkthrough" class="first-run-walkthrough" aria-labelledby="walkthrough-title" hidden>
+      <div class="walkthrough-header">
+        <span class="walkthrough-kicker">Getting started</span>
+        <span id="walkthrough-step" class="walkthrough-step">1 of 4</span>
+      </div>
+      <h2 id="walkthrough-title" class="walkthrough-title">Welcome to TabKebab</h2>
+      <p id="walkthrough-description" class="walkthrough-description"></p>
+      <div class="walkthrough-actions">
+        <button id="walkthrough-action" type="button" class="action-btn secondary" hidden></button>
+        <span class="walkthrough-spacer"></span>
+        <button id="walkthrough-dismiss" type="button" class="action-btn secondary">Skip tour</button>
+        <button id="walkthrough-back" type="button" class="action-btn secondary" hidden>Back</button>
+        <button id="walkthrough-next" type="button" class="action-btn">Next</button>
+      </div>
+    </section>
+
     <!-- Sessions view -->
     <section id="view-sessions" class="view hidden">
       <div class="toolbar">
@@ -182,11 +198,32 @@
       <div id="sub-domains" class="sub-view">
         <div class="toolbar">
           <button id="btn-group-by-domain" class="action-btn">Group by Domain</button>
-          <button id="btn-smart-group" class="action-btn" hidden>Smart Group</button>
+          <button id="btn-smart-group" class="action-btn">Smart Group</button>
           <button id="btn-ungroup-all" class="action-btn secondary">Ungroup All</button>
           <button id="btn-kebab-all" class="action-btn kebab">Kebab All</button>
           <button id="btn-collapse-all-tabs" class="action-btn secondary">Collapse All</button>
           <button id="btn-expand-all-tabs" class="action-btn secondary">Expand All</button>
+        </div>
+        <p id="smart-group-zero-config-note" class="smart-group-zero-config-note">
+          Smart Group uses Chrome's built-in AI by default. No key or account is needed,
+          and no data leaves this machine.
+        </p>
+        <div
+          id="smart-group-fallback"
+          class="smart-group-fallback"
+          role="status"
+          aria-live="polite"
+          hidden
+        >
+          <p id="smart-group-fallback-message"></p>
+          <div class="smart-group-fallback-actions">
+            <button
+              id="btn-smart-group-domain-fallback"
+              type="button"
+              class="action-btn secondary"
+            >Use domain grouping instead</button>
+            <a id="link-smart-group-settings" href="#settings-ai-section">Set up an API key</a>
+          </div>
         </div>
         <div id="pipeline-progress" class="pipeline-progress">
           <div class="phase-label">
@@ -376,6 +413,13 @@
               <option value="dark">Dark</option>
             </select>
           </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Getting started</span>
+              <span class="setting-hint">Replay the four-step guide to grouping, stashing, and restoring tabs</span>
+            </div>
+            <button id="btn-relaunch-walkthrough" type="button" class="action-btn secondary">Replay guide</button>
+          </div>
           <div class="setting-divider"></div>
           <div class="toolbar">
             <button id="btn-export-settings" class="action-btn secondary">Export Settings</button>
@@ -412,7 +456,7 @@
       </div>
 
       <!-- ─── Automation ─── -->
-      <div class="settings-section settings-card">
+      <div class="settings-section settings-card" id="settings-automation-section">
         <div class="settings-card-header">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <h3 class="settings-card-title">Automation</h3>
