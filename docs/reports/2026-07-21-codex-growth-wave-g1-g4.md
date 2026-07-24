@@ -4,7 +4,8 @@
 **Target branch:** `feat/growth-wave-g2-g4`  
 **Base:** `main` at `5a6b40b`  
 **Resumed lane:** G1 follow-ups are committed at `4676fe8`  
-**Status:** BLOCKED before branch switch; G2–G4 were not started
+**Status:** COMPLETE — G1 follow-ups `4676fe8`, G2 `c2d0dd8`, G3 `6d50ab9`, G4 `9e77bb7`
+(the historical blocker narrative below is preserved; per-task close-outs follow it)
 
 ## What changed
 
