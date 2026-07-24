@@ -259,3 +259,96 @@ Ran 900 tests across 47 files. [7.80s]
   retain their more specific friendly explanations.
 - Per this lane's constraints, `VERSION`, `manifest.json`, and `CHANGELOG.md`
   were not touched, and no git command was run.
+
+## G4 + wave close-out
+
+### What changed
+
+- Added the two missing privacy disclosures in `PRIVACY.md`, written against
+  the current code rather than the earlier assumption:
+  - Opening a stash list renders at most five stored favicon values per stash.
+    The render gate accepts only bounded `http`, `https`, `chrome`, and `data`
+    URLs; accepted HTTP(S) values are loaded from the hosts named by the stored
+    URLs, and rejected or failed values use a local placeholder.
+  - Optional bookmark HTML exports embed
+    `https://www.google.com/s2/favicons` image URLs derived from tab hostnames.
+    The request occurs when the exported HTML is opened.
+- Updated the privacy policy's general local-only wording so those favicon
+  disclosures are not contradicted elsewhere in the document.
+- Added `docs/store-listing.md` with a 116-character short description, a
+  plain-language long description that explains the `tabs` warning, current
+  product features, privacy boundaries, and a permission-by-permission
+  justification matching the manifest.
+- The listing distinguishes TabKebab's no-account/no-backend default from
+  optional Google Drive and hosted AI. Chrome built-in AI is described as
+  on-device and keyless; OpenAI, Anthropic, and Gemini require user-supplied
+  keys; user-configured Custom endpoints are correctly documented as
+  optionally keyed because the current provider permits that.
+- Bumped `VERSION` and `manifest.json` together from `1.2.19` to `1.2.20` and
+  added the whole-wave `CHANGELOG.md` entry covering the G1 follow-ups, G2,
+  G3, and G4.
+
+### Permission audit
+
+All entries in `manifest.json` were verified against current runtime call
+sites:
+
+- `tabs` reads open-tab metadata and performs requested activate, move, group,
+  ungroup, discard, close, create, and restore actions.
+- `tabGroups` queries and manages native Chrome tab groups.
+- `storage` persists local product state and encrypted settings and holds
+  session-scoped key/Focus state.
+- `sidePanel` registers and opens the extension's interface.
+- `identity` obtains and clears OAuth tokens for optional Drive operations.
+- `alarms` drives session auto-save, auto-kebab, auto-stash, Drive sync and
+  retention, bookmark snapshots, and Focus ticks.
+- `bookmarks` reads the bookmark tree to locate the destination and creates
+  TabKebab snapshot folders and entries.
+- The three host permissions are used only for the corresponding optional
+  OpenAI, Anthropic, and Gemini provider calls.
+- The separately declared `drive.file` OAuth scope limits optional Drive
+  access to files TabKebab created or the user explicitly opened with it.
+
+### Verification
+
+Fresh full-suite gate after the `1.2.20` lockstep bump:
+
+```text
+bun test v1.3.11 (af24e281)
+
+900 pass
+0 fail
+4975 expect() calls
+Ran 900 tests across 47 files. [9.48s]
+```
+
+The suite includes the syntax/version-parity test. The growth wave moved the
+full-suite count from the G1-follow-up baseline of 876 to 900, adding 24
+regressions across G2 and G3.
+
+### Assumptions and follow-ups
+
+- “No account” means no TabKebab account is required. Optional Drive uses a
+  Google account, and optional hosted AI credentials come from the selected
+  provider.
+- “No server” means TabKebab operates no application backend. Direct,
+  user-selected provider and Drive calls, plus the disclosed favicon image
+  requests, remain explicitly documented.
+- Domain grouping is a one-click fallback offered after Smart Group failure;
+  it is not run automatically without the user's click.
+- No G4 claim required a product-code change.
+- `store/listing.txt`, `store/permissions.txt`, and
+  `store/privacy-policy.txt` remain older submission-working copies.
+  Synchronizing those files from the reviewed `docs/store-listing.md` draft is
+  a separate store-publication follow-up.
+
+### Close-out confirmation
+
+- G4 privacy and store-listing documentation: complete
+- Wave version lockstep: `1.2.20`
+- Whole-wave changelog entry: complete
+- Full suite: 900 pass, 0 fail
+- Code changes in this lane: none
+- New dependencies: none
+- Git commands run in this lane: none
+- Long-running processes left behind: none

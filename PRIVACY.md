@@ -1,10 +1,10 @@
 # Privacy Policy
 
-**Last updated:** July 19, 2026
+**Last updated:** July 24, 2026
 
 ## The short version
 
-TabKebab collects **zero** data. No telemetry, no analytics, no tracking, no cookies, no fingerprinting, no crash reports — nothing. We have no servers. We have no database. We don't even have a website that phones home. Everything stays on your machine unless you explicitly choose otherwise.
+TabKebab collects **zero** data. No telemetry, no analytics, no tracking, no cookies, no fingerprinting, no crash reports — nothing. We have no servers. We have no database. We don't even have a website that phones home. Everything stays on your machine unless you explicitly choose otherwise, apart from the favicon image requests disclosed below.
 
 ---
 
@@ -16,7 +16,7 @@ None.
 
 ## Data stored locally on your device
 
-All extension data lives inside your browser profile and never leaves it unless you take an explicit action (enable AI features, connect Google Drive, or export a file).
+All extension data lives inside your browser profile and never leaves it unless you take an explicit action (enable network-backed AI features, connect Google Drive, or export a file), apart from the favicon image requests disclosed below.
 
 ### Chrome local storage (`chrome.storage.local`)
 
@@ -37,6 +37,8 @@ Decrypted AI API keys are held in session storage while the extension is active.
 ### IndexedDB (`TabKebabStash`)
 
 Stashed tabs are stored in an IndexedDB database on your device. Each stash contains the same kind of data as a session snapshot: tab URLs, titles, favicon URLs, pinned state, and group metadata.
+
+When you open the stash list, each stash preview loads up to five stored favicon URLs that pass TabKebab's scheme and size checks; HTTP(S) icons are fetched directly from the hosts named by those stored URLs, while rejected or failed icons use a local placeholder.
 
 ### API key encryption
 
@@ -80,6 +82,8 @@ Chrome may collect its own telemetry, sync data, or diagnostics depending on you
 
 When you export data, a JSON file is downloaded to your computer. A full backup can contain tab URLs and titles from sessions and stashes, custom groups, keep-awake domains, local bookmark snapshots, general settings, Focus preferences/history, and non-secret AI provider/model configuration. Individual session, stash, and settings exports contain only their named section.
 
+Optional bookmark HTML exports embed Google s2 favicon URLs derived from each tab's hostname, so opening one of those HTML files can request favicon images from `www.google.com`.
+
 Portable files never include API keys (encrypted or plaintext), passphrase metadata, decrypted-key session caches, OAuth tokens/state, Drive connection/profile state, install identifiers, active Focus state, or AI response caches. Import files are still untrusted input: TabKebab enforces a 25 MiB file limit, validates the complete document in both the panel and service worker, and changes only the repositories named by the file kind.
 
 Exporting does not upload the file anywhere. Where the downloaded file goes after that is up to you, so treat a full backup as sensitive because it can contain browsing URLs, titles, and Focus history.
@@ -105,7 +109,7 @@ Nothing. There is no "home" to phone. No analytics endpoint, no error reporting 
 
 ## Third-party services
 
-TabKebab does not embed any third-party SDKs, tracking pixels, ad networks, or analytics libraries. The only external network calls are the ones described above (AI providers and Google Drive), both of which require your explicit opt-in.
+TabKebab does not embed any third-party SDKs, tracking pixels, ad networks, or analytics libraries. External network activity is limited to the AI and Google Drive actions described above, plus the disclosed favicon loads in stash previews and opened bookmark HTML exports.
 
 ---
 

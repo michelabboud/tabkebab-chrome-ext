@@ -4,6 +4,55 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.2.20] — 2026-07-24
+
+### Added
+
+- Added a skippable, four-step first-run guide for the core
+  group → stash → restore loop. It appears once per browser profile, is
+  dismissible throughout, and can be replayed from General settings.
+- Added actionable empty states for saved sessions, auto-saved sessions,
+  stashes, and Focus profiles. Each state now explains the next step and links
+  to or performs a working action.
+- Made Smart Group available without setup by using Chrome's built-in,
+  on-device AI when no enabled usable provider is configured. The local route
+  needs no account or API key and does not send the grouping request over the
+  network.
+- Added an inline Smart Group recovery path with deterministic domain grouping
+  and a link to AI settings when built-in or configured AI is unavailable,
+  times out, aborts, or fails.
+- Added an evidence-backed Chrome Web Store listing draft with current feature,
+  privacy, and manifest-permission explanations.
+
+### Fixed
+
+- Reused the session canonicalization policy on Drive sync reads and portable
+  export reads, so older poisoned records heal and persist without requiring a
+  successful deletion first.
+- Session healing now recomputes window tab counts after dropping
+  unrepresentable tabs, and saving a session whose tabs are all
+  unrepresentable now returns the same error shape as an empty stash capture
+  instead of storing an empty session.
+- All four stash capture paths now share the same save-before-close boundary:
+  rejected or empty captures save nothing and close nothing, and only tabs
+  represented in a successfully saved stash are closed.
+- The stash favicon render gate now has direct coverage for valid, unsafe, and
+  oversized values and falls back locally when a stored value is rejected.
+
+### Documentation
+
+- Disclosed that opened bookmark HTML exports can load Google s2 favicon URLs
+  and that stash previews load bounded, scheme-checked stored favicon URLs from
+  the hosts those URLs name.
+- Documented the zero-account, zero-TabKebab-server model while distinguishing
+  on-device Chrome AI from optional user-configured network AI and Google Drive.
+
+### Verification note
+
+- The growth-wave baseline passed `876 tests / 0 failures`; G2 and G3 added 24
+  regression tests, bringing the final full suite to `900 tests / 0 failures`
+  across 47 files. The syntax/version-parity gate passes at `1.2.20`.
+
 ## [1.2.19] — 2026-07-21
 
 ### Fixed
