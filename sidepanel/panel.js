@@ -46,7 +46,9 @@ const aiSettingsCtrl = new AISettings(settingsRoot, {
 const settingsManagerCtrl = new SettingsManager(settingsRoot);
 
 const controllers = {
-  tabs: new TabList(document.getElementById('sub-domains')),
+  tabs: new TabList(document.getElementById('sub-domains'), {
+    navigate: navigatePanel,
+  }),
   sessions: new SessionManager(document.getElementById('view-sessions'), {
     navigate: navigatePanel,
   }),
@@ -352,12 +354,12 @@ let aiVisibilityGeneration = 0;
 async function updateAIVisibility() {
   const visibilityGeneration = ++aiVisibilityGeneration;
   try {
+    const aiSettings = await sendOrThrow({ action: 'getAISettings' });
     const result = await sendOrThrow({ action: 'isAIAvailable' });
     const available = result?.available || false;
     let providerName = '';
 
     if (available) {
-      const aiSettings = await sendOrThrow({ action: 'getAISettings' });
       const providerNames = {
         openai: 'OpenAI',
         claude: 'Claude',
@@ -376,9 +378,20 @@ async function updateAIVisibility() {
     const commandBarEl = document.getElementById('command-bar');
     if (commandBarEl) commandBarEl.hidden = !available;
 
-    // Show/hide Smart Group button
+    // Smart Group is always reachable. It uses the configured provider when
+    // usable and otherwise tries Chrome's brokered on-device AI without setup.
     const smartGroupBtn = document.getElementById('btn-smart-group');
-    if (smartGroupBtn) smartGroupBtn.hidden = !available;
+    if (smartGroupBtn) smartGroupBtn.hidden = false;
+    const selectedConfig = aiSettings?.providerConfigs?.[aiSettings?.providerId];
+    const usesConfiguredProvider = aiSettings?.enabled === true && (
+      aiSettings.providerId === 'custom' ||
+      (
+        aiSettings.providerId !== 'chrome-ai' &&
+        selectedConfig?.hasApiKey === true
+      )
+    );
+    const zeroConfigNote = document.getElementById('smart-group-zero-config-note');
+    if (zeroConfigNote) zeroConfigNote.hidden = usesConfiguredProvider;
 
     // Show/hide AI Suggest keep-awake button
     const suggestKeepAwakeBtn = document.getElementById('btn-suggest-keep-awake');
@@ -392,10 +405,14 @@ async function updateAIVisibility() {
     if (visibilityGeneration !== aiVisibilityGeneration) return false;
     // AI not available — keep hidden
     document.body.classList.remove('ai-available');
-    for (const id of ['command-bar', 'btn-smart-group', 'btn-suggest-keep-awake']) {
+    for (const id of ['command-bar', 'btn-suggest-keep-awake']) {
       const element = document.getElementById(id);
       if (element) element.hidden = true;
     }
+    const smartGroupBtn = document.getElementById('btn-smart-group');
+    if (smartGroupBtn) smartGroupBtn.hidden = false;
+    const zeroConfigNote = document.getElementById('smart-group-zero-config-note');
+    if (zeroConfigNote) zeroConfigNote.hidden = false;
     const providerLabel = document.getElementById('ai-provider-label');
     if (providerLabel) providerLabel.textContent = '';
     return false;
@@ -570,7 +587,7 @@ function toggleHelp() {
         <div class="help-group">
           <h3>Key Features</h3>
           <div class="help-feature"><strong>Kebab</strong> &mdash; Discard inactive tabs to save memory. Keep-awake domains are protected.</div>
-          <div class="help-feature"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain (requires AI setup in Settings).</div>
+          <div class="help-feature"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain. Chrome's built-in AI works without a key when available.</div>
           <div class="help-feature"><strong>Drive Sync</strong> &mdash; Back up sessions, stashes, and bookmarks to Google Drive.</div>
           <div class="help-feature"><strong>Bookmarks</strong> &mdash; Export tabs as Chrome bookmarks, local JSON, or Drive HTML.</div>
           <div class="help-feature"><strong>Focus Mode</strong> &mdash; Start a timed focus session. Distracting tabs are blocked, non-focus tabs can be kebab'd or stashed.</div>

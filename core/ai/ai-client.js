@@ -618,6 +618,48 @@ async function responseCacheScope(settings, providerId, request) {
   };
 }
 
+async function completeWithResolvedProvider(request, {
+  providerId,
+  config,
+  settings,
+}) {
+  const cacheKey = await AICache.makeCacheKey(
+    providerId,
+    config.model,
+    request.systemPrompt || '',
+    request.userPrompt,
+    await responseCacheScope(settings, providerId, request),
+  );
+
+  const cached = await AICache.get(cacheKey);
+  if (cached) {
+    if (config.apiKey && containsPrivatePlaintext(cached, config.apiKey)) {
+      await AICache.clear();
+    } else {
+      return { ...cached, fromCache: true };
+    }
+  }
+
+  const provider = PROVIDERS[providerId];
+  let response;
+  try {
+    response = await queue.enqueue(() =>
+      runAbortableAttempt(
+        (signal) => provider.complete(request, config, signal),
+        REQUEST_TIMEOUT_MS,
+      ));
+  } catch (error) {
+    // Provider/server/browser errors are untrusted and may reflect request
+    // headers or prompts. Preserve only the typed category across the core boundary.
+    throw sanitizeProviderFailure(error);
+  }
+  if (config.apiKey && containsPrivatePlaintext(response, config.apiKey)) {
+    throw new AINetworkError();
+  }
+  await AICache.set(cacheKey, response);
+  return { ...response, fromCache: false };
+}
+
 async function selectedProviderIsUnlocked(settings) {
   const providerId = safeOwnDataValue(settings, 'providerId');
   if (!PROVIDER_ID_SET.has(providerId) || providerId === ProviderId.CHROME_AI) return true;
@@ -893,42 +935,20 @@ export const AIClient = {
       throw new AIDisabledError();
     }
 
-    const provider = PROVIDERS[providerId];
     const config = await buildPrivateProviderConfig(settings, providerId);
-    const cacheKey = await AICache.makeCacheKey(
-      providerId,
-      config.model,
-      request.systemPrompt || '',
-      request.userPrompt,
-      await responseCacheScope(settings, providerId, request),
-    );
+    return completeWithResolvedProvider(request, { providerId, config, settings });
+  },
 
-    const cached = await AICache.get(cacheKey);
-    if (cached) {
-      if (config.apiKey && containsPrivatePlaintext(cached, config.apiKey)) {
-        await AICache.clear();
-      } else {
-        return { ...cached, fromCache: true };
-      }
-    }
-
-    let response;
-    try {
-      response = await queue.enqueue(() =>
-        runAbortableAttempt(
-          (signal) => provider.complete(request, config, signal),
-          REQUEST_TIMEOUT_MS,
-        ));
-    } catch (error) {
-      // Provider/server/browser errors are untrusted and may reflect request
-      // headers or prompts. Preserve only the typed category across the core boundary.
-      throw sanitizeProviderFailure(error);
-    }
-    if (config.apiKey && containsPrivatePlaintext(response, config.apiKey)) {
-      throw new AINetworkError();
-    }
-    await AICache.set(cacheKey, response);
-    return { ...response, fromCache: false };
+  /**
+   * Run Chrome's document-brokered provider without saving or changing AI
+   * settings. It shares the normal queue, timeout/abort lifecycle, cache, and
+   * sanitized error boundary.
+   */
+  async completeWithChromeAI(request) {
+    const providerId = ProviderId.CHROME_AI;
+    const settings = defaultPrivateSettings();
+    const config = { model: PROVIDER_DEFAULTS[providerId].model };
+    return completeWithResolvedProvider(request, { providerId, config, settings });
   },
 
   // ── Model Listing ──

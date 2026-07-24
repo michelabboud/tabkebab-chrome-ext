@@ -168,3 +168,94 @@ Ran 886 tests across 44 files. [8.40s]
 - Pushed: no
 - Merged: no
 - Long-running processes left behind: none
+
+## G3 close-out
+
+### What was built
+
+- Smart Group is now always available. When no enabled, usable BYO provider is
+  configured, it transparently uses Chrome's built-in AI through the existing
+  side-panel broker without changing or saving the user's AI settings.
+- The point-of-use copy states that the zero-config path needs no key or
+  account and that no data leaves the machine. Configured BYO providers still
+  take precedence when enabled and usable.
+- Smart Group now returns a fixed outcome describing whether AI was applied,
+  which route ran, and whether an unavailable, timed-out/aborted, or other
+  sanitized failure occurred. Raw provider and browser error text is never
+  rendered in the fallback UI.
+- AI failure no longer ends in the raw error toast or silently mutates tabs
+  with an implicit fallback. A friendly inline explanation offers two working
+  paths: one-click **Use domain grouping instead**, which invokes the existing
+  deterministic grouping action, and **Set up an API key**, which navigates to
+  the existing AI settings section.
+- The transient Chrome-AI route shares the existing AI queue, cache scoping,
+  120-second timeout, per-attempt `AbortController`, broker cancellation, and
+  sanitized error boundary. No new dependency, drawer, telemetry, or remote
+  code was introduced.
+
+### Files touched
+
+- `core/ai/ai-client.js`
+- `core/ai/smart-group-route.js`
+- `core/engine/solver-ai.js`
+- `core/grouping.js`
+- `sidepanel/components/smart-group-fallback.js`
+- `sidepanel/components/tab-list.js`
+- `sidepanel/panel.css`
+- `sidepanel/panel.html`
+- `sidepanel/panel.js`
+- `tests/core/smart-group-coordinator.test.js`
+- `tests/core/smart-group-route.test.js`
+- `tests/sidepanel/component-messaging.test.js`
+- `tests/sidepanel/smart-group-fallback.test.js`
+- `docs/reports/2026-07-21-codex-growth-wave-g1-g4.md`
+
+### Verification
+
+The fallback-ladder tests were written first and observed failing because the
+route module, inline component, point-of-use copy, and outcome handling did not
+yet exist. Focused green gate:
+
+```text
+14 pass
+0 fail
+39 expect() calls
+Ran 14 tests across 3 files. [44.00ms]
+```
+
+Focused component-boundary and G3 gate after enrolling the new component in
+the repository's side-panel request audit:
+
+```text
+33 pass
+0 fail
+175 expect() calls
+Ran 33 tests across 4 files. [101.00ms]
+```
+
+Fresh full-suite `bun test` tail:
+
+```text
+900 pass
+0 fail
+4975 expect() calls
+Ran 900 tests across 47 files. [7.80s]
+```
+
+### Assumptions
+
+- “No BYO key is configured” means there is no enabled usable keyed provider.
+  A saved key for a disabled/unselected configuration does not prevent the
+  zero-config Chrome-AI route. An enabled custom endpoint remains an explicit
+  configured route even when it intentionally uses no API key.
+- An explicitly selected Chrome built-in provider and the automatic
+  zero-config path receive the same local-only point-of-use promise.
+- “Falls back to a stated working non-AI action” means the extension presents
+  the deterministic domain action inline and runs it with one click. It does
+  not automatically rearrange tabs after an AI failure without the user's
+  fallback click.
+- A malformed or empty AI grouping result uses the same generic inline ladder
+  as other sanitized AI failures. Built-in unavailability and timeout/abort
+  retain their more specific friendly explanations.
+- Per this lane's constraints, `VERSION`, `manifest.json`, and `CHANGELOG.md`
+  were not touched, and no git command was run.

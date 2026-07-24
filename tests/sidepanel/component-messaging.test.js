@@ -29,6 +29,7 @@ const AUDITED_SIDE_PANEL_FILES = [
   'sidepanel/components/group-editor.js',
   'sidepanel/components/session-manager.js',
   'sidepanel/components/settings-manager.js',
+  'sidepanel/components/smart-group-fallback.js',
   'sidepanel/components/stash-list.js',
   'sidepanel/components/tab-list.js',
   'sidepanel/components/toast.js',
