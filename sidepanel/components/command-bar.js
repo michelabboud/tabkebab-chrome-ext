@@ -35,7 +35,10 @@ export class CommandBar {
     try {
       const result = await this.send({ action: 'executeNLCommand', command });
 
-      if (result.error) {
+      if (!result || typeof result !== 'object') {
+        showToast('Command failed: no response from background', 'error');
+        this.resultsEl.innerHTML = '';
+      } else if (result.error) {
         showToast(result.error, 'error');
         this.resultsEl.innerHTML = '';
       } else if (result.confirmation) {
@@ -46,6 +49,9 @@ export class CommandBar {
         showToast(result.message || 'Done', 'success');
         this.resultsEl.innerHTML = '';
         this.inputEl.value = '';
+      } else {
+        showToast('Command produced no result', 'error');
+        this.resultsEl.innerHTML = '';
       }
     } catch (err) {
       showToast('Command failed: ' + err.message, 'error');
@@ -208,7 +214,7 @@ export class CommandBar {
           parsedCommand: result.parsedCommand,
         });
         if (this._confirmationGeneration !== generation) return false;
-        showToast(execResult.message || 'Done', 'success');
+        showToast(execResult?.message || 'Done', 'success');
         this.inputEl.value = '';
         this.resultsEl.innerHTML = '';
         return true;

@@ -17,6 +17,12 @@ import { routePanelFocusMessage } from './focus-events.js';
 import { sendOrThrow } from './message-client.js';
 import { startChromeAIBroker } from './chrome-ai-broker.js';
 import { FirstRunWalkthrough } from './components/first-run-walkthrough.js';
+import { isConfirmOpen } from './components/confirm-dialog.js';
+import {
+  createDebounced,
+  isPlainShortcutAllowed,
+  resolveTabsChangedRefreshKey,
+} from './panel-helpers.js';
 
 // Chrome's Prompt API is document-only. Keep one named broker alive for this
 // panel document and permanently stop reconnecting when the document exits.
@@ -275,10 +281,21 @@ checkDuplicates();
 setInterval(checkDuplicates, 60000);
 
 // --- Listen for tab changes from service worker ---
+// tabsChanged arrives in bursts (one per tab event). Coalesce them and
+// refresh whichever live-tab view is visible so its rendered tab ids stay
+// current (stale ids would otherwise be acted on by close/ungroup buttons).
+function refreshVisibleTabViews() {
+  const visibleView = [...views].find(v => !v.classList.contains('hidden'))?.id?.replace(/^view-/, '');
+  const activeSubtab = document.querySelector('#view-tabs .sub-nav [role="tab"].active')?.dataset.subtab;
+  const key = resolveTabsChangedRefreshKey({ visibleView, activeSubtab });
+  if (key) void refreshController(controllers[key], key);
+  void refreshGlobalStats();
+}
+const scheduleTabsChangedRefresh = createDebounced(refreshVisibleTabViews, 150);
+
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'tabsChanged') {
-    void refreshController(controllers.tabs, 'tabs');
-    void refreshGlobalStats();
+    scheduleTabsChangedRefresh();
   }
   void routePanelFocusMessage(message, focusPanel, {
     loadFocusState: () => sendOrThrow({ action: 'getFocusState' }),
@@ -497,8 +514,11 @@ document.getElementById('btn-help').addEventListener('click', () => toggleHelp()
 
 // --- Keyboard shortcuts ---
 document.addEventListener('keydown', (e) => {
+  // A modal confirmation dialog owns the keyboard while it is open.
+  if (isConfirmOpen()) return;
+
   // Ctrl+K / Cmd+K: toggle search (works even when focused in inputs)
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') {
     e.preventDefault();
     globalSearch.toggle();
     return;
@@ -513,6 +533,10 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
+
+  // Single-key shortcuts never fire with Ctrl/Meta/Alt (e.g. Ctrl/Cmd+F
+  // must stay the browser's find) or when another handler claimed the key.
+  if (!isPlainShortcutAllowed(e, { dialogOpen: isConfirmOpen() })) return;
 
   // 1-4: switch main tabs
   const tabKeys = { '1': 'windows', '2': 'tabs', '3': 'stash', '4': 'sessions' };
@@ -553,7 +577,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // ?: show help overlay
-  if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+  if (e.key === '?') {
     e.preventDefault();
     toggleHelp();
     return;

@@ -40,27 +40,56 @@ export class StashList {
     this.listEl = rootEl.querySelector('#stash-list');
     this.navigate = navigate;
     this.driveConnected = false;
-    this.activeRestoreId = null;
+    // Restore ids currently in flight (id → count, since "Restore" and
+    // "Restore here" may run concurrently for the same item). A single id
+    // would let one restore's completion silence another's progress.
+    this.activeRestores = new Map();
 
     rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => this.exportStashes());
     rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
 
     // Listen for restore progress broadcasts from the service worker
-    this._progressPending = null;
+    // Latest pending progress per restore id, flushed once per frame.
+    this._progressPending = new Map();
     this._progressRafId = null;
     this._onRestoreProgress = (message) => {
-      if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
-        this._progressPending = message;
+      if (message?.action === 'restoreProgress' && this.isRestoreActive(message.restoreId)) {
+        this._progressPending.set(message.restoreId, message);
         if (!this._progressRafId) {
           this._progressRafId = requestAnimationFrame(() => {
             this._progressRafId = null;
-            const m = this._progressPending;
-            if (m) this.updateProgress(m.restoreId, m.created, m.loaded, m.total);
+            const pending = [...this._progressPending.values()];
+            this._progressPending.clear();
+            for (const m of pending) {
+              if (this.isRestoreActive(m.restoreId)) {
+                this.updateProgress(m.restoreId, m.created, m.loaded, m.total);
+              }
+            }
           });
         }
       }
     };
     chrome.runtime.onMessage.addListener(this._onRestoreProgress);
+  }
+
+  isRestoreActive(restoreId) {
+    return this.activeRestores.has(restoreId);
+  }
+
+  beginRestore(restoreId) {
+    this.activeRestores.set(restoreId, (this.activeRestores.get(restoreId) || 0) + 1);
+  }
+
+  /** Returns true when no other restore of the same id is still running. */
+  endRestore(restoreId) {
+    const remaining = (this.activeRestores.get(restoreId) || 1) - 1;
+    if (remaining > 0) {
+      this.activeRestores.set(restoreId, remaining);
+      return false;
+    }
+    this.activeRestores.delete(restoreId);
+    this._progressPending?.delete?.(restoreId);
+    return true;
   }
 
   updateProgress(restoreId, created, loaded, total) {
@@ -205,12 +234,14 @@ export class StashList {
       }
       restoreBtn.disabled = true;
       restoreBtn.textContent = 'Restoring...';
-      this.activeRestoreId = stash.id;
-      await this.restoreStash(stash.id, { mode: 'windows' });
-      this.activeRestoreId = null;
-      this.hideProgress(stash.id);
-      restoreBtn.disabled = false;
-      restoreBtn.textContent = 'Restore';
+      this.beginRestore(stash.id);
+      try {
+        await this.restoreStash(stash.id, { mode: 'windows' });
+      } finally {
+        if (this.endRestore(stash.id)) this.hideProgress(stash.id);
+        restoreBtn.disabled = false;
+        restoreBtn.textContent = 'Restore';
+      }
     });
 
     const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
@@ -224,12 +255,14 @@ export class StashList {
       }
       restoreHereBtn.disabled = true;
       restoreHereBtn.textContent = 'Restoring...';
-      this.activeRestoreId = stash.id;
-      await this.restoreStash(stash.id, { mode: 'here' });
-      this.activeRestoreId = null;
-      this.hideProgress(stash.id);
-      restoreHereBtn.disabled = false;
-      restoreHereBtn.textContent = 'Restore here';
+      this.beginRestore(stash.id);
+      try {
+        await this.restoreStash(stash.id, { mode: 'here' });
+      } finally {
+        if (this.endRestore(stash.id)) this.hideProgress(stash.id);
+        restoreHereBtn.disabled = false;
+        restoreHereBtn.textContent = 'Restore here';
+      }
     });
 
     // Per-stash Export button (download arrow)

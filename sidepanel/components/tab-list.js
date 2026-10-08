@@ -4,6 +4,7 @@ import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { sendOrThrow } from '../message-client.js';
 import { SmartGroupFallback } from './smart-group-fallback.js';
+import { makeKeyboardActivatable, setExpanded } from './keyboard-activate.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -22,6 +23,10 @@ export class TabList {
     this.initialized = false;
     this.lastGroups = [];
     this.allKeys = [];
+    // Render/refresh generations: only the newest call may touch the DOM, so
+    // overlapping refreshes (bursts of tabsChanged) can't append duplicates.
+    this._renderGeneration = 0;
+    this._refreshGeneration = 0;
     this.groupBtn = rootEl.querySelector('#btn-group-by-domain');
     this.ungroupBtn = rootEl.querySelector('#btn-ungroup-all');
     this.collapseBtn = rootEl.querySelector('#btn-collapse-all-tabs');
@@ -151,25 +156,32 @@ export class TabList {
   // ── Tab list rendering ──
 
   async refresh() {
+    const generation = ++this._refreshGeneration;
     const [groups, keepAwakeList] = await Promise.all([
       this.send({ action: 'getGroupedTabs' }),
       this.send({ action: 'getKeepAwakeList' }),
     ]);
+    // A newer refresh started while this one was in flight; its data wins.
+    if (generation !== this._refreshGeneration) return;
     this.keepAwakeDomains = new Set(keepAwakeList || []);
     await this.render(groups);
   }
 
   async render(groups) {
-    this.lastGroups = groups;
-    this.listEl.innerHTML = '';
+    const generation = ++this._renderGeneration;
 
     if (!groups || groups.length === 0) {
+      this.lastGroups = groups;
       this.listEl.innerHTML = '<p class="empty-state">No tabs open.</p>';
       return;
     }
 
     // Build a window index so we can label tabs from other windows
     const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+    // Superseded by a newer render while awaiting: discard this one.
+    if (generation !== this._renderGeneration) return;
+    this.lastGroups = groups;
+    const fragment = document.createDocumentFragment();
     const windowIndex = {};
     windows.forEach((w, i) => { windowIndex[w.id] = i + 1; });
     const multipleWindows = windows.length > 1;
@@ -354,11 +366,17 @@ export class TabList {
           this.collapsed.delete(group.domain);
           header.classList.remove('collapsed');
           body.classList.remove('collapsed');
+          setExpanded(header, true);
         } else {
           this.collapsed.add(group.domain);
           header.classList.add('collapsed');
           body.classList.add('collapsed');
+          setExpanded(header, false);
         }
+      });
+      makeKeyboardActivatable(header, {
+        expanded: !isCollapsed,
+        label: `${group.domain}, ${group.tabs.length} tab${group.tabs.length !== 1 ? 's' : ''}`,
       });
 
       // Body
@@ -389,12 +407,15 @@ export class TabList {
               this.collapsed.delete(subKey);
               subHeader.classList.remove('collapsed');
               subBody.classList.remove('collapsed');
+              setExpanded(subHeader, true);
             } else {
               this.collapsed.add(subKey);
               subHeader.classList.add('collapsed');
               subBody.classList.add('collapsed');
+              setExpanded(subHeader, false);
             }
           });
+          makeKeyboardActivatable(subHeader, { expanded: !subCollapsed });
 
           const subBody = document.createElement('div');
           subBody.className = `window-subgroup-body${subCollapsed ? ' collapsed' : ''}`;
@@ -416,8 +437,11 @@ export class TabList {
 
       domainEl.appendChild(header);
       domainEl.appendChild(body);
-      this.listEl.appendChild(domainEl);
+      fragment.appendChild(domainEl);
     }
+
+    // Swap in one step so the list is never observed half-built or doubled.
+    this.listEl.replaceChildren(fragment);
   }
 
   createTabItem(tab) {
@@ -471,6 +495,7 @@ export class TabList {
         showToast('Failed to focus tab: ' + err.message, 'error');
       }
     });
+    makeKeyboardActivatable(item, { label: `Switch to ${title.textContent}` });
 
     return item;
   }
@@ -674,7 +699,24 @@ export class TabList {
   async ungroupAll() {
     try {
       const tabs = await this.send({ action: 'getTabs', allWindows: true });
-      const grouped = tabs.filter(t => t.groupId && t.groupId !== -1);
+      if (!Array.isArray(tabs)) throw new Error('No tab data received from background');
+      const groupIds = new Set(tabs.filter(t => t.groupId && t.groupId !== -1).map(t => t.groupId));
+      if (groupIds.size === 0) {
+        showToast('No tab groups to ungroup', 'info');
+        return;
+      }
+      const ok = await showConfirm({
+        title: 'Ungroup all tabs?',
+        message: `Remove all ${groupIds.size} tab group${groupIds.size !== 1 ? 's' : ''}? Tabs stay open, but group names and colors are lost.`,
+        confirmLabel: 'Ungroup All',
+        danger: true,
+      });
+      if (!ok) return;
+      // Re-read at action time so tabs grouped while the dialog was open are
+      // included and tabs closed meanwhile are not sent.
+      const liveTabs = await this.send({ action: 'getTabs', allWindows: true });
+      if (!Array.isArray(liveTabs)) throw new Error('No tab data received from background');
+      const grouped = liveTabs.filter(t => t.groupId && t.groupId !== -1);
       if (grouped.length > 0) {
         await this.send({ action: 'ungroupTabs', tabIds: grouped.map(t => t.id) });
       }
