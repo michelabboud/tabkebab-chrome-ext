@@ -215,7 +215,7 @@ export const aiHandlers = {
   // ── AI Tab Summarization ──
 
   async summarizeTabs(msg) {
-    const allTabs = await getAllTabs({ allWindows: true });
+    const allTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const targetTabs = allTabs.filter(t => msg.tabIds.includes(t.id));
 
     if (targetTabs.length === 0) {
@@ -253,7 +253,7 @@ export const aiHandlers = {
   // ── AI Natural Language Commands ──
 
   async executeNLCommand(msg) {
-    const promptTabs = await getAllTabs({ allWindows: true });
+    const promptTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const tabContext = Prompts.nlCommand.buildTabContext(promptTabs);
 
     const response = await AIClient.complete({
@@ -272,7 +272,7 @@ export const aiHandlers = {
     if (!parsed.action || typeof parsed.action !== 'string') {
       return { error: 'AI returned an invalid action' };
     }
-    const liveTabs = await getAllTabs({ allWindows: true });
+    const liveTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const matchingTabs = filterNLMatches(parsed.action, liveTabs, parsed.filter);
 
     if (matchingTabs.length === 0) {
@@ -304,7 +304,7 @@ export const aiHandlers = {
     }
 
     const approvedIds = new Set(parsedCommand.tabIds);
-    const allTabs = await getAllTabs({ allWindows: true });
+    const allTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const matchingTabs = filterNLMatches(parsedCommand.action, allTabs, parsedCommand.filter)
       .filter((tab) => approvedIds.has(tab.id));
     if (matchingTabs.length === 0) {
@@ -322,7 +322,7 @@ export const aiHandlers = {
   // ── AI keep-awake suggestions ──
 
   async classifyKeepAwake() {
-    const allTabs = await getAllTabs({ allWindows: true });
+    const allTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const response = await AIClient.complete({
       systemPrompt: Prompts.keepAwake.system,
       userPrompt: Prompts.keepAwake.buildUserPrompt(allTabs),

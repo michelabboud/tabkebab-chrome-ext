@@ -130,6 +130,10 @@ export async function applySmartGroupsToChrome(onProgress) {
   // Phase 1: Snapshot
   report(Phase.SNAPSHOT, 'Reading all tabs and windows...');
   const snapshot = await takeSnapshot();
+  // Incognito tab titles and URLs are never sent to an AI provider.
+  if ([...snapshot.tabsById.values()].some((tab) => tab.incognito)) {
+    throw new Error('Smart group is not available for incognito windows.');
+  }
 
   // Phase 2: AI Solver. Failure returns a fixed, actionable fallback outcome;
   // the panel owns the user's one-click decision to run deterministic grouping.

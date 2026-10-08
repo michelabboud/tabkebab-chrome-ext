@@ -22,12 +22,12 @@ export function formatDriveCleanupResult(result) {
     const failedText = `${result.errors.length} ${result.errors.length === 1 ? 'file' : 'files'} failed`;
     return {
       type: 'error',
-      message: `Cleanup incomplete: Deleted ${result.deleted} Drive files; ${failedText}. ${protectedText}`,
+      message: `Cleanup incomplete: moved ${result.deleted} Drive files to the trash; ${failedText}. ${protectedText}`,
     };
   }
 
   return {
     type: 'success',
-    message: `Deleted ${result.deleted} Drive files. ${protectedText}`,
+    message: `Moved ${result.deleted} Drive files to the trash. ${protectedText}`,
   };
 }

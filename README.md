@@ -63,7 +63,7 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 - **Audio-safe pipeline restore**: batched creation → temporary background mute → discard → guaranteed unmute cleanup; non-discarding restores never mute
 - **Auto-save** on browser start and at configurable intervals (default 24h), with retention policy (default 7 days, always keeping the 2 newest)
 - **Optional name** — an empty name saves as e.g. "Session — Oct 8, 9:18 PM"
-- **Incognito tabs are never saved**, and pages that cannot be reopened are left out
+- **Incognito tabs are never saved or sent to AI**, and pages that cannot be reopened are left out
 - **Per-session export** as JSON for sharing or backup
 - **Rename and delete** sessions from the panel
 

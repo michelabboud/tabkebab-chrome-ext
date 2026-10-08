@@ -704,7 +704,7 @@ describe('checked cleanup UI boundary', () => {
       deleted: 2, keptCanonical: 2, keptNewest: 3, ignoredUndated: 4, errors: [],
     })).toEqual({
       type: 'success',
-      message: 'Deleted 2 Drive files. Protected 2 canonical, 3 newest, and 4 undated files.',
+      message: 'Moved 2 Drive files to the trash. Protected 2 canonical, 3 newest, and 4 undated files.',
     });
 
     const partial = formatDriveCleanupResult({
@@ -716,7 +716,7 @@ describe('checked cleanup UI boundary', () => {
     });
     expect(partial.type).toBe('error');
     expect(partial.message).toContain('Cleanup incomplete');
-    expect(partial.message).toContain('Deleted 1');
+    expect(partial.message).toContain('moved 1 Drive files to the trash');
     expect(partial.message).toContain('1 file failed');
     expect(partial.message).toContain('Protected 2 canonical, 3 newest, and 4 undated');
     expect(partial.message).not.toContain('success');
@@ -749,7 +749,7 @@ describe('checked cleanup UI boundary', () => {
     await complete.manager.cleanDriveFiles();
     expect(complete.notifications).toEqual([{
       type: 'success',
-      message: 'Deleted 2 Drive files. Protected 2 canonical, 3 newest, and 4 undated files.',
+      message: 'Moved 2 Drive files to the trash. Protected 2 canonical, 3 newest, and 4 undated files.',
     }]);
     expect(complete.button).toMatchObject({ disabled: false, textContent: 'Clean Drive Files' });
 

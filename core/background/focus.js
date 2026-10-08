@@ -77,7 +77,7 @@ export function createFocusTabGuard({ focusReadiness }) {
             decision: { distraction: true, confidence: 1 },
             category: result.category,
           });
-        } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
+        } else if (state.aiBlocking && !tab.incognito && !isAllowed(tabWithUrl, state.allowedDomains)) {
           // Try AI categorization for unknown domains
           await checkWithAI({
             runId: state.runId,
@@ -110,7 +110,7 @@ export function createFocusTabGuard({ focusReadiness }) {
             decision: { distraction: true, confidence: 1 },
             category: result.category,
           });
-        } else if (state.aiBlocking && !isAllowed(tabWithUrl, state.allowedDomains)) {
+        } else if (state.aiBlocking && !tab.incognito && !isAllowed(tabWithUrl, state.allowedDomains)) {
           // Try AI categorization for unknown domains
           await checkWithAI({
             runId: state.runId,

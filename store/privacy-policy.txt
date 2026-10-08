@@ -24,7 +24,7 @@ All extension data lives inside your browser profile:
 
 The unlimitedStorage permission only lifts the local storage quota; it grants no access to other data.
 
-Incognito tabs are never written to sessions, stashes, or bookmark exports.
+Incognito tabs are never written to sessions, stashes, or bookmark exports, and are never sent to an AI provider.
 
 API keys are encrypted with AES-GCM 256-bit using PBKDF2 key derivation (600,000 iterations for new keys). Plaintext keys are never written to disk.
 

@@ -38,7 +38,7 @@ TabKebab requests the `unlimitedStorage` permission. It only lifts Chrome's 10 M
 
 ### Incognito tabs
 
-Incognito (private) tabs are never written to sessions, stashes, or bookmark exports. TabKebab can only see incognito tabs at all if you allow the extension in incognito in `chrome://extensions`.
+Incognito (private) tabs are never written to sessions, stashes, or bookmark exports, and are never sent to an AI provider. TabKebab can only see incognito tabs at all if you allow the extension in incognito in `chrome://extensions`.
 
 ### Chrome session storage (`chrome.storage.session`)
 
@@ -76,7 +76,7 @@ AI is off by default (the **AI provider** setting starts at **Off**). If — and
 - **Natural-language commands:** your command plus, for up to 200 open tabs, each tab's title (first 60 characters) and hostname.
 - **Focus Mode AI Detection** (only if you turn it on): the hostname of a site you navigate to during a focus session and the name of the focus profile.
 
-Incognito tabs are not included in sessions, stashes, or bookmarks, but if you allow TabKebab in incognito, their titles and URLs can be part of an AI request you start while they are open.
+Incognito tabs are never included in AI requests: AI commands, summaries, keep-awake suggestions and Focus AI checks skip them, and Smart group is unavailable for incognito windows.
 
 When a key is configured, it is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
 

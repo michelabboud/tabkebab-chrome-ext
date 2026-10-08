@@ -73,7 +73,7 @@ Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
 - **Scheduling:** browser restarts and settings saves no longer reset alarm
   timers, so long-interval jobs (e.g. 24 h Drive sync) actually run.
 - **Privacy:** incognito tabs are excluded from sessions, stashes, and
-  bookmark exports.
+  bookmark exports, and are never sent to an AI provider.
 - **Reliability:** stash database writes can no longer hang the extension;
   partial tab closes report the real count; audible tabs are not discarded or
   auto-stashed and pinned tabs are not auto-stashed.
