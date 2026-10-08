@@ -48,14 +48,16 @@ The side panel opens on the right side of your browser and stays open as you bro
 
 ### First Launch
 
-On first launch, TabKebab opens to the **Tabs** view showing all tabs in your current window. The four main views are accessible via the navigation bar at the top:
+On first launch, TabKebab opens to the **Tabs** view, and a short **Getting started** card walks you through the group → stash → restore loop in four steps (click **Skip tour** to dismiss it, or replay it later from Settings > General > **Replay guide**). The four main views are in the view bar at the top, in this order:
 
-| Tab | Purpose |
-|-----|---------|
-| **Windows** | Overview of all browser windows with tab counts |
-| **Tabs** | Live tab list with grouping, search, and management |
-| **Stash** | Saved tab collections stored in IndexedDB |
-| **Sessions** | Full browser state snapshots |
+| View | Key | Purpose |
+|------|-----|---------|
+| **Tabs** | `1` | Live tabs by domain, Chrome groups and custom groups, and duplicates |
+| **Windows** | `2` | Overview of all browser windows with tab counts |
+| **Stash** | `3` | Saved tab collections stored in IndexedDB |
+| **Sessions** | `4` | Full browser state snapshots |
+
+Focus Mode and Settings open from icons in the header.
 
 ---
 
@@ -63,92 +65,87 @@ On first launch, TabKebab opens to the **Tabs** view showing all tabs in your cu
 
 ### Header
 
-The header shows the TabKebab logo, a **version badge**, quick links to GitHub and the Privacy Policy, status icons for **Drive** and **AI** connections, a **Focus Mode** button (F), a **search** button (Ctrl+K), a **help button** (?), and a **gear icon** for Settings.
+The header shows the TabKebab logo and, from left to right:
 
-### Global Stats Bar
+- **Drive status** (cloud) and **AI status** (sparkle) icons. Both features are opt-in, so "not set up" is a neutral grey icon (for example "AI: off — click to set up"). A configured feature that works shows a small green dot, and only a configured feature that is failing turns red. Click either icon to jump to its Settings section.
+- **Focus Mode** (target icon, `F`). It pulses red while a focus session runs.
+- **Search** (magnifier, `Ctrl+K`).
+- **Help** (`?`).
+- **Settings** (gear).
 
-Below the navigation bar, a fixed stats bar displays three cards:
+While Focus or Settings is open, its header icon shows as selected instead of a view-bar tab. The version number, privacy policy and GitHub links are in Settings > About.
 
-| Stat | Meaning |
-|------|---------|
-| **Windows** | Total open browser windows |
-| **Tabs** | Total open tabs across all windows |
-| **Active / Kebab** | Percentage of tabs that are active (not discarded) |
+### View Bar
 
-A hint line reads "Kebab = discarded tabs saving memory". The stats bar stays visible on every view and updates in real time.
+Four pill-shaped tabs switch between **Tabs**, **Windows**, **Stash** and **Sessions**. The selected view is a filled pill. Press `1`–`4`, or focus the bar and use the `←` / `→` arrow keys. Each view keeps its scroll position when you switch away and back.
 
-### Navigation Bar
+### Stats Strip
 
-Four tabs switch between the main views. The active tab is highlighted with an accent underline. Each view retains its scroll position when you switch away and back.
+Under the view bar, one line summarizes your browser, for example `3 windows · 21 tabs · 0 sleeping`. "Sleeping" tabs are discarded ("kebab'd") to free memory; they reload when you open them. The strip updates in real time and is hidden on Settings and Focus, where it carries no information.
+
+### Focus Banner
+
+While a focus session is running or paused, a slim banner across every view reads, for example, `Focus · Coding · 49:58 left` (or `12:30 elapsed` for an open-ended session, plus `· paused` when paused). Click it to open the Focus view, or click **End** to end the session (see [Session End](#session-end)). The banner is hidden while the Focus view itself is open, and it stays visible even if Focus Mode is switched off in Settings > Features, so a running session can always be ended. It also follows sessions started, paused or ended from a TabKebab panel in another window.
 
 ### AI Command Bar
 
-When AI is configured, a multi-line command bar appears below the stats bar. Type natural language commands and press **Enter** to send (or **Shift+Enter** for a new line). A small label shows the active AI provider name (e.g., "OpenAI", "Claude"). See [Natural Language Commands](#natural-language-commands) for details.
+When an AI provider is set up, a one-line command bar appears under the stats strip: "Ask TabKebab… (e.g. close YouTube tabs)". Press `/` to jump to it, type a command and press **Enter** (or click **Go**). **Shift+Enter** adds a new line. A small label under it shows the provider, for example "via OpenAI". See [Natural Language Commands](#natural-language-commands).
+
+### Search
+
+Press `Ctrl+K` (`Cmd+K` on macOS) or click the magnifier to search **open tabs**, **stashes** and **sessions** at once by title or URL. `Ctrl+K` works even while you are typing in a field, and `/` opens search when the AI command bar is not set up.
+
+- Results are grouped into **Open Tabs**, **Stashes** and **Sessions** with a count each. Up to 10 are listed per group; **Show all N** opens the matching view.
+- Use `↑` / `↓` to move through results and **Enter** to open one: a tab is brought to the front in its window, and a stash or session opens its view with that card scrolled into view and highlighted.
+- Press **Esc** or click outside to close search.
 
 ---
 
 ## Tabs View
 
-The Tabs view is the primary workspace. It has a toolbar row and four sub-views.
+The Tabs view is the primary workspace. A sub-tab bar switches between three sub-views: **Domains**, **Groups** and **Duplicates** (the Duplicates tab carries a red badge when duplicates exist).
 
-### Toolbar
+Every tab row shows the favicon and title. Hover a row to see the full title and URL, click it to switch to that tab, or click **×** to close it. Discarded (sleeping) tabs are dimmed.
 
-- **Refresh** — reload the tab list
-- **Sub-view buttons**: All | Domains | Groups | a groups editor icon
-- **Find Duplicates** — scan all windows for duplicate tabs
-- **Kebab** dropdown — sleep (discard) tabs by scope
-- **Stash** dropdown — stash and close tabs by scope
-- **Group** dropdown — organize tabs into Chrome groups
+### Domains
 
-### Sub-view: All Tabs
+Tabs from all windows, grouped by domain. Blank and browser-internal pages are listed together under **Blank & browser pages**.
 
-Shows every tab in the current window as a flat list. Each tab row displays:
+**Toolbar** (one row):
 
-- **Favicon** (from Google's favicon API)
-- **Title** (truncated with ellipsis)
-- **URL** (dimmed, truncated)
-- **Status indicator**: active tab has an accent dot; discarded tabs show a sleep icon
+- **Group by domain ▾** — a split button. The main part groups tabs into Chrome tab groups by domain (see [Grouping Tabs](#grouping-tabs)). The **▾** part opens a menu with **Smart group (AI)** and **Ungroup all…**.
+- **Sleep all** — discard (kebab) every background tab in every window to free memory. Active tabs, keep-awake domains and already-sleeping tabs are skipped.
+- **⇕** — collapse or expand every domain row at once.
 
-**Actions per tab** (on hover):
-- Close (X button)
-- Right-click context for pin, discard, move to window
+**Domain rows.** Each row shows the domain name (long names are truncated), a tab count, and `W1, W2` when the domain is open in more than one window; its tabs are then split into per-window sub-lists. Click a row to collapse or expand it. On the right of each row:
 
-### Sub-view: By Domain
+- **Stash** — save and close this domain's tabs (see [Stash View](#stash-view)). A toast offers **Undo**.
+- **⋯** — more actions for this domain:
+  - **Sleep tabs (Kebab)** — discard this domain's tabs.
+  - **Keep awake** — a check item; when on, this domain is never discarded and the row is marked.
+  - **Summarize tabs (AI)** — shown when AI is available.
+  - **Close N tabs…** — close all of this domain's tabs, after a confirmation.
 
-Tabs grouped by their domain name. Each domain section shows:
-- Domain name and tab count badge
-- Collapsible: click the header to expand/collapse
-- Tabs listed within each domain
+### Groups
 
-### Sub-view: By Chrome Group
+Three collapsible sections (click a section title to fold it):
 
-Shows tabs organized by their Chrome native tab group. Includes:
-- Group color dot and name
-- Ungrouped tabs in a separate section
-- Collapsible group headers
-
-### Sub-view: Groups Editor
-
-A unified editor for managing tab groups. Three collapsible sections:
-
-1. **Custom Groups** — groups you create within TabKebab. Includes a toolbar to create new groups. Each group card has:
-   - Collapsible body with drag-and-drop tab slots
+1. **Custom Groups** — groups you create within TabKebab. Type a name, pick a color and click **Create**. Each group card has:
+   - Collapsible body with drag-and-drop tab slots (drag tabs in from anywhere in the Groups view)
    - **Smart search input** — type to filter open tabs by title or URL; matching tabs appear with a **+** button to add them to the group
    - **URL paste** — if the input looks like a URL, an "Add URL" option appears to add it directly
    - **Apply to Chrome** — creates a native Chrome tab group from the custom group
-   - **Delete** — removes the custom group locally; its deletion propagates to other connected profiles at the next sync
-2. **Chrome Tab Groups** — lists all native Chrome tab groups with their color and title. Click to expand and see member tabs. Groups with no title display as "Untitled Group".
+   - **Delete group** — removes the custom group locally; its deletion propagates to other connected profiles at the next sync
+2. **Chrome Tab Groups** — every native Chrome tab group with its color, title and tab count (groups with no title show as "Untitled Group"). The section toolbar has **Sleep all** (discard every grouped tab) and **⇕** (collapse or expand all groups in Chrome's tab strip). Each group row has **Stash** and a **⋯** menu with **Sleep tabs (Kebab)**, **Keep awake**, **Collapse in tab strip** / **Expand in tab strip**, **Ungroup** and **Close N tabs…**.
 3. **Ungrouped Tabs** — tabs not belonging to any group.
-
-Each section header has a **collapse/expand chevron**.
 
 ### Grouping Tabs
 
-The **Group** dropdown offers:
+Grouping lives in the **Group by domain ▾** split button on the Domains toolbar:
 
-- **By Domain** — groups all tabs by their domain into Chrome native tab groups. Domains with only 1 tab are left ungrouped.
-- **Smart (AI)** — sends tab titles and URLs to your configured AI provider. The AI creates contextual groups (e.g., "Research", "Shopping", "Work Tools").
-- **Ungroup All** — removes all tab group assignments.
+- **Group by domain** (main button) — groups tabs by their domain into Chrome native tab groups. Domains with only 1 tab are left ungrouped, and pinned tabs, blank pages and browser-internal pages are never grouped.
+- **Smart group (AI)** (in the ▾ menu) — groups tabs by topic (e.g., "Research", "Shopping", "Work Tools"). It uses your configured AI provider, or Chrome's on-device AI when that is available without setup; a one-line hint under the toolbar says so when on-device AI is ready. If Smart group can't run, an inline notice explains why and offers **Group by domain** now or **Add an API key**.
+- **Ungroup all…** (in the ▾ menu) — removes every tab group after a confirmation ("Ungroup all tabs?"). Tabs stay open; group names and colors are lost.
 
 When grouping runs, a **4-phase progress indicator** appears:
 
@@ -159,13 +156,13 @@ When grouping runs, a **4-phase progress indicator** appears:
 
 ### Finding Duplicates
 
-The **Duplicates** sub-tab shows a **red badge** on the tab button with the current count of extra duplicate copies plus empty pages. This count is updated automatically every 60 seconds and after any close operation.
+The **Duplicates** sub-tab shows a **red badge** with the number of extra duplicate copies (blank pages are not counted). The count is refreshed every 60 seconds and after any close operation.
 
-Click **Scan for Duplicates** to refresh the list. Results show:
-- Number of duplicates found per URL
-- Each duplicate group with checkboxes (first tab marked "KEEP", rest pre-checked for closing)
-- **Close** button per tab or **Close All Duplicates** for bulk removal with lossless undo from each selected tab's exact original URL
-- Badge resets to zero when all duplicates are resolved
+Click **Scan for duplicates** to refresh the list. Results show:
+- One card per duplicated URL, showing a readable host and path (hover for the full URL)
+- Each tab with a checkbox: the first copy is marked **KEEP**, the rest are pre-checked for closing
+- **Close** per tab, or **Close N duplicates** to close every checked copy at once. The toast offers **Undo**, which reopens the exact original URLs.
+- The badge resets to zero when all duplicates are resolved
 
 URL fragments are part of duplicate identity. For example, `https://app.test/#/one` and `https://app.test/#/two` are different pages, while two exact copies of either route form their own duplicate group. **Undo** reopens the exact captured URLs, including query strings and fragments.
 
@@ -177,33 +174,35 @@ Above the duplicate list, an **Empty Pages** row appears if any blank tabs are d
 
 Chrome's `chrome://newtab` and `chrome://new-tab-page` pages are intentionally preserved and are not offered as duplicate or empty-page cleanup targets.
 
-Click **Close Empty Pages** to remove them all at once. The badge count includes both duplicates and empty pages.
+Click **Close Empty Pages** to remove them all at once. Empty pages are counted in this row, not in the Duplicates badge.
 
 ---
 
 ## Windows View
 
-Shows all open browser windows as cards.
+Shows all open browser windows as cards. The toolbar has **Consolidate windows** (see below) and **⇕** to collapse or expand every card.
 
 ### Window Cards
 
-Each card displays:
-- **Window number** (Window 1, Window 2, etc.)
-- **Tab count badge** with color coding:
-  - **Green**: below warning threshold
-  - **Yellow**: above warning threshold (default: 20)
-  - **Red**: above danger threshold (default: 50)
-- **Focused window** indicator
+Each card header displays:
+- A **status dot** colored by tab count:
+  - **Green**: below the warning threshold
+  - **Yellow**: at or above the warning threshold (default: 20)
+  - **Red**: at or above the danger threshold (default: 50); the count turns into a red "N tabs" badge
+- **Window number** (Window 1, Window 2, etc.) and the tab count
+- The **current window** is marked with an accent edge on the card and a small dot after its name
+
+Click a header to expand the card. The body lists the window's Chrome groups as chips and collapsible sections (plus an **Ungrouped** section), and a **Bring to front** button.
 
 ### Actions
 
-- **Bring to Front** button — brings that browser window to the foreground
-- **Consolidate** button intelligently reorganizes your windows (see below)
+- **Stash** — save and close every tab in that window. A toast offers **Undo**.
+- **⋯** — **Sleep tabs (Kebab)** for that window; for other windows also **Bring to front** and **Close window…** (with confirmation).
 - Tab counts update in real time
 
 ### Consolidate Windows
 
-The **Consolidate** button runs a 3-phase optimization:
+The **Consolidate windows** button runs a 3-phase optimization:
 
 1. **Redistribute from huge windows** — Windows with >100 tabs have excess tabs moved to smaller windows that have room. Targets ~50 tabs per window.
 
@@ -228,28 +227,28 @@ Stashing saves tabs and closes them, freeing browser resources while preserving 
 
 ### Creating a Stash
 
-Use the **Stash** dropdown in the Tabs toolbar:
+Click **Stash** on any of these rows:
 
-- **Stash Window** — saves and closes all tabs in the current window
-- **Stash by Group** — saves and closes tabs by their Chrome group
-- **Stash by Domain** — saves and closes tabs grouped by domain
-- **Stash All** — saves and closes all tabs across all windows
+- a **domain** row in Tabs > Domains — saves and closes that domain's tabs
+- a **Chrome group** row in Tabs > Groups — saves and closes the group's tabs
+- a **window** card in Windows — saves and closes all tabs in that window
+
+Blank pages and browser-internal pages stay open (pinned tabs are stashed and come back pinned). A toast confirms what was stashed, for example "Stashed 3 tabs from github.com", with an **Undo** button for 8 seconds: Undo reopens those tabs and removes the stash. Focus Mode (Stash action), auto-stash and AI commands can also create stashes.
 
 Each stash records: tab URLs, titles, favicon URLs, pinned state, group metadata, source type, and timestamp.
 
 ### Stash List
 
 Stashes appear as cards with:
-- **Name** (based on source: window name, group name, or "All Tabs")
-- **Tab count** badge
-- **Favicon previews** — up to 5 favicons from the stashed tabs
-- **Source badge** — Window, Group, Domain, or All
+- **Name** (the domain, group, or window it came from)
+- **Source badge** — Window, Group, or Domain
 - **Restored badge** — shows if the stash has already been restored
-- **Timestamp**
+- **Favicon previews** from the stashed tabs
+- **Tab count** and **timestamp**
 
 ### Restoring a Stash
 
-Click the **Restore** button on a stash card.
+Click **Restore** on a stash card to reopen the tabs in their own windows, or **Restore here** to open them in the current window.
 
 - If the stash has a "Restored" badge, a confirmation dialog asks if you want to restore again.
 - Tabs are restored in batches of up to six. Successful creations retain their own saved pinned/group metadata even if a sibling tab fails.
@@ -260,8 +259,10 @@ Click the **Restore** button on a stash card.
 
 ### Other Stash Actions
 
-- **Export** — download the stash as a JSON file
-- **Delete** — permanently remove the stash (with confirmation)
+- **Export** (⤓ icon) — download the stash as a JSON file
+- **Save to Google Drive** (cloud icon) — shown when Drive is connected
+- **Delete** — removes the stash, with an **Undo** button in the toast for 8 seconds
+- The **⋯** menu next to the "Stashed tabs" heading has **Export stashes (JSON)** and **Import stashes…**
 
 ### Settings Integration
 
@@ -289,7 +290,9 @@ The **Auto** tab displays a count badge and strips the `[Auto]` prefix from sess
 
 ### Saving a Session
 
-Type a name in the input at the top of the Sessions view and click **Save** (or press Enter). The snapshot is saved to `chrome.storage.local` and appears in the **Saved** tab.
+Type a name in the input at the top of the Sessions view and click **Save** (or press Enter). The name is optional: leave it empty and the session is named after the current date and time, for example **Session — Oct 8, 9:18 PM**. The snapshot is saved to `chrome.storage.local` and appears in the **Saved** tab.
+
+The **⋯** menu next to **Save** has **Export all data (JSON)** and **Import JSON…** (see [Export & Import](#export--import)).
 
 ### Auto-Save
 
@@ -311,7 +314,7 @@ The default discard pipeline temporarily mutes only background tabs that are abo
 
 ### Session Actions
 
-- **Export** — download as JSON (arrow icon)
+- **Export** (⤓ icon) — download as JSON
 - **Delete** — remove locally with an 8-second Undo action. The deletion propagates to other connected profiles at the next sync.
 
 Session Undo restores exactly one newer copy while retaining the deletion's convergence metadata. That retained metadata prevents an older copy from another profile from replacing the restored session during the next sync. Manual-group deletion also propagates at the next sync, but it does not offer Undo.
@@ -324,12 +327,11 @@ Session Undo restores exactly one newer copy while retaining the deletion's conv
 
 ### How to Kebab
 
-The **Kebab** dropdown in the Tabs toolbar offers:
+- **Sleep all** on the Tabs > Domains toolbar — discard every background tab in every window
+- **Sleep all** on the Tabs > Groups toolbar — discard every tab that is in a Chrome group
+- **⋯ > Sleep tabs (Kebab)** on a domain row, a Chrome group row, or a window card — discard just those tabs
 
-- **Kebab Domain** — discard all tabs on a specific domain
-- **Kebab Group** — discard all tabs in a Chrome group
-- **Kebab Window** — discard all tabs in the current window
-- **Kebab All** — discard all tabs across all windows
+The active tab of each window, keep-awake domains and tabs that are already sleeping are skipped. The stats strip shows how many tabs are sleeping.
 
 ### Keep-Awake List
 
@@ -337,9 +339,12 @@ Some tabs should never be discarded (email clients, calendars, real-time tools).
 
 **Default protected domains** include: `gmail.com`, `calendar.google.com`, `outlook.com`, `slack.com`, `teams.microsoft.com`, `discord.com`, and others.
 
-**Manage the list** in Settings > Tab Sleep:
+**Toggle a domain** from its row: **⋯ > Keep awake** on a domain or Chrome group row in the Tabs view.
+
+**Manage the list** in Settings > Tab Sleep (Kebab):
 - **Add domain** — type a domain and click Add
-- **Remove** — click X next to any domain
+- **Count and filter** — the list shows how many domains are protected; type in **Filter domains** to find one, and click **Show all** to expand a long list
+- **Remove** — click × next to any domain
 - **Suggest (AI)** — if AI is configured, click to get AI suggestions for which domains to protect based on your current tabs
 - **Reset to Defaults** — restore the original domain list
 
@@ -360,8 +365,10 @@ Focus Mode transforms TabKebab into a productivity assistant. Start a timed sess
 ### Starting a Focus Session
 
 Access Focus Mode via:
-- **Header button** — click the target/crosshair icon in the header
+- **Header button** — click the target icon in the header
 - **Keyboard** — press `F` (when not in an input field)
+
+Press **Esc** to leave the Focus setup and go back to Tabs.
 
 ### Built-in Profiles
 
@@ -376,22 +383,28 @@ Choose from 4 preset profiles, each with suggested domains and duration:
 
 ### Setup Options
 
-Before starting, configure:
+The top of the setup screen has everything needed to start:
 
-1. **Duration** — set minutes or check "Open-ended" for unlimited timer
-2. **Tab Action** — what happens to non-focus tabs when you start:
-   - **Kebab** — discard background non-focus tabs (they stay in the tab strip but unload); the active tab is never discarded
-   - **Stash** — save and close background non-focus tabs (auto-restored when the session ends); the active tab is never closed
-   - **Group** — create a Chrome tab group containing only eligible focus tabs. If Chrome metadata or Focus-state persistence fails after grouping begins, TabKebab rolls the partial group back instead of leaving it unmanaged.
-   - **None** — monitor only, don't touch tabs
-3. **Blocking Mode**:
+1. **Profile** — Coding, Writing, Research or Meeting
+2. **Duration** — minutes, or check **Open-ended** for an unlimited timer
+3. **Start Focus**
+
+Everything else is folded under **Customize** (it remembers whether you left it open):
+
+1. **When focus starts** — what happens to non-focus tabs:
+   - **Kebab non-focus tabs** — discard background non-focus tabs (they stay in the tab strip but unload); the active tab is never discarded
+   - **Stash non-focus tabs** — save and close background non-focus tabs (auto-restored when the session ends); the active tab is never closed
+   - **Group focus tabs only** — create a Chrome tab group containing only eligible focus tabs. If Chrome metadata or Focus-state persistence fails after grouping begins, TabKebab rolls the partial group back instead of leaving it unmanaged.
+   - **Do nothing (monitor only)** — don't touch tabs
+2. **Blocking**:
    - **Strict Mode** — only allowlisted entries are permitted. With an empty allowlist, every non-internal URL is blocked.
-   - **Curated Categories** — select categories to block (Social, Video, Gaming, News, Shopping, Entertainment)
-   - **AI Detection** — AI categorizes unknown domains in real-time
-4. **Allowlist** — add entries that are always permitted:
+   - **AI Detection** — AI categorizes unknown domains in real-time. It is disabled until AI is set up; a **Set up AI** link opens the AI settings.
+   - **Block categories** — select categories to block (Social, Video, Gaming, News, Shopping, Entertainment)
+3. **Allowed (whitelist)** — add entries that are always permitted:
    - **Domain** — permits the exact host and true subdomains, but not lookalike suffixes
    - **URL** — permits only the canonical exact URL; path, query, and fragment case is preserved and prefix extensions do not match
    - **Chrome Group** — stores the group's exact title and rebinds it to every live group with that title when a run starts, the worker restarts, or a paused run resumes. Untitled groups cannot be saved.
+4. **Blocked domains (additional)** — extra domains to block on top of the categories
 
 Chrome and extension-internal pages are never blocked and are excluded from startup discard, stash, and grouping actions. The same allowlist policy is used both when Focus starts and when later navigations are evaluated. If a tab is still navigating when Focus starts, its pending destination controls classification and is the URL preserved by a Focus stash. Duplicate legacy preferences collapse to one entry with the same type and value.
 
@@ -399,13 +412,15 @@ Each session has a unique run ID. A deterministic or AI classification is applie
 
 ### The Focus HUD
 
-Once started, the panel shows a colorful timer dashboard:
+Once started, the Focus view shows a timer dashboard in your profile's color (with matching light and dark theme colors):
 
-- **Profile-colored display** — the entire HUD glows in your profile's color with a subtle pulsing animation
-- **Countdown timer** — large minutes:seconds display (or elapsed time if open-ended)
-- **Progress bar** — visual progress toward your goal
+- **Header** — "Focus mode · Coding", plus a **Paused** tag while paused
+- **Timer** — large minutes:seconds display, with "remaining · N%" for a timed session or "elapsed" for an open-ended one
+- **Progress bar** — timed sessions only
 - **Stats** — distractions blocked and focus tab count
-- **Controls** — Pause, +5 min extend, End Session
+- **Controls** — **Pause** / **Resume**, **+5 min** (timed sessions only), and **End Session**
+
+Outside the Focus view, the [Focus banner](#focus-banner) keeps the countdown and an **End** button visible on every view.
 
 The extension badge shows the remaining minutes during focus and `||` while paused. Pause, Resume, Extend, and End are bound to the run currently displayed by the panel; if that run has already been replaced, the stale command is ignored and the panel refreshes. Badge and side-panel updates are likewise tied to the current durable run, so a delayed event from an older run cannot repaint, blink, switch views, or clear a replacement session.
 
@@ -421,7 +436,11 @@ Blocking is a **soft block** — you can always navigate manually after the redi
 
 ### Session End
 
-When the timer expires (or you click End Session):
+When the timer expires, or you click **End Session** in the HUD or **End** in the banner:
+
+- A timed session with more than a minute left first asks **End focus early?** ("You have 49:58 left. Your stats so far will be saved.") with **Keep focusing** and **End session**. Open-ended sessions, and timed sessions in their last minute, end right away.
+
+Then:
 
 1. If tabs were stashed, they're automatically restored
 2. Focus tab group is removed (tabs ungrouped)
@@ -436,7 +455,7 @@ Ending intent is saved before teardown begins. If Chrome suspends or restarts th
 
 ### Focus History
 
-Click "Recent Sessions" to see your last 50 focus sessions with date, profile, duration, and distraction count. Useful for tracking productivity over time.
+Click **Recent Sessions** at the bottom of the setup screen to see your last 50 focus sessions with date, profile, duration, and distraction count. Useful for tracking productivity over time.
 
 ### Preferences Per Profile
 
@@ -502,7 +521,7 @@ Open the HTML file directly in Google Drive's preview to browse your bookmarks f
 
 ## Natural Language Commands
 
-When an AI provider is configured, the command bar appears at the top of the panel.
+When an AI provider is set up, the command bar appears under the stats strip. Press `/` to jump to it.
 
 ### Supported Commands
 
@@ -521,8 +540,8 @@ Type natural language instructions like:
 
 1. Your command and current tab list (titles + URLs) are sent to the AI provider.
 2. The AI returns structured actions (close, group, move, etc.). Domain filters match only the exact host and true subdomains: `github.com` includes `docs.github.com`, but not `notgithub.com` or `github.com.evil.test`.
-3. A close action shows a confirmation preview. At confirmation, TabKebab queries the live tabs again, reapplies the original filter, and can only narrow the preview-approved IDs; a tab that navigated away is not closed. A title-based close also waits for any pending navigation to settle instead of trusting the previous page's stale title.
-4. TabKebab executes the validated action and shows results in the command bar.
+3. A close or stash action shows a confirmation preview with a red confirm button. At confirmation, TabKebab queries the live tabs again, reapplies the original filter, and can only narrow the preview-approved IDs; a tab that navigated away is not closed. A title-based close also waits for any pending navigation to settle instead of trusting the previous page's stale title.
+4. TabKebab executes the validated action and shows results in the command bar. A "find" command lists the matching tabs with **Group**, **Close all** and **Dismiss** buttons.
 
 Commands never send page content, cookies, passwords, or browsing history — only tab titles and URLs.
 
@@ -595,13 +614,14 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 
 ### Setting Up a Provider
 
-1. Go to Settings (gear icon in the header)
-2. The AI section appears in settings with provider options
-3. Select a provider from the dropdown
-4. Enter your API key (if required)
-5. Choose device protection or enable passphrase protection
-6. Choose a model and, for Custom, review the endpoint URL
-7. Click **Save AI Settings**
+1. Open Settings (gear icon) and click the **AI** chip in the index at the top — or just click the AI status icon in the header
+2. In **AI provider**, pick a provider. The first option, **Off**, means AI is disabled; picking a provider expands its setup
+3. Enter your API key (if required); **Show** reveals what you typed
+4. Optionally check **Protect API key with passphrase**; otherwise the key uses device protection
+5. Choose a model (**Load** fetches the provider's current list) and, for Custom, review the endpoint URL
+6. Click **Save Settings**, then **Test Connection**
+
+To turn AI off, choose **Off** and click **Save Settings**. Your saved keys stay encrypted in storage. To hide every AI control as well, switch off **AI** in Settings > Features.
 
 **Test Connection** and **Load Models** use only the saved provider configuration. If the selected provider has unsaved changes, save them first. A passphrase-protected key must also be unlocked for the current browser session before either action or any AI command can use it.
 
@@ -624,7 +644,7 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 - Settings and newly entered keys are validated, encrypted, and committed as one operation; keys and passphrases are never returned in a runtime response or written to logs
 - Changing between device and passphrase protection requires re-entering every stored provider key. Older profiles with a mixture of protection modes show an indeterminate setting and likewise require every key to normalize the profile
 
-After a browser restart, select the protected provider and use the **Unlock AI key** prompt. A wrong passphrase leaves the provider locked and does not alter the encrypted key. The correct passphrase unlocks only that provider for the current browser session.
+After a browser restart, select the protected provider and use the **Unlock selected provider** field (enter the passphrase and click **Unlock**). A wrong passphrase leaves the provider locked and does not alter the encrypted key. The correct passphrase unlocks only that provider for the current browser session.
 
 ### Custom Endpoint Safety
 
@@ -678,15 +698,29 @@ AI responses are cached locally (LRU, max 200 entries, 24-hour expiry) to avoid 
 
 ## Settings Reference
 
-Access settings via the **gear icon** in the header.
+Access settings via the **gear icon** in the header; press **Esc** to go back to Tabs. A sticky row of chips at the top — **General · Features · Sleep · AI · Automation · Bookmarks · Drive** — jumps to each section (chips for switched-off features are hidden). The cards appear in this order:
+
+1. General
+2. Features
+3. Tab Sleep (Kebab)
+4. AI Features
+5. Automation
+6. Tab Limits (advanced, collapsed by default)
+7. Bookmarks
+8. Google Drive
+9. Backup & restore
+10. About (version, privacy policy, terms, GitHub)
+
+Settings save as soon as you change them, except the AI card, which has its own **Save Settings** button.
 
 ### General
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Remove stash after restore | On | Auto-delete stash entries once restored |
-| Default view | Tabs | Which view opens on launch |
 | Theme | System | Light, Dark, or follow system preference |
+| Default view | Tabs | Which view opens on launch |
+| Remove stash after restore | On | Auto-delete stash entries once restored |
+| Getting started | — | **Replay guide** restarts the four-step getting-started card |
 
 ### Features
 
@@ -713,7 +747,7 @@ turn it back on and everything is where you left it.
 Notes:
 
 - The number-key shortcuts follow the visible views: with Windows off,
-  `1` Tabs, `2` Stash, `3` Sessions. The help overlay (`?`) lists only what is
+  `1` Tabs, `2` Stash, `3` Sessions. The help dialog (`?`) lists only what is
   switched on, and the getting-started guide skips steps for features that are off.
 - If the view you're on is switched off, the panel goes back to Tabs.
 - Recovery always works: listing and restoring stashes and sessions, undo,
@@ -721,12 +755,13 @@ Notes:
 - The switches are part of exported settings. Importing settings merges them
   per feature and never weakens the Drive retention guards.
 
-### Tab Limits
+### Tab Sleep (Kebab)
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Warning threshold (yellow) | 20 | Tabs per window before yellow badge |
-| Danger threshold (red) | 50 | Tabs per window before red badge |
+The keep-awake domain list is managed in this section: add, filter, remove, or reset domains. Use **Suggest (AI)** if AI is available. See [Keep-Awake List](#keep-awake-list).
+
+### AI Features
+
+The **AI provider** select (Off, OpenAI, Claude, Gemini, Chrome Built-in AI, Custom) and the selected provider's key, model and passphrase. See [AI Configuration](#ai-configuration).
 
 ### Automation
 
@@ -737,7 +772,18 @@ Notes:
 | Auto-kebab idle tabs | 3 hours | Discard tabs idle for N hours (0 = off) |
 | Auto-stash inactive tabs | 0 (off) | Stash tabs inactive for N days |
 
+### Tab Limits
+
+Collapsed by default; click **Tab Limits (Advanced)** to open it.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Warning threshold (yellow) | 20 | Tabs per window before yellow badge |
+| Danger threshold (red) | 50 | Tabs per window before red badge |
+
 ### Bookmarks
+
+Destination, auto-bookmark on stash and **Bookmark Now** are always shown; the format and export options are folded under **Folder formats and export options**.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -751,6 +797,8 @@ Notes:
 
 ### Google Drive
 
+**Connect Google Drive** is shown until you connect; then **Sync Now**, **Disconnect** and the settings below appear. Retention options are folded under **Retention and cleanup**.
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Auto-export sessions | Off | Include sessions in Drive sync |
@@ -759,9 +807,9 @@ Notes:
 | Drive retention | 30 days | Auto-delete files older than this |
 | Never delete from Drive | Off | Override retention, keep all files |
 
-### Tab Sleep (Kebab)
+### Backup & restore
 
-The keep-awake domain list is managed in this section. Add, remove, or reset domains. Use AI suggestions if a provider is configured.
+**Export Settings**, **Export all data** and **Import Settings**. See [Export & Import](#export--import).
 
 ---
 
@@ -769,7 +817,7 @@ The keep-awake domain list is managed in this section. Add, remove, or reset dom
 
 ### Full Export
 
-In **Sessions**, use **Export JSON** to download a portable version-2 backup containing:
+Use **Export all data (JSON)** in the Sessions **⋯** menu, or **Export all data** in Settings > Backup & restore, to download a portable version-2 backup containing:
 
 - All sessions
 - All stashes
@@ -784,7 +832,7 @@ The export intentionally excludes Drive/OAuth state, install identifiers, active
 
 ### Full Import
 
-Use **Import JSON** in **Sessions** to load a supported full or sessions file. TabKebab rejects files above 25 MiB, malformed data, secrets, and the wrong export kind before changing storage.
+Use **Import JSON…** in the Sessions **⋯** menu to load a supported full or sessions file. TabKebab rejects files above 25 MiB, malformed data, secrets, and the wrong export kind before changing storage.
 
 Imports merge under one service-worker lock. Existing same-ID sessions, stashes, groups, bookmarks, Focus preferences, and history remain authoritative; keep-awake domains are combined; imported general settings update the local settings; and safe AI choices update without replacing an existing encrypted local key. The eight local-storage sections commit together, and IndexedDB stashes are replaced atomically. If either commit fails, TabKebab restores the affected snapshots and reports failure instead of claiming success.
 
@@ -792,10 +840,10 @@ After a settings or full import, TabKebab also refreshes its automation schedule
 
 ### Individual Exports
 
-- **Session export**: click the export icon on any session card → downloads a one-session v2 file
-- **Stash export**: click the export icon on any stash card → downloads a one-stash v2 file
-- **All stashes**: use **Export Stashes** in Stash; **Import Stashes** accepts only stash files
-- **Settings**: use **Export Settings** or **Import Settings** in Settings; the importer accepts only settings files
+- **Session export**: click the ⤓ export icon on any session card → downloads a one-session v2 file
+- **Stash export**: click the ⤓ export icon on any stash card → downloads a one-stash v2 file
+- **All stashes**: use **Export stashes (JSON)** in the Stash **⋯** menu; **Import stashes…** accepts only stash files
+- **Settings**: use **Export Settings** or **Import Settings** in Settings > Backup & restore; the importer accepts only settings files
 
 ---
 
@@ -805,27 +853,29 @@ After a settings or full import, TabKebab also refreshes its automation schedule
 
 | Key | Action |
 |-----|--------|
-| **1** | Switch to Windows view |
-| **2** | Switch to Tabs view |
+| **1** | Switch to Tabs view |
+| **2** | Switch to Windows view |
 | **3** | Switch to Stash view |
 | **4** | Switch to Sessions view |
-| **F** | Start Focus Mode |
-| **/** | Focus the AI command bar |
-| **?** | Toggle the help overlay |
-| **Esc** | Close help/settings overlay, or blur the current input |
+| **← / →** | Move between views (or sub-tabs) when the view bar has keyboard focus |
+| **F** | Open Focus Mode |
+| **Ctrl+K** / **Cmd+K** | Open or close search (works even while typing) |
+| **/** | Jump to the AI command bar, or open search when AI is not set up |
+| **?** | Toggle the help dialog |
+| **Esc** | Close search or help; leave Settings or Focus setup (back to Tabs); in a field, leave the field |
 
-Shortcuts are disabled when typing in an input, textarea, or select. Press **Esc** in any input to blur it first.
+The number keys follow the views that are switched on: with Windows off, `1` is Tabs, `2` Stash and `3` Sessions. Single-key shortcuts never fire while you type in an input, textarea, or select, or together with Ctrl/Cmd/Alt, so `Ctrl+F` stays the browser's find. Press **Esc** in any input to leave it first.
 
-### Help Overlay
+### Help Dialog
 
-Press **?** or click the help button (circle with question mark) in the header to open a comprehensive help overlay. It covers:
+Press **?** or click the help button (circle with question mark) in the header to open the help dialog. It covers:
 - View descriptions
 - Key features
-- All keyboard shortcuts
+- Keyboard shortcuts (matching the views that are switched on)
 - Usage tips
 - Links to the full guide and issue tracker
 
-Click the backdrop or press **Esc** to dismiss.
+Press **Esc** or **?**, click **×**, or click the backdrop to close it.
 
 ### Tips for Power Users
 
@@ -840,7 +890,7 @@ Click the backdrop or press **Esc** to dismiss.
 ### Performance Tips
 
 - For 100+ tabs, prefer **domain grouping** over AI grouping (faster, no API call)
-- **Kebab tabs** regularly to keep memory usage low — the stats bar shows your Active/Kebab percentage
+- **Kebab tabs** regularly to keep memory usage low — the stats strip shows how many tabs are sleeping
 - **Stash old tabs** instead of keeping them open — they're safely stored in IndexedDB
 - **Pipeline restore** handles large sessions gracefully — let it complete without interrupting
 
@@ -850,11 +900,11 @@ Click the backdrop or press **Esc** to dismiss.
 
 ### "Tab not responding" after restore
 
-Large session restores create many tabs at once. The pipeline restore (batched creation + discard) mitigates this, but Chrome may still be sluggish for a moment. Wait for the progress bar to complete.
+Large session restores create many tabs at once. The pipeline restore (batched creation + discard) mitigates this, but Chrome may still be sluggish for a moment. Wait for the progress bar on the card to complete.
 
 ### AI features not appearing
 
-- Ensure you've selected a provider and entered a valid API key in Settings
+- Ensure **AI** is on in Settings > Features, and that you've selected a provider (not **Off**), entered a valid API key and clicked **Save Settings**
 - Check that the API key has credits/quota remaining
 - For Chrome Built-in AI, use a supported Chrome/device with an already
   available on-device Prompt model and keep the side panel open. TabKebab does
@@ -878,7 +928,7 @@ Stashes are stored in IndexedDB, which is per-profile. If you switched Chrome pr
 
 ### API key issues
 
-- If you set a passphrase, re-enter it in **Unlock AI key** after Chrome fully restarts, the extension reloads or updates, or you disable and re-enable it
+- If you set a passphrase, re-enter it in **Unlock selected provider** after Chrome fully restarts, the extension reloads or updates, or you disable and re-enable it
 - Service-worker idle by itself does not lock the key; the session-storage entry remains available
 - Save a changed provider selection before using **Test Connection** or **Load Models**
 - If you forgot your passphrase, remove the API key and add it again
