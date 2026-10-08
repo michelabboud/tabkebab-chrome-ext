@@ -2,9 +2,16 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { showStashedToast } from './stash-list.js';
 import { sendOrThrow } from '../message-client.js';
 import { SmartGroupFallback } from './smart-group-fallback.js';
-import { makeKeyboardActivatable, setExpanded } from './keyboard-activate.js';
+import {
+  createOverflowMenu,
+  makeKeyboardActivatable,
+  setExpanded,
+  wireCollapseToggle,
+  wireMenuButton,
+} from './keyboard-activate.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -14,6 +21,24 @@ const PHASE_LABELS = {
 };
 
 const PHASE_INDEX = { snapshot: 1, solver: 2, planner: 3, executor: 4 };
+
+/**
+ * Human label for a domain group key. Non-http pages (about:blank, chrome://,
+ * file:) have an empty hostname; unparsable URLs are bucketed as 'other'.
+ */
+export function domainLabel(domain) {
+  if (!domain) return 'Blank & browser pages';
+  if (domain === 'other') return 'Other pages';
+  return domain;
+}
+
+/** Full-title + URL tooltip for a tab row. */
+export function tabTooltip(tab) {
+  const title = tab?.title || '';
+  const url = tab?.url || tab?.pendingUrl || '';
+  if (title && url && title !== url) return `${title}\n${url}`;
+  return title || url || 'New Tab';
+}
 
 export class TabList {
   constructor(rootEl, { navigate = () => {} } = {}) {
@@ -29,8 +54,9 @@ export class TabList {
     this._refreshGeneration = 0;
     this.groupBtn = rootEl.querySelector('#btn-group-by-domain');
     this.ungroupBtn = rootEl.querySelector('#btn-ungroup-all');
-    this.collapseBtn = rootEl.querySelector('#btn-collapse-all-tabs');
-    this.expandBtn = rootEl.querySelector('#btn-expand-all-tabs');
+    this.groupMenuBtn = rootEl.querySelector('#btn-group-menu');
+    this.groupMenu = rootEl.querySelector('#group-menu');
+    this.collapseToggleBtn = rootEl.querySelector('#btn-toggle-collapse-tabs');
 
     // Pipeline progress elements
     this.progressEl = rootEl.querySelector('#pipeline-progress');
@@ -54,8 +80,16 @@ export class TabList {
       this.smartGroupBtn.addEventListener('click', () => this.smartGroup());
     }
     this.ungroupBtn.addEventListener('click', () => this.ungroupAll());
-    this.collapseBtn.addEventListener('click', () => this.collapseAll());
-    this.expandBtn.addEventListener('click', () => this.expandAll());
+    // [Group ▾] split button: primary = by domain, menu = Smart / Ungroup all.
+    if (this.groupMenuBtn && this.groupMenu) {
+      wireMenuButton(this.groupMenuBtn, this.groupMenu, {
+        wrapper: this.groupMenuBtn.parentNode,
+      });
+    }
+    this.collapseToggle = wireCollapseToggle(this.collapseToggleBtn, {
+      isAllCollapsed: () => this.isAllCollapsed(),
+      onToggle: (collapse) => (collapse ? this.collapseAll() : this.expandAll()),
+    });
 
     // Tab summaries cache (tabId → summary string)
     this.summaries = new Map();
@@ -133,6 +167,17 @@ export class TabList {
 
   // ── Collapse / Expand ──
 
+  /** True when every domain row (and window sub-group) is collapsed. */
+  isAllCollapsed() {
+    if (!this.initialized) return true; // first render starts collapsed
+    const keys = this.allKeys || [];
+    return keys.length > 0 && keys.every((key) => this.collapsed.has(key));
+  }
+
+  syncCollapseToggle() {
+    this.collapseToggle?.sync();
+  }
+
   async collapseAll() {
     for (const key of this.allKeys) {
       this.collapsed.add(key);
@@ -173,6 +218,7 @@ export class TabList {
     if (!groups || groups.length === 0) {
       this.lastGroups = groups;
       this.listEl.innerHTML = '<p class="empty-state">No tabs open.</p>';
+      this.syncCollapseToggle();
       return;
     }
 
@@ -228,14 +274,14 @@ export class TabList {
       const windowEntries = Object.entries(byWindow);
       const spansMultipleWindows = multipleWindows && windowEntries.length > 1;
 
-      // Header
+      // Header: two zones — the name truncates, the actions stay right-aligned.
       const header = document.createElement('div');
       header.className = `domain-group-header${isCollapsed ? ' collapsed' : ''}`;
+      const label = domainLabel(group.domain);
+      const tabCount = group.tabs.length;
+      const tabsWord = `tab${tabCount !== 1 ? 's' : ''}`;
 
       const windowNumbers = windowEntries.map(([wid]) => windowIndex[wid] || '?');
-      const windowInfo = multipleWindows
-        ? ` <span class="window-label">${windowNumbers.map(n => `W${n}`).join(', ')}</span>`
-        : '';
 
       // Use the first tab's favicon as the domain icon
       const domainFavicon = group.tabs[0]?.favIconUrl || '';
@@ -243,7 +289,8 @@ export class TabList {
 
       const chevronEl = document.createElement('span');
       chevronEl.className = 'chevron';
-      chevronEl.textContent = '\u25BC';
+      chevronEl.textContent = '▼';
+      chevronEl.setAttribute('aria-hidden', 'true');
 
       const faviconEl = document.createElement('img');
       faviconEl.className = 'domain-favicon';
@@ -252,54 +299,41 @@ export class TabList {
       faviconEl.addEventListener('error', () => { faviconEl.src = fallbackSvg; }, { once: true });
 
       const domainNameEl = document.createElement('span');
-      domainNameEl.className = 'domain-name';
-      domainNameEl.textContent = group.domain;
+      domainNameEl.className = `domain-name${group.domain ? '' : ' domain-name-generic'}`;
+      domainNameEl.textContent = label;
+      domainNameEl.title = label;
 
       const countEl = document.createElement('span');
       countEl.className = 'count';
-      countEl.textContent = group.tabs.length;
+      countEl.textContent = tabCount;
+      countEl.title = `${tabCount} ${tabsWord}`;
 
       header.appendChild(chevronEl);
       header.appendChild(faviconEl);
       header.appendChild(domainNameEl);
       header.appendChild(countEl);
 
-      if (multipleWindows) {
+      // Window label only when the domain spans more than one window.
+      if (spansMultipleWindows) {
         const winLabel = document.createElement('span');
         winLabel.className = 'window-label';
         winLabel.textContent = windowNumbers.map(n => `W${n}`).join(', ');
+        winLabel.title = `Open in ${windowNumbers.map(n => `Window ${n}`).join(', ')}`;
         header.appendChild(winLabel);
       }
 
-      // Summarize button (only if AI is available — checked async)
-      const summarizeBtn = document.createElement('button');
-      summarizeBtn.className = 'summarize-btn ai-feature';
-      summarizeBtn.textContent = '\u2139'; // ℹ info icon
-      summarizeBtn.title = 'Summarize tabs (AI)';
-      summarizeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const tabIds = group.tabs.map(t => t.id);
-        this.summarizeGroup(tabIds, domainEl);
-      });
-      header.appendChild(summarizeBtn);
-
-      // Keep Awake toggle
       const isKeepAwake = this.keepAwakeDomains.has(group.domain);
-      const keepAwakeBtn = document.createElement('button');
-      keepAwakeBtn.className = `keep-awake-btn${isKeepAwake ? ' keep-awake-active' : ''}`;
-      keepAwakeBtn.textContent = isKeepAwake ? '\u2600' : '\u263E'; // ☀ or ☾
-      keepAwakeBtn.title = isKeepAwake ? 'Keep Awake (click to allow sleep)' : 'Allow sleep (click to keep awake)';
-      keepAwakeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.toggleKeepAwake(group.domain, !isKeepAwake);
-      });
-      header.appendChild(keepAwakeBtn);
 
-      // Stash (save + close) button
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+
+      // Stash (save + close) stays one click away: it is the core loop.
       const stashBtn = document.createElement('button');
+      stashBtn.type = 'button';
       stashBtn.className = 'stash-btn';
       stashBtn.textContent = 'Stash';
       stashBtn.title = 'Stash this domain (save and close tabs)';
+      stashBtn.setAttribute('aria-label', `Stash ${label} (${tabCount} ${tabsWord})`);
       stashBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         stashBtn.disabled = true;
@@ -307,7 +341,7 @@ export class TabList {
         try {
           const result = await this.send({ action: 'stashDomain', domain: group.domain });
           if (!await this.refreshCommittedState('Tabs were stashed')) return;
-          showToast(`Stashed ${result.stash.tabCount} tabs from ${group.domain}`, 'success');
+          showStashedToast(result.stash, { from: label, onUndone: () => this.refresh() });
         } catch (err) {
           showToast('Stash failed: ' + err.message, 'error');
         } finally {
@@ -315,45 +349,40 @@ export class TabList {
           stashBtn.textContent = 'Stash';
         }
       });
-      header.appendChild(stashBtn);
+      actions.appendChild(stashBtn);
 
-      // Kebab (discard) button
-      const kebabBtn = document.createElement('button');
-      kebabBtn.className = 'kebab-btn';
-      kebabBtn.textContent = 'Kebab';
-      kebabBtn.title = 'Kebab this domain (discard tabs)';
-      kebabBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.kebabDomain(group.domain);
+      // Everything else lives in the ⋯ menu; Close is separated at the end.
+      const rowMenu = createOverflowMenu({
+        label: `More actions for ${label}`,
+        items: [
+          {
+            label: 'Sleep tabs (Kebab)',
+            className: 'kebab-item',
+            title: 'Discard these tabs to free memory',
+            onSelect: () => this.kebabDomain(group.domain),
+          },
+          {
+            label: 'Keep awake',
+            className: 'keep-awake-item',
+            checked: isKeepAwake,
+            title: isKeepAwake ? 'Allow these tabs to sleep again' : 'Never auto-sleep these tabs',
+            onSelect: () => this.toggleKeepAwake(group.domain, !isKeepAwake),
+          },
+          {
+            label: 'Summarize tabs (AI)',
+            className: 'summarize-item ai-feature',
+            onSelect: () => this.summarizeGroup(group.tabs.map(t => t.id), domainEl),
+          },
+          {
+            label: `Close ${tabCount} ${tabsWord}…`,
+            danger: true,
+            className: 'close-item',
+            onSelect: () => this.closeDomain(group, label),
+          },
+        ],
       });
-      header.appendChild(kebabBtn);
-
-      // Close button
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'close-btn';
-      closeBtn.textContent = 'Close';
-      closeBtn.title = 'Close all tabs from this domain';
-      closeBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const tabIds = group.tabs.map(t => t.id);
-        const ok = await showConfirm({
-          title: 'Close domain?',
-          message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from ${group.domain}? This cannot be undone.`,
-          confirmLabel: 'Close',
-          danger: true,
-        });
-        if (!ok) return;
-        closeBtn.disabled = true;
-        try {
-          await this.send({ action: 'closeTabs', tabIds });
-          if (!await this.refreshCommittedState('Domain tabs were closed')) return;
-          showToast(`Closed ${tabIds.length} tabs from ${group.domain}`, 'success');
-        } catch (err) {
-          showToast('Close failed: ' + err.message, 'error');
-          closeBtn.disabled = false;
-        }
-      });
-      header.appendChild(closeBtn);
+      actions.appendChild(rowMenu.wrapper);
+      header.appendChild(actions);
 
       // Apply keep-awake class to header
       if (isKeepAwake) {
@@ -373,11 +402,13 @@ export class TabList {
           body.classList.add('collapsed');
           setExpanded(header, false);
         }
+        this.syncCollapseToggle();
       });
       makeKeyboardActivatable(header, {
         expanded: !isCollapsed,
-        label: `${group.domain}, ${group.tabs.length} tab${group.tabs.length !== 1 ? 's' : ''}`,
+        label: `${label}, ${tabCount} ${tabsWord}${isKeepAwake ? ', kept awake' : ''}`,
       });
+      header.title = `${label} — ${tabCount} ${tabsWord}`;
 
       // Body
       const body = document.createElement('div');
@@ -396,7 +427,7 @@ export class TabList {
           const subHeader = document.createElement('div');
           subHeader.className = `window-subgroup-header${subCollapsed ? ' collapsed' : ''}`;
           subHeader.innerHTML = `
-            <span class="chevron">\u25BC</span>
+            <span class="chevron" aria-hidden="true">\u25BC</span>
             <span class="window-label">Window ${wNum}</span>
             <span class="count">${windowTabs.length}</span>
           `;
@@ -414,8 +445,12 @@ export class TabList {
               subBody.classList.add('collapsed');
               setExpanded(subHeader, false);
             }
+            this.syncCollapseToggle();
           });
-          makeKeyboardActivatable(subHeader, { expanded: !subCollapsed });
+          makeKeyboardActivatable(subHeader, {
+            expanded: !subCollapsed,
+            label: `Window ${wNum}, ${windowTabs.length} tab${windowTabs.length !== 1 ? 's' : ''}`,
+          });
 
           const subBody = document.createElement('div');
           subBody.className = `window-subgroup-body${subCollapsed ? ' collapsed' : ''}`;
@@ -442,6 +477,27 @@ export class TabList {
 
     // Swap in one step so the list is never observed half-built or doubled.
     this.listEl.replaceChildren(fragment);
+    this.syncCollapseToggle();
+  }
+
+  async closeDomain(group, label = domainLabel(group.domain)) {
+    const tabIds = group.tabs.map(t => t.id);
+    const ok = await showConfirm({
+      title: 'Close domain?',
+      message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from ${label}? This cannot be undone.`,
+      confirmLabel: 'Close',
+      danger: true,
+    });
+    if (!ok) return false;
+    try {
+      await this.send({ action: 'closeTabs', tabIds });
+    } catch (err) {
+      showToast('Close failed: ' + err.message, 'error');
+      return false;
+    }
+    if (!await this.refreshCommittedState('Domain tabs were closed')) return false;
+    showToast(`Closed ${tabIds.length} tabs from ${label}`, 'success');
+    return true;
   }
 
   createTabItem(tab) {
@@ -460,11 +516,14 @@ export class TabList {
     const title = document.createElement('span');
     title.className = 'title';
     title.textContent = tab.title || tab.url || 'New Tab';
+    item.title = tabTooltip(tab);
 
     const closeBtn = document.createElement('button');
-    closeBtn.className = 'close-btn';
+    closeBtn.type = 'button';
+    closeBtn.className = 'close-btn tab-close-btn';
     closeBtn.textContent = '\u00D7';
     closeBtn.title = 'Close tab';
+    closeBtn.setAttribute('aria-label', `Close tab: ${title.textContent}`);
     closeBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -503,6 +562,7 @@ export class TabList {
   async groupByDomain() {
     this.groupBtn.disabled = true;
     this.ungroupBtn.disabled = true;
+    if (this.groupMenuBtn) this.groupMenuBtn.disabled = true;
     this.showProgress();
 
     try {
@@ -536,6 +596,7 @@ export class TabList {
     } finally {
       this.groupBtn.disabled = false;
       this.ungroupBtn.disabled = false;
+      if (this.groupMenuBtn) this.groupMenuBtn.disabled = false;
     }
   }
 
@@ -543,6 +604,7 @@ export class TabList {
     if (this.smartGroupBtn) this.smartGroupBtn.disabled = true;
     this.groupBtn.disabled = true;
     this.ungroupBtn.disabled = true;
+    if (this.groupMenuBtn) this.groupMenuBtn.disabled = true;
     this.smartGroupFallback?.hide();
     this.showProgress();
 
@@ -598,14 +660,15 @@ export class TabList {
       if (this.smartGroupBtn) this.smartGroupBtn.disabled = false;
       this.groupBtn.disabled = false;
       this.ungroupBtn.disabled = false;
+      if (this.groupMenuBtn) this.groupMenuBtn.disabled = false;
     }
   }
 
   async summarizeGroup(tabIds, headerEl) {
     // Show loading state on the summarize button
-    const btn = headerEl.querySelector('.summarize-btn');
+    const btn = headerEl.querySelector('.summarize-item');
     if (btn) {
-      btn.textContent = '\u22EF'; // ellipsis
+      btn.textContent = 'Summarizing\u2026';
       btn.disabled = true;
     }
 
@@ -633,7 +696,7 @@ export class TabList {
       showToast('Failed to summarize tabs: ' + err.message, 'error');
     } finally {
       if (btn) {
-        btn.textContent = '\u2139'; // info icon
+        btn.textContent = 'Summarize tabs (AI)';
         btn.disabled = false;
       }
     }
@@ -668,7 +731,7 @@ export class TabList {
         showToast('Domain tabs were kebabed, but the view could not refresh: ' + err.message, 'error');
         return;
       }
-      const msg = `Kebab'd ${result.discarded} tab${result.discarded !== 1 ? 's' : ''} from ${domain}`;
+      const msg = `Kebab'd ${result.discarded} tab${result.discarded !== 1 ? 's' : ''} from ${domainLabel(domain)}`;
       const extra = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
       showToast(msg + extra, 'success');
     } catch (err) {
@@ -690,7 +753,7 @@ export class TabList {
         showToast('Keep-awake changed, but the view could not refresh: ' + err.message, 'error');
         return;
       }
-      showToast(keepAwake ? `${domain} will stay awake` : `${domain} can now sleep`, 'success');
+      showToast(keepAwake ? `${domainLabel(domain)} will stay awake` : `${domainLabel(domain)} can now sleep`, 'success');
     } catch (err) {
       showToast('Failed to update keep-awake: ' + err.message, 'error');
     }

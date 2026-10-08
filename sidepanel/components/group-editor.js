@@ -2,8 +2,26 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { showStashedToast } from './stash-list.js';
 import { sendOrThrow } from '../message-client.js';
-import { makeKeyboardActivatable, setExpanded } from './keyboard-activate.js';
+import {
+  createOverflowMenu,
+  makeKeyboardActivatable,
+  setExpanded,
+  wireCollapseToggle,
+} from './keyboard-activate.js';
+
+/** Full-title + URL tooltip for a tab row. */
+function tabTooltip(tab) {
+  const title = tab?.title || '';
+  const url = tab?.url || tab?.pendingUrl || '';
+  if (title && url && title !== url) return `${title}\n${url}`;
+  return title || url || 'New Tab';
+}
+
+function tabsText(n) {
+  return `${n} tab${n !== 1 ? 's' : ''}`;
+}
 
 /**
  * Live member tab ids of a Chrome tab group, read at action time so tabs
@@ -89,27 +107,15 @@ export class GroupEditor {
       return;
     }
 
-    // Bulk collapse/expand toolbar
+    // Bulk toolbar — same pattern as Domains/Windows: [Sleep all] [⇕]
     const toolbar = document.createElement('div');
-    toolbar.className = 'toolbar chrome-groups-toolbar';
-
-    const collapseAllBtn = document.createElement('button');
-    collapseAllBtn.className = 'action-btn secondary';
-    collapseAllBtn.textContent = 'Collapse All';
-    collapseAllBtn.addEventListener('click', async () => {
-      await this.setAllChromeGroupsCollapsed(groups, true);
-    });
-
-    const expandAllBtn = document.createElement('button');
-    expandAllBtn.className = 'action-btn secondary';
-    expandAllBtn.textContent = 'Expand All';
-    expandAllBtn.addEventListener('click', async () => {
-      await this.setAllChromeGroupsCollapsed(groups, false);
-    });
+    toolbar.className = 'toolbar view-toolbar chrome-groups-toolbar';
 
     const kebabAllBtn = document.createElement('button');
-    kebabAllBtn.className = 'action-btn kebab';
-    kebabAllBtn.textContent = 'Kebab All';
+    kebabAllBtn.type = 'button';
+    kebabAllBtn.className = 'action-btn secondary sleep-all-btn';
+    kebabAllBtn.textContent = 'Sleep all';
+    kebabAllBtn.title = 'Kebab: discard every grouped tab to free memory';
     kebabAllBtn.addEventListener('click', async () => {
       kebabAllBtn.disabled = true;
       try {
@@ -119,80 +125,67 @@ export class GroupEditor {
       }
     });
 
+    const collapseToggleBtn = document.createElement('button');
+    collapseToggleBtn.type = 'button';
+    collapseToggleBtn.className = 'icon-toggle-btn collapse-toggle-btn';
+    collapseToggleBtn.textContent = '⇕'; // ⇕
+    wireCollapseToggle(collapseToggleBtn, {
+      isAllCollapsed: () => groups.every((g) => g.collapsed),
+      onToggle: (collapse) => this.setAllChromeGroupsCollapsed(groups, collapse),
+    });
+
     toolbar.appendChild(kebabAllBtn);
-    toolbar.appendChild(collapseAllBtn);
-    toolbar.appendChild(expandAllBtn);
+    toolbar.appendChild(collapseToggleBtn);
     this.chromeGroupsContainer.appendChild(toolbar);
 
     for (const group of groups) {
       const el = document.createElement('div');
       el.className = 'chrome-group';
+      const groupTitle = group.title || 'Untitled Group';
 
       // Header
       const header = document.createElement('div');
       header.className = 'chrome-group-header';
       header.addEventListener('click', () => {
         body.hidden = !body.hidden;
-        chevron.textContent = body.hidden ? '\u25b6' : '\u25bc';
+        chevron.textContent = body.hidden ? '▶' : '▼';
+        setExpanded(header, !body.hidden);
       });
 
       const chevron = document.createElement('span');
       chevron.className = 'chrome-group-chevron';
-      chevron.textContent = '\u25bc';
+      chevron.textContent = '▼';
+      chevron.setAttribute('aria-hidden', 'true');
 
       const dot = document.createElement('span');
       dot.className = 'color-dot';
       dot.style.background = this.chromeColor(group.color);
+      dot.setAttribute('aria-hidden', 'true');
 
       const name = document.createElement('span');
-      name.className = 'group-name';
-      name.textContent = group.title || 'Untitled Group';
+      name.className = `group-name${group.title ? '' : ' group-name-untitled'}`;
+      name.textContent = groupTitle;
+      name.title = groupTitle;
 
       const count = document.createElement('span');
       count.className = 'group-count';
-      count.textContent = `${group.tabs.length} tab${group.tabs.length !== 1 ? 's' : ''}`;
+      count.textContent = tabsText(group.tabs.length);
 
       header.appendChild(chevron);
       header.appendChild(dot);
       header.appendChild(name);
       header.appendChild(count);
 
-      // Actions
+      // Actions: Stash stays visible; the rest goes in ⋯ with Close last.
       const actions = document.createElement('div');
-      actions.className = 'chrome-group-actions';
-
-      const kebabGroupBtn = document.createElement('button');
-      kebabGroupBtn.className = 'kebab-btn';
-      kebabGroupBtn.textContent = 'Kebab';
-      kebabGroupBtn.title = 'Discard tabs in this group';
-      kebabGroupBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        kebabGroupBtn.disabled = true;
-        try {
-          await this.discardChromeGroup(group);
-        } finally {
-          kebabGroupBtn.disabled = false;
-        }
-      });
-
-      const keepAwakeGroupBtn = document.createElement('button');
-      keepAwakeGroupBtn.className = 'keep-awake-btn';
-      keepAwakeGroupBtn.textContent = '\u263E'; // ☾
-      keepAwakeGroupBtn.title = 'Keep tabs in this group awake';
-      keepAwakeGroupBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try {
-          await this.send({ action: 'setKeepAwake', scope: 'group', groupId: group.id, keepAwake: true });
-          showToast(`"${group.title}" tabs set to keep awake`, 'success');
-        } catch (err) {
-          showToast('Failed to set keep awake: ' + err.message, 'error');
-        }
-      });
+      actions.className = 'chrome-group-actions row-actions';
 
       const stashGroupBtn = document.createElement('button');
+      stashGroupBtn.type = 'button';
       stashGroupBtn.className = 'stash-btn';
       stashGroupBtn.textContent = 'Stash';
       stashGroupBtn.title = 'Save and close tabs in this group';
+      stashGroupBtn.setAttribute('aria-label', `Stash ${groupTitle} (${tabsText(group.tabs.length)})`);
       stashGroupBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         stashGroupBtn.disabled = true;
@@ -205,55 +198,48 @@ export class GroupEditor {
         }
       });
 
-      const collapseBtn = document.createElement('button');
-      collapseBtn.className = 'action-btn secondary';
-      collapseBtn.textContent = group.collapsed ? 'Expand' : 'Collapse';
-      collapseBtn.style.fontSize = '11px';
-      collapseBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const newState = !group.collapsed;
-        try {
-          await this.send({ action: 'setGroupCollapsed', groupId: group.id, collapsed: newState });
-          group.collapsed = newState;
-          collapseBtn.textContent = newState ? 'Expand' : 'Collapse';
-        } catch (err) {
-          showToast('Failed to update group: ' + err.message, 'error');
-        }
-      });
-
-      const ungroupBtn = document.createElement('button');
-      ungroupBtn.className = 'action-btn secondary';
-      ungroupBtn.textContent = 'Ungroup';
-      ungroupBtn.style.fontSize = '11px';
-      ungroupBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await this.ungroupChromeGroup(group);
-      });
-
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'action-btn danger';
-      closeBtn.textContent = 'Close';
-      closeBtn.style.fontSize = '11px';
-      closeBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const tabIds = group.tabs.map(t => t.id);
-        const ok = await showConfirm({
-          title: 'Close group?',
-          message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from "${group.title}"? This cannot be undone.`,
-          confirmLabel: 'Close',
-          danger: true,
-        });
-        if (!ok) return;
-        await this.closeChromeGroup(group);
+      const rowMenu = createOverflowMenu({
+        label: `More actions for ${groupTitle}`,
+        items: [
+          {
+            label: 'Sleep tabs (Kebab)',
+            className: 'kebab-item',
+            title: 'Discard tabs in this group to free memory',
+            onSelect: () => this.discardChromeGroup(group),
+          },
+          {
+            label: 'Keep awake',
+            className: 'keep-awake-item',
+            title: 'Never auto-sleep tabs in this group',
+            onSelect: () => this.keepChromeGroupAwake(group),
+          },
+          {
+            label: group.collapsed ? 'Expand in tab strip' : 'Collapse in tab strip',
+            className: 'collapse-item',
+            onSelect: () => this.toggleChromeGroupCollapsed(group),
+          },
+          {
+            label: 'Ungroup',
+            className: 'ungroup-item',
+            title: 'Remove the group; tabs stay open',
+            onSelect: () => this.ungroupChromeGroup(group),
+          },
+          {
+            label: `Close ${tabsText(group.tabs.length)}…`,
+            danger: true,
+            className: 'close-item',
+            onSelect: () => this.confirmCloseChromeGroup(group),
+          },
+        ],
       });
 
       actions.appendChild(stashGroupBtn);
-      actions.appendChild(kebabGroupBtn);
-      actions.appendChild(keepAwakeGroupBtn);
-      actions.appendChild(collapseBtn);
-      actions.appendChild(ungroupBtn);
-      actions.appendChild(closeBtn);
+      actions.appendChild(rowMenu.wrapper);
       header.appendChild(actions);
+      makeKeyboardActivatable(header, {
+        expanded: true,
+        label: `${groupTitle}, ${tabsText(group.tabs.length)}`,
+      });
 
       // Tab list body
       const body = document.createElement('div');
@@ -262,6 +248,7 @@ export class GroupEditor {
       for (const tab of group.tabs) {
         const row = document.createElement('div');
         row.className = 'chrome-group-tab';
+        row.title = tabTooltip(tab);
         row.addEventListener('click', async () => {
           try {
             await this.send({ action: 'focusTab', tabId: tab.id });
@@ -281,10 +268,10 @@ export class GroupEditor {
         const title = document.createElement('span');
         title.className = 'title';
         title.textContent = tab.title || tab.url || 'New Tab';
-        title.title = tab.url || '';
 
         row.appendChild(favicon);
         row.appendChild(title);
+        makeKeyboardActivatable(row, { label: `Switch to ${title.textContent}` });
         body.appendChild(row);
       }
 
@@ -292,6 +279,42 @@ export class GroupEditor {
       el.appendChild(body);
       this.chromeGroupsContainer.appendChild(el);
     }
+  }
+
+  async keepChromeGroupAwake(group) {
+    try {
+      await this.send({ action: 'setKeepAwake', scope: 'group', groupId: group.id, keepAwake: true });
+      showToast(`"${group.title || 'Untitled Group'}" tabs set to keep awake`, 'success');
+      return true;
+    } catch (err) {
+      showToast('Failed to set keep awake: ' + err.message, 'error');
+      return false;
+    }
+  }
+
+  async toggleChromeGroupCollapsed(group) {
+    const newState = !group.collapsed;
+    try {
+      await this.send({ action: 'setGroupCollapsed', groupId: group.id, collapsed: newState });
+      group.collapsed = newState;
+    } catch (err) {
+      showToast('Failed to update group: ' + err.message, 'error');
+      return false;
+    }
+    await this.refreshCommittedState(newState ? 'Group collapsed' : 'Group expanded');
+    return true;
+  }
+
+  async confirmCloseChromeGroup(group) {
+    const tabIds = group.tabs.map(t => t.id);
+    const ok = await showConfirm({
+      title: 'Close group?',
+      message: `Close ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from "${group.title || 'Untitled Group'}"? This cannot be undone.`,
+      confirmLabel: 'Close',
+      danger: true,
+    });
+    if (!ok) return false;
+    return this.closeChromeGroup(group);
   }
 
   // ── Manual Groups ──
@@ -305,7 +328,7 @@ export class GroupEditor {
 
     const entries = Object.entries(groups);
     if (entries.length === 0) {
-      this.groupsContainer.innerHTML = '<p class="empty-state">No custom groups. Create one above.</p>';
+      this.groupsContainer.innerHTML = '<p class="empty-state">Name a group, then drag tabs into it.</p>';
       return;
     }
 
@@ -316,19 +339,21 @@ export class GroupEditor {
       // Header (clickable to collapse/expand)
       const header = document.createElement('div');
       header.className = 'manual-group-header';
-      header.style.cursor = 'pointer';
 
       const chevron = document.createElement('span');
       chevron.className = 'chrome-group-chevron';
       chevron.textContent = '\u25bc';
+      chevron.setAttribute('aria-hidden', 'true');
 
       const dot = document.createElement('span');
       dot.className = 'color-dot';
       dot.style.background = this.chromeColor(group.color);
+      dot.setAttribute('aria-hidden', 'true');
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'group-name';
       nameSpan.textContent = group.name;
+      nameSpan.title = group.name;
 
       const countSpan = document.createElement('span');
       countSpan.className = 'group-count';
@@ -347,7 +372,7 @@ export class GroupEditor {
       const urlSet = new Set(group.tabUrls);
       const matchingTabs = tabs.filter(t => urlSet.has(t.url));
       if (matchingTabs.length === 0) {
-        body.innerHTML = '<p class="empty-state" style="padding:8px">Drag tabs here or search below</p>';
+        body.innerHTML = '<p class="empty-state empty-state-compact">Drag tabs here or search below</p>';
       } else {
         for (const tab of matchingTabs) {
           body.appendChild(this.createDraggableTab(tab));
@@ -363,6 +388,11 @@ export class GroupEditor {
         body.hidden = isHidden;
         addTabArea.hidden = isHidden;
         chevron.textContent = isHidden ? '\u25b6' : '\u25bc';
+        setExpanded(header, !isHidden);
+      });
+      makeKeyboardActivatable(header, {
+        expanded: true,
+        label: `${group.name}, ${tabsText(group.tabUrls.length)}`,
       });
 
       // Actions
@@ -370,15 +400,16 @@ export class GroupEditor {
       actions.className = 'manual-group-actions';
 
       const applyBtn = document.createElement('button');
-      applyBtn.className = 'action-btn secondary';
+      applyBtn.type = 'button';
+      applyBtn.className = 'action-btn secondary action-btn-sm';
       applyBtn.textContent = 'Apply to Chrome';
-      applyBtn.style.fontSize = '11px';
       applyBtn.addEventListener('click', () => this.applyToChrome(groupId));
 
       const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'action-btn danger';
-      deleteBtn.textContent = 'Delete Group';
-      deleteBtn.style.fontSize = '11px';
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'action-btn ghost-danger action-btn-sm';
+      deleteBtn.textContent = 'Delete group';
+      deleteBtn.setAttribute('aria-label', `Delete group ${group.name}`);
       deleteBtn.addEventListener('click', async () => {
         const ok = await showConfirm({
           title: 'Delete group?',
@@ -441,6 +472,7 @@ export class GroupEditor {
     const title = document.createElement('span');
     title.className = 'title';
     title.textContent = tab.title || tab.url || 'New Tab';
+    item.title = tabTooltip(tab);
 
     item.appendChild(favicon);
     item.appendChild(title);
@@ -458,6 +490,7 @@ export class GroupEditor {
     input.type = 'text';
     input.className = 'input group-add-tab-input';
     input.placeholder = 'Search open tabs or paste a URL\u2026';
+    input.setAttribute('aria-label', `Add a tab to ${group.name}`);
 
     const results = document.createElement('div');
     results.className = 'group-add-tab-results';
@@ -541,6 +574,8 @@ export class GroupEditor {
     addBtn.className = 'group-add-tab-btn';
     addBtn.textContent = '+';
     addBtn.title = 'Add this URL to group';
+    addBtn.type = 'button';
+    addBtn.setAttribute('aria-label', `Add ${url} to group`);
     addBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await this.addTabToGroup(url, groupId, 'URL added to group');
@@ -575,6 +610,8 @@ export class GroupEditor {
     addBtn.className = 'group-add-tab-btn';
     addBtn.textContent = '+';
     addBtn.title = 'Add to group';
+    addBtn.type = 'button';
+    addBtn.setAttribute('aria-label', `Add ${tab.title || tab.url || 'tab'} to group`);
     addBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await this.addTabToGroup(tab.url, groupId, 'Tab added to group');
@@ -705,9 +742,11 @@ export class GroupEditor {
       this.notify('Stash failed: ' + err.message, 'error');
       return false;
     }
-    const message = `Stashed ${result.stash.tabCount} tabs from "${group.title}"`;
-    const refreshed = await this.refreshCommittedState(message);
-    if (refreshed) this.notify(message, 'success');
+    const from = `"${group.title}"`;
+    const refreshed = await this.refreshCommittedState(`Stashed ${result.stash.tabCount} tabs from ${from}`);
+    if (refreshed) {
+      showStashedToast(result.stash, { from, onUndone: () => this.refresh(), notify: this.notify });
+    }
     return true;
   }
 

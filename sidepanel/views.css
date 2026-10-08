@@ -1,1 +1,497 @@
-/* TabKebab side panel — views styles. Loaded after panel.css; use its tokens. */
+/* TabKebab side panel — views styles. Loaded after panel.css; use its tokens.
+ *
+ * Tabs (Domains / Groups / Duplicates) and Windows views: two-zone rows with a
+ * ⋯ overflow menu, the shared [Group ▾] / [Sleep all] / [⇕] toolbar, and
+ * truncation + hit-target fixes for 360px panels. */
+
+/* ── Guard: these views never scroll sideways ── */
+#view-tabs,
+#view-windows {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+/* ── Shared view toolbar ── */
+.view-toolbar {
+  align-items: center;
+  gap: 6px;
+}
+
+.view-toolbar .action-btn {
+  min-height: 28px;
+}
+
+/* Split button: [Group by domain | ▾] */
+.split-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.split-btn .split-btn-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-btn .split-btn-toggle {
+  min-width: 28px;
+  padding: 0 8px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: var(--fs-sm, 12px);
+  line-height: 1;
+}
+
+.split-btn .split-btn-toggle[aria-expanded="true"] {
+  background: var(--accent-hover);
+}
+
+/* Sleep all: secondary with an amber moon so it reads as "Kebab" */
+.sleep-all-btn::before {
+  content: '\263E';
+  color: var(--kebab);
+  margin-right: 5px;
+  font-weight: 400;
+}
+
+/* Collapse/expand-all icon toggle (aria-pressed = everything collapsed) */
+.icon-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--fs-lg, 15px);
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.icon-toggle-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.icon-toggle-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-medium);
+  color: var(--accent);
+}
+
+.chrome-groups-toolbar {
+  margin-bottom: 10px;
+}
+
+/* ── Overflow (⋯) menus ── */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.row-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.row-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-xl, 18px);
+  font-family: var(--font);
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.row-menu-btn:hover,
+.row-menu-btn[aria-expanded="true"] {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.row-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 184px;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+  font-weight: 400;
+  text-align: left;
+}
+
+.row-menu[hidden] {
+  display: none !important;
+}
+
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--fs-md, 13px);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* .ai-feature forces inline-flex; keep menu items full-width rows. */
+body.ai-available .row-menu-item.ai-feature {
+  display: flex !important;
+}
+
+.row-menu-item:hover,
+.row-menu-item:focus-visible {
+  background: var(--bg-hover);
+}
+
+.row-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.row-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.row-menu-item.danger {
+  color: var(--danger);
+}
+
+.row-menu-item.danger:hover,
+.row-menu-item.danger:focus-visible {
+  background: var(--danger-soft);
+}
+
+.row-menu-item[role="menuitemcheckbox"]::after {
+  content: '';
+  margin-left: auto;
+  font-size: var(--fs-sm, 12px);
+  color: var(--accent);
+}
+
+.row-menu-item[role="menuitemcheckbox"][aria-checked="true"]::after {
+  content: '\2713';
+}
+
+.row-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* Visible row chips: at least 24px tall */
+.domain-group-header .stash-btn,
+.chrome-group-actions .stash-btn,
+.window-card-header .stash-btn {
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: var(--fs-xs, 11px);
+  white-space: nowrap;
+}
+
+/* ── Domains: two-zone rows ── */
+.domain-group-header {
+  gap: 6px;
+  min-width: 0;
+  min-height: 40px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.domain-group-header .chevron,
+.domain-group-header .domain-favicon {
+  flex-shrink: 0;
+}
+
+.domain-group-header .domain-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain-group-header .domain-name-generic {
+  font-weight: 500;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.domain-group-header .count,
+.domain-group-header .window-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.window-label {
+  font-size: var(--fs-xs, 11px);
+}
+
+/* Tab rows: full title in the tooltip; × close is 24×24 and keyboard-visible */
+.tab-item {
+  min-width: 0;
+}
+
+.tab-item .title {
+  min-width: 0;
+}
+
+.tab-item .close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -2px -4px -2px 0;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.tab-item:focus-within .close-btn,
+.tab-item .close-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .tab-item .close-btn {
+    opacity: 1;
+  }
+}
+
+/* ── Groups ── */
+.chrome-group-header {
+  min-width: 0;
+}
+
+.chrome-group-header .group-name {
+  flex: 1 1 80px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chrome-group-header .group-name-untitled {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.chrome-group-header .group-count {
+  white-space: nowrap;
+}
+
+.chrome-group-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 300px) {
+  .chrome-group-header {
+    flex-wrap: wrap;
+  }
+
+  .chrome-group-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
+
+.chrome-group-tab .title {
+  flex: 1 1 auto;
+}
+
+.chrome-group-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.manual-group-header .group-name {
+  flex: 1 1 80px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-group-header:focus-visible,
+.chrome-group-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.empty-state-compact {
+  padding: 8px;
+}
+
+.action-btn.action-btn-sm {
+  padding: 5px 10px;
+  min-height: 24px;
+  font-size: var(--fs-xs, 11px);
+}
+
+/* Destructive but not primary: ghost danger */
+.action-btn.ghost-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid transparent;
+}
+
+.action-btn.ghost-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+.group-add-tab-btn {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* ── Windows ── */
+.window-card--active {
+  border-left: 3px solid var(--accent);
+}
+
+.window-card-header {
+  min-width: 0;
+  gap: 6px;
+}
+
+.window-card-header .chevron,
+.window-card-header .window-status-dot {
+  flex-shrink: 0;
+}
+
+.window-card-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ACTIVE is a small accent dot after the name instead of a wrapping badge */
+.window-focus-badge.window-active-dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.window-card-header .count,
+.window-card-header .window-warning-badge {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.window-focus-btn.action-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 12px;
+  min-height: 28px;
+  font-size: var(--fs-sm, 12px);
+  text-align: center;
+}
+
+.window-group-header,
+.window-subgroup-header {
+  min-width: 0;
+}
+
+.window-group-header .count,
+.window-subgroup-header .count {
+  flex-shrink: 0;
+}
+
+/* ── Duplicates ── */
+.duplicate-group .dupe-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+  font-size: var(--fs-sm, 12px);
+}
+
+.duplicate-group .dupe-tab label {
+  min-width: 0;
+}
+
+.duplicate-group .dupe-tab .dupe-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-group .dupe-tab input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.duplicate-group .dupe-tab .keep-badge {
+  font-size: var(--fs-xs, 11px);
+  flex-shrink: 0;
+}
+
+.dupe-close-btn {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger);
+  font-family: var(--font);
+  font-size: var(--fs-xs, 11px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.dupe-close-btn:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}

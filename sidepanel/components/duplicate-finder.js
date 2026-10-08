@@ -71,6 +71,37 @@ export function selectLiveDuplicateCloses(duplicateGroups, selectedIds, liveTabs
   return { tabIds, urls };
 }
 
+function safeDecode(text) {
+  try {
+    return decodeURI(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Readable form of a duplicate group's URL: decoded host + path (+ query),
+ * without the scheme, a default "www." or a trailing slash. Malformed
+ * percent-encoding falls back to the raw text instead of throwing.
+ */
+export function formatDuplicateUrl(url) {
+  const raw = String(url ?? '');
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return safeDecode(raw);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return safeDecode(raw);
+  }
+  const host = parsed.host.replace(/^www\./, '');
+  let path = parsed.pathname === '/' ? '' : parsed.pathname;
+  path = safeDecode(path);
+  const query = parsed.search ? safeDecode(parsed.search) : '';
+  return `${host}${path}${query}` || raw;
+}
+
 /** Prefer the background's real closed count when it reports one. */
 function closedCount(result, fallback) {
   for (const key of ['closed', 'closedCount']) {
@@ -121,7 +152,9 @@ export class DuplicateFinder {
       ? this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0)
       : 0;
     const totalCount = dupeCount + this.emptyPages.length;
-    document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count: totalCount } }));
+    document.dispatchEvent(new CustomEvent('dupesUpdated', {
+      detail: { count: totalCount, duplicateCount: dupeCount },
+    }));
   }
 
   renderEmptyPages() {
@@ -173,7 +206,9 @@ export class DuplicateFinder {
     const dupeCount = this.duplicates
       ? this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0)
       : 0;
-    document.dispatchEvent(new CustomEvent('dupesUpdated', { detail: { count: dupeCount } }));
+    document.dispatchEvent(new CustomEvent('dupesUpdated', {
+      detail: { count: dupeCount, duplicateCount: dupeCount },
+    }));
 
     await new Promise(r => setTimeout(r, 200));
     try {
@@ -197,12 +232,9 @@ export class DuplicateFinder {
     if (!this.duplicates || this.duplicates.length === 0) {
       this.listEl.innerHTML = '<p class="empty-state">No duplicate tabs found.</p>';
       this.closeAllBtn.disabled = true;
+      this.closeAllBtn.textContent = 'Close duplicates';
       return;
     }
-
-    this.closeAllBtn.disabled = false;
-    const totalDupes = this.duplicates.reduce((sum, g) => sum + g.tabs.length - 1, 0);
-    this.closeAllBtn.textContent = `Close All Duplicates (${totalDupes})`;
 
     for (const group of this.duplicates) {
       const groupEl = document.createElement('div');
@@ -210,7 +242,8 @@ export class DuplicateFinder {
 
       const urlEl = document.createElement('div');
       urlEl.className = 'dupe-url';
-      urlEl.textContent = group.url;
+      urlEl.textContent = formatDuplicateUrl(group.url);
+      urlEl.title = group.url;
       groupEl.appendChild(urlEl);
 
       group.tabs.forEach((tab, index) => {
@@ -227,7 +260,11 @@ export class DuplicateFinder {
 
         const label = document.createElement('label');
         const titleSpan = document.createElement('span');
+        titleSpan.className = 'dupe-title';
         titleSpan.textContent = tab.title || 'Untitled';
+        label.title = tab.title ? `${tab.title}\n${tab.url || group.url}` : (tab.url || group.url);
+        // Keep the Close button's count equal to what it will actually close.
+        checkbox.addEventListener('change', () => this.updateCloseAllLabel());
         label.appendChild(checkbox);
         label.appendChild(titleSpan);
 
@@ -242,10 +279,10 @@ export class DuplicateFinder {
         }
 
         const closeBtn = document.createElement('button');
-        closeBtn.className = 'action-btn danger';
+        closeBtn.type = 'button';
+        closeBtn.className = 'dupe-close-btn';
         closeBtn.textContent = 'Close';
-        closeBtn.style.padding = '2px 8px';
-        closeBtn.style.fontSize = '11px';
+        closeBtn.setAttribute('aria-label', `Close tab: ${tab.title || 'Untitled'}`);
         closeBtn.addEventListener('click', async () => {
           try {
             const live = selectLiveDuplicateCloses([group], [tab.id], await queryLiveTabs());
@@ -274,6 +311,21 @@ export class DuplicateFinder {
 
       this.listEl.appendChild(groupEl);
     }
+    this.updateCloseAllLabel();
+  }
+
+  /** Count of currently checked duplicate tabs (what Close will act on). */
+  selectedCount() {
+    return this.listEl.querySelectorAll('input[type="checkbox"]:checked').length;
+  }
+
+  updateCloseAllLabel() {
+    if (!this.duplicates || this.duplicates.length === 0) return;
+    const n = this.selectedCount();
+    this.closeAllBtn.disabled = n === 0;
+    this.closeAllBtn.textContent = n === 0
+      ? 'Close duplicates'
+      : `Close ${n} duplicate${n !== 1 ? 's' : ''}`;
   }
 
   async closeAllDuplicates() {

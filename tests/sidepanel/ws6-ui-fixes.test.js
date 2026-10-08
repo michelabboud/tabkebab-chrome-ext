@@ -488,7 +488,8 @@ describe('6.4 headers and tab rows are keyboard operable', () => {
     expect(list.listEl.querySelector('.domain-group-body').classList.contains('collapsed')).toBe(false);
 
     // Keys on nested controls don't toggle the header.
-    keydown(header.querySelector('.kebab-btn'), 'Enter');
+    keydown(header.querySelector('.stash-btn'), 'Enter');
+    keydown(header.querySelector('.row-menu-btn'), 'Enter');
     expect(header.getAttribute('aria-expanded')).toBe('true');
 
     keydown(header, ' ');
