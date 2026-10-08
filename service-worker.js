@@ -14,7 +14,7 @@ import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { isRestorableUrl, sanitizeCapturedGroupTitle, sanitizeCapturedTab, sanitizeStashableTab } from './core/tab-restore.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
-import { getSettings, saveSettings, validateSettingsPatch } from './core/settings.js';
+import { getSettings, preserveDriveRetentionGuards, saveSettings, validateSettingsPatch } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
 import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from './core/drive-retention.js';
 import { reconcileDriveSync } from './core/drive-sync.js';
@@ -1870,7 +1870,10 @@ export async function handleMessage(msg, options = {}) {
     case 'importDriveSettings': {
       return withStateMutationLock(async () => {
         const current = await getSettings();
-        const replacement = validateSettingsPatch(msg.settings, current);
+        const replacement = preserveDriveRetentionGuards(
+          current,
+          validateSettingsPatch(msg.settings, current),
+        );
         await Storage.setMany({
           tabkebabSettings: replacement,
           tabkebabSettingsPrevious: current,

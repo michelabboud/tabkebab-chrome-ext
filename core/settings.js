@@ -203,3 +203,20 @@ export async function getSetting(key) {
 export async function setSetting(key, value) {
   return saveSettings({ [key]: value });
 }
+
+/**
+ * A settings import must never make Drive retention more destructive than the
+ * local configuration: keep `neverDeleteFromDrive` on and never shorten
+ * `driveRetentionDays`.
+ */
+export function preserveDriveRetentionGuards(current, replacement) {
+  const next = { ...replacement };
+  if (current?.neverDeleteFromDrive === true) next.neverDeleteFromDrive = true;
+  const localDays = Number.isInteger(current?.driveRetentionDays)
+    ? current.driveRetentionDays
+    : SETTINGS_DEFAULTS.driveRetentionDays;
+  if (!Number.isInteger(next.driveRetentionDays) || next.driveRetentionDays < localDays) {
+    next.driveRetentionDays = localDays;
+  }
+  return next;
+}
