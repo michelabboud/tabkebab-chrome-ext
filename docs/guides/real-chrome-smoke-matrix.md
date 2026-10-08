@@ -1090,7 +1090,8 @@ matrix_start_browser row03 "$row03_profile"
 source "$release_state"
 ```
 
-**Delayed classification actions.** Enable **AI blocking**, choose a
+**Delayed classification actions.** Enable **AI Detection** (Focus setup ›
+**Customize** › Blocking), choose a
 non-destructive fixture action only if the UI requires one, and start a run.
 For each of the pause, end, and pause→resume subcases, first capture the current
 counter in a terminal, perform the named UI setup, and press Enter immediately:
@@ -1136,7 +1137,7 @@ test "$(jq -r .focus <<< "$focus_metrics")" -eq "$((focus_before + 1))"
 test "$(jq -r .focusActive <<< "$focus_metrics")" -eq 0
 ```
 
-**Strict and exact actions.** Disable AI blocking. With strict mode enabled and
+**Strict and exact actions.** Disable AI Detection. With strict mode enabled and
 an empty allowlist, open `http://strict.matrix.test:$fixture_port/blocked`; it
 must be rejected while Focus has zero allowed tabs. Add the exact URL
 `http://matrix.test:$fixture_port/exact`, start again, and prove that URL remains
@@ -1221,8 +1222,8 @@ http://matrix.test:FIXTURE_PORT/r04/route#/one
 http://matrix.test:FIXTURE_PORT/r04/route#/two
 ```
 
-In **Duplicates**, click **Scan for Duplicates**. Require three independent
-groups of two with one selected copy per group. Click **Close All Duplicates**;
+In **Tabs › Duplicates**, click **Scan for duplicates**. Require three independent
+groups of two with one selected copy per group. Click **Close 3 duplicates**;
 require exact multiplicities `1,1,1`. Click the eight-second **Undo** toast;
 require exact multiplicities `2,2,2`. The two fragments must never collapse
 into one identity. Use count-only `chrome.tabs.query()` summaries; do not record
@@ -1236,7 +1237,7 @@ matrix_stop_browser row04 no
 matrix_read_outcome 04 row_actual row_result
 matrix_record_row 04 "$row04_profile" \
   'two copies each of one ordinary URL and two distinct fragment routes' \
-  'scan, Close All Duplicates, then invoke the production Undo toast' \
+  'scan, Close 3 duplicates, then invoke the production Undo toast' \
   'three exact duplicate groups; close counts 1,1,1; Undo counts 2,2,2' \
   "$row_actual" "$row_result" 'all duplicate fixture tabs closed; profile removed'
 matrix_end_row 04
@@ -1614,7 +1615,8 @@ Run **Clean Drive Files** with 30 days. Require:
 
 - `tabkebab-sync.json` and `tabkebab-settings.json` remain;
 - the one deliberately unique newest copy in each seeded category remains;
-- the deliberately old non-newest archive is removed;
+- the deliberately old non-newest archive is moved to the Drive trash (it no
+  longer appears in `trashed=false` listings and is not permanently deleted);
 - unrelated/undated files, if any were intentionally seeded, remain; and
 - the result has zero deletion errors.
 
@@ -1705,7 +1707,7 @@ await (async (profileName) => {
 })('SHARED_DRIVE_PROFILE_NAME');
 ```
 
-The production cleanup result's `deleted` count must equal the sum of
+The production cleanup result's `deleted` count (files moved to the trash) must equal the sum of
 `eligibleOld` from age setup unless another explicitly enumerated synthetic old
 copy was seeded; `errors` must be empty.
 
@@ -1840,7 +1842,7 @@ await new Promise((resolve, reject) => {
 db.close();
 ```
 
-Import `portable_file` through B's production **Import** picker. Require all
+Import `portable_file` through B's production **Import JSON…** picker (Sessions **⋯** menu). Require all
 section counts/settings plus the IndexedDB stash appear and the import summary
 reports no rollback. Automated injected tests remain the rollback-failure
 authority; do not add a live failure hook.
@@ -2477,7 +2479,7 @@ if (chromeAIBrokerClient.pending.size !== 0 || Object.keys(reconnectCache.aiCach
 ({ pendingCount: 0, cacheKeyCount: 1 });
 ```
 
-**Closed-panel background action.** Start a Focus run with AI blocking and a
+**Closed-panel background action.** Start a Focus run with AI Detection and a
 non-destructive `none` action. Create one `about:blank` target tab. In panel
 DevTools capture a canonical SHA-256 fingerprint of the complete `focusState`
 and sorted `aiCache` key set, requiring one cache key and zero named locks; copy

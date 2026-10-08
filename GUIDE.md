@@ -233,7 +233,7 @@ Click **Stash** on any of these rows:
 - a **Chrome group** row in Tabs > Groups — saves and closes the group's tabs
 - a **window** card in Windows — saves and closes all tabs in that window
 
-Blank pages and browser-internal pages stay open (pinned tabs are stashed and come back pinned). A toast confirms what was stashed, for example "Stashed 3 tabs from github.com", with an **Undo** button for 8 seconds: Undo reopens those tabs and removes the stash. Focus Mode (Stash action), auto-stash and AI commands can also create stashes.
+Blank pages, browser-internal pages, other pages a restore could not reopen (such as extension pages, `about:` and `data:` URLs) and incognito tabs stay open and are not stashed (pinned tabs are stashed and come back pinned). A toast confirms what was stashed, for example "Stashed 3 tabs from github.com", with an **Undo** button for 8 seconds: Undo reopens those tabs and removes the stash. Focus Mode (Stash action), auto-stash and AI commands can also create stashes.
 
 Each stash records: tab URLs, titles, favicon URLs, pinned state, group metadata, source type, and timestamp.
 
@@ -287,6 +287,8 @@ The **Auto** tab displays a count badge and strips the `[Auto]` prefix from sess
 - All tabs per window: URL, title, favicon URL, pinned state
 - Tab group metadata: group name, color, which tabs belong to it
 - Timestamp and session name
+
+Incognito tabs and pages that cannot be reopened (such as extension pages, `about:` and `data:` URLs) are not saved.
 
 ### Saving a Session
 
@@ -489,10 +491,20 @@ Enable one or more formats in Settings > Bookmarks.
 
 | Destination | Storage |
 |-------------|---------|
-| **Chrome Bookmarks** | Creates folders in Chrome's bookmark bar under a "TabKebab" folder |
+| **Chrome Bookmarks** | Creates folders in Chrome's bookmark bar under a "TabKebab" folder (see limits below) |
 | **Local Storage** | Saves to `chrome.storage.local` (max 50 snapshots) |
 | **Google Drive** | Uploads JSON to `TabKebab/{profile}/bookmarks/` on Drive |
 | **All** | Saves to all three destinations |
+
+Chrome bookmark exports are kept bounded:
+
+- At most 4 folder levels below the bookmark bar. If you move the TabKebab folder deeper, lower levels are flattened into the bookmark titles (for example `Windows · Window 1`).
+- A renamed or moved TabKebab folder is found again and reused.
+- The newest 30 date folders are kept; older date folders under the TabKebab folder are removed.
+- One export stops at 5,000 bookmarks and says so.
+- Exporting again on the same day replaces that day's snapshot instead of duplicating it.
+
+Incognito tabs are never bookmarked. **Auto-bookmark on stash** bookmarks exactly the tabs that were stashed.
 
 ### Creating Bookmarks
 
@@ -529,21 +541,22 @@ Type natural language instructions like:
 
 | Command | What it does |
 |---------|-------------|
-| "close YouTube tabs" | Closes all tabs with YouTube URLs |
-| "find my GitHub tabs" | Highlights/filters GitHub tabs |
-| "group by project" | AI groups tabs by inferred project context |
-| "close all shopping tabs" | AI identifies and closes shopping-related tabs |
-| "stash all social media" | Stashes tabs the AI classifies as social media |
-| "how many tabs do I have?" | Returns tab count information |
+| "close YouTube tabs" | Closes tabs on youtube.com and its subdomains, after a confirmation |
+| "find my GitHub tabs" | Lists the matching tabs with **Group**, **Close all** and **Dismiss** buttons |
+| "group my docs tabs" | Groups the matching tabs into a named Chrome tab group (one group per window) |
+| "move Jira tabs to a new window" | Moves the matching tabs into a new window |
+| "switch to my Gmail tab" | Brings the first matching tab to the front |
+
+The supported actions are close, group, move (to a new window), switch to a tab, and find. Matching is by domain, text in the title, or text in the URL.
 
 ### How It Works
 
-1. Your command and current tab list (titles + URLs) are sent to the AI provider.
-2. The AI returns structured actions (close, group, move, etc.). Domain filters match only the exact host and true subdomains: `github.com` includes `docs.github.com`, but not `notgithub.com` or `github.com.evil.test`.
-3. A close or stash action shows a confirmation preview with a red confirm button. At confirmation, TabKebab queries the live tabs again, reapplies the original filter, and can only narrow the preview-approved IDs; a tab that navigated away is not closed. A title-based close also waits for any pending navigation to settle instead of trusting the previous page's stale title.
+1. Your command and the current tab list (titles and domains, up to 200 tabs) are sent to the AI provider.
+2. The AI returns one structured action (close, group, move, focus or find) with a filter. Filters that would match far too broadly are rejected. Domain filters match only the exact host and true subdomains: `github.com` includes `docs.github.com`, but not `notgithub.com` or `github.com.evil.test`.
+3. A close action always shows a confirmation, and a group or move asks first when it spans more than one window or more than 20 tabs. The confirmation is built from the actual matching tabs (count, windows, pinned tabs, titles), never from AI-written text. Pinned tabs are never grouped. At confirmation, TabKebab queries the live tabs again, reapplies the original filter, and can only narrow the preview-approved IDs; a tab that navigated away is not closed. A title-based close also waits for any pending navigation to settle instead of trusting the previous page's stale title.
 4. TabKebab executes the validated action and shows results in the command bar. A "find" command lists the matching tabs with **Group**, **Close all** and **Dismiss** buttons.
 
-Commands never send page content, cookies, passwords, or browsing history — only tab titles and URLs.
+Commands never send page content, cookies, passwords, or browsing history — only your command plus tab titles and domains.
 
 ---
 
@@ -589,11 +602,12 @@ Google Drive/
 
 ### Retention & Cleanup
 
-- **Drive retention** — auto-delete only strictly dated recoverable copies older than N days (default: 30)
+- **Drive retention** — move only strictly dated recoverable copies older than N days (default: 30) to the Google Drive trash; nothing is permanently deleted by TabKebab
 - **Never delete from Drive** — override retention, keep everything forever
 - Canonical `tabkebab-sync.json` and `tabkebab-settings.json` files are never retention candidates
-- The newest copy in each bounded file category is preserved, including every tie; young, cutoff-equal, malformed, undated, wrong-folder, and unrelated JSON/HTML files are also preserved
-- Manual cleanup reports deleted files plus canonical, newest, and undated files protected; any partial deletion is shown as incomplete rather than success
+- The newest copy in each bounded file category is preserved, including every tie, and the newest export of every individually exported stash is kept; young, cutoff-equal, malformed, undated, wrong-folder, and unrelated JSON/HTML files are also preserved
+- **Clean Drive Files** reports the files removed (moved to the trash) plus canonical, newest, and undated files protected; any partial cleanup is shown as incomplete rather than success
+- Sync deletion records (which make a deleted session or custom group stay deleted on other profiles) expire after 180 days and are capped, so sync can't break permanently
 - Existing files are archived (copied with a timestamp) before overwrite; if the archive copy fails, the overwrite is aborted
 
 ### Cross-Profile Import
@@ -637,7 +651,7 @@ To turn AI off, choose **Off** and click **Save Settings**. Your saved keys stay
 
 ### API Key Security
 
-- Keys are encrypted with **AES-GCM 256-bit** using PBKDF2 key derivation (100,000 iterations)
+- Keys are encrypted with **AES-GCM 256-bit** using PBKDF2 key derivation (600,000 iterations for keys saved with this version; keys saved by older versions still decrypt)
 - Optional **passphrase** protection derives the encryption key from a passphrase you know; otherwise device protection uses a random per-profile install ID
 - Decrypted keys are held only in **session storage**. They survive service-worker idle/suspension, but Chrome clears them on a full browser restart, extension reload, extension update, or disable
 - Plaintext keys are **never written to disk**
@@ -804,7 +818,7 @@ Destination, auto-bookmark on stash and **Bookmark Now** are always shown; the f
 | Auto-export sessions | Off | Include sessions in Drive sync |
 | Auto-export stashes | Off | Include stashes in Drive sync |
 | Auto-sync interval | 0 (manual) | Hours between automatic syncs |
-| Drive retention | 30 days | Auto-delete files older than this |
+| Drive retention | 30 days | Move dated copies older than this to the Drive trash |
 | Never delete from Drive | Off | Override retention, keep all files |
 
 ### Backup & restore
@@ -834,7 +848,7 @@ The export intentionally excludes Drive/OAuth state, install identifiers, active
 
 Use **Import JSON…** in the Sessions **⋯** menu to load a supported full or sessions file. TabKebab rejects files above 25 MiB, malformed data, secrets, and the wrong export kind before changing storage.
 
-Imports merge under one service-worker lock. Existing same-ID sessions, stashes, groups, bookmarks, Focus preferences, and history remain authoritative; keep-awake domains are combined; imported general settings update the local settings; and safe AI choices update without replacing an existing encrypted local key. The eight local-storage sections commit together, and IndexedDB stashes are replaced atomically. If either commit fails, TabKebab restores the affected snapshots and reports failure instead of claiming success.
+Imports merge under one service-worker lock. Existing same-ID sessions, stashes, groups, bookmarks, Focus preferences, and history remain authoritative; keep-awake domains are combined; imported general settings update the local settings (but never weaken Drive retention); and imported AI settings contribute only per-provider model choices: an import never turns AI on, switches the AI provider, or sets a Custom endpoint, and an existing encrypted local key is kept. The eight local-storage sections commit together, and IndexedDB stashes are replaced atomically. If either commit fails, TabKebab restores the affected snapshots and reports failure instead of claiming success.
 
 After a settings or full import, TabKebab also refreshes its automation schedules. A red committed-warning message means the data was imported but one or more schedules could not be refreshed; restart TabKebab before relying on automatic actions.
 

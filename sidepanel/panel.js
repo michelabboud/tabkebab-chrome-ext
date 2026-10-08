@@ -312,7 +312,7 @@ async function refreshGlobalStats() {
 
 // --- Duplicate badge ---
 // The badge counts duplicate tabs only (the extra copies), matching the
-// "Close All Duplicates (N)" button. Blank pages are not included.
+// Duplicates sub-view's "Close N duplicates" button. Blank pages are not included.
 function updateDupeBadge(count) {
   const badge = document.getElementById('dupe-badge');
   if (!badge) return;

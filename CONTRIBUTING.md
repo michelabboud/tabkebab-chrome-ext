@@ -18,7 +18,7 @@ Thanks for your interest in contributing to TabKebab!
    - Open `chrome://extensions`
    - Enable **Developer Mode**
    - Click **Load unpacked** and select the project folder
-5. Install Bun `1.3.11`, the exact version pinned in `.bun-version`
+5. Install Bun `1.4.2`, the exact version pinned in `.bun-version`
 
 No package installation is required. TabKebab has no runtime or test dependencies and Chrome loads its source files directly.
 
@@ -60,6 +60,8 @@ the exact successful CI run.
 - **Match the existing code style** — follow the patterns you see in the codebase
 - **Test success and failure paths** — start behavior changes with a failing regression, then run the full gate
 - **Respect the test boundary** — the Chrome mock verifies policy and API orchestration, not DOM, IndexedDB, extension lifecycle, OAuth, or Prompt API behavior; verify those in real Chrome
+- **Put worker code in its feature module** — `tabkebab-service-worker.js` only registers listeners and wires the router; new message actions go in the matching `core/background/<feature>.js` handler map. If an action uses a feature that Settings → Features can switch off, add it to `ACTION_FEATURES` in `core/background/router.js` (recovery, listing, and export actions stay ungated) and mark panel controls with `data-feature="<name>"`
+- **Log through `core/log.js`** — use `createLogger('<scope>')` so worker output is prefixed `[TabKebab:<scope>]`
 - **Keep PRs focused** — one feature or fix per PR
 
 ## Reporting Bugs

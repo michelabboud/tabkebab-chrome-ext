@@ -82,7 +82,7 @@ Tab moves for different target windows are sequential with 100ms delays between 
 
 ### 3.3 Optimize large bookmark HTML generation
 
-**File:** `tabkebab-service-worker.js`
+**File:** `core/background/bookmarks.js`
 
 `generateBookmarkHtml` builds the entire page as one string. For 10K+ tabs this creates a multi-MB allocation. Consider streaming with array joins or pagination.
 
@@ -133,7 +133,7 @@ Help overlay includes: view descriptions, feature explanations, shortcut referen
 
 ### ~~5.3 Export/import settings as file~~ ✅
 
-Added "Export Settings" and "Import Settings" buttons to the General settings card. Exports as standalone JSON file.
+Added "Export Settings" and "Import Settings" buttons (now in the Settings > Backup & restore card). Exports as standalone JSON file.
 
 ### 5.4 Bulk operations toolbar
 
@@ -143,26 +143,28 @@ When multiple tabs are selected, show a floating toolbar with bulk actions: clos
 
 Before restoring a session, show what's changed: new tabs, removed tabs, moved tabs. Let users cherry-pick which parts to restore.
 
-### 5.6 Tab search across all views
+### ~~5.6 Tab search across all views~~ ✅
 
-Add a global search bar that finds tabs across open tabs, stashes, and sessions — not just the current view.
+**File:** `sidepanel/components/global-search.js`
+
+Ctrl+K / Cmd+K (or the header magnifier) searches open tabs, stashes, and sessions at once, grouped by kind.
 
 ---
 
 ## Priority 6 — Testing
 
-### 6.1 Add unit tests for core modules
+### ~~6.1 Add unit tests for core modules~~ ✅
 
-Critical untested paths:
+Bun `bun:test` suite under `tests/` with a repository-owned Chrome API mock (see ADR 0001). Paths originally listed as untested:
 - 4-phase grouping pipeline (snapshot → solver → planner → executor)
 - Session v1 → v2 migration logic
 - AI provider response parsing
 - IndexedDB transaction handling
 - Drive sync conflict resolution
 
-### 6.2 Add integration tests for message handler
+### ~~6.2 Add integration tests for message handler~~ ✅
 
-Test the full `handleMessage` flow for each action type, including error cases.
+Router and worker-level tests (`tests/core/worker-router.test.js`, `tests/core/feature-switches.test.js`, `tests/integration/`) cover message dispatch, feature gating, and error responses.
 
 ---
 
@@ -189,6 +191,6 @@ Test the full `handleMessage` flow for each action type, including error cases.
 | 17 | P3.3 Optimize bookmark HTML | Planned |
 | 18 | P5.4 Bulk operations toolbar | Planned |
 | 19 | P5.5 Session diff view | Planned |
-| 20 | P5.6 Tab search across views | Planned |
-| 21 | P6.1 Unit tests | Planned |
-| 22 | P6.2 Integration tests | Planned |
+| 20 | P5.6 Tab search across views | ✅ Done |
+| 21 | P6.1 Unit tests | ✅ Done |
+| 22 | P6.2 Integration tests | ✅ Done |

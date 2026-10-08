@@ -30,13 +30,15 @@ Before publishing to Chrome Web Store:
 
 ## Architecture
 - Manifest V3 with ES modules, no bundler
-- Service worker (`tabkebab-service-worker.js`) is the message hub; feature handlers live in `core/background/*.js`
+- Service worker (`tabkebab-service-worker.js`) is the message hub: it only registers listeners and wires the router; feature handlers live in `core/background/{router,tabs,sessions,grouping,stash,bookmarks,drive,settings,ai,focus,alarms,lifecycle}.js`
 - Background logging goes through `core/log.js` `createLogger(scope)` → `[TabKebab:<scope>] …` (never raw `console.*('[TabKebab] …')`)
-- Side panel UI in `sidepanel/` — vanilla HTML/CSS/JS, no framework
+- Side panel UI in `sidepanel/` — vanilla HTML/CSS/JS, no framework; nav order Tabs · Windows · Stash · Sessions (Focus and Settings open from the header)
+- Settings → Features: 11 on/off switches (`FEATURE_KEYS` in `core/settings.js`, panel side `sidepanel/feature-flags.js`, worker gating `ACTION_FEATURES` in `core/background/router.js`); off hides the feature and refuses its actions but never deletes data
 - Core logic in `core/` — tabs API, sessions, stash (IndexedDB), grouping engine, AI providers, Drive client
 - 4-phase grouping engine: snapshot → solver → planner → executor
-- AI: 5 providers (OpenAI, Claude, Gemini, Chrome Built-in, Custom), AES-GCM 256-bit encrypted key storage
-- Google Drive sync with OAuth2 (`drive.file` scope), profile-scoped folders
+- AI: 5 providers (OpenAI, Claude, Gemini, Chrome Built-in, Custom), off by default; defaults `gpt-6-luna`, `claude-haiku-5-5`, `gemini-3.8-flash` (`core/ai/provider.js`; retired saved models migrate to the default); AES-GCM 256-bit encrypted key storage (PBKDF2 600k iterations for new keys)
+- Google Drive sync with OAuth2 (`drive.file` scope), profile-scoped folders; retention moves old files to the Drive trash
+- Permissions include `unlimitedStorage`; incognito tabs are never persisted (sessions, stashes, bookmarks)
 
 ## Website (`tabkebab-website` repo)
 - Static site: `index.html`, `style.css`, `script.js`, `img/`
@@ -47,9 +49,11 @@ Before publishing to Chrome Web Store:
 
 ## Key Files
 - `manifest.json` — extension manifest
-- `tabkebab-service-worker.js` — background script
+- `tabkebab-service-worker.js` — background service worker entry
+- `core/background/` — worker feature modules and message router
 - `sidepanel/panel.html` — main UI
 - `sidepanel/panel.css` — design system / tokens
+- `sidepanel/feature-flags.js` — Settings → Features switches (panel side)
 - `core/` — all business logic
 - `GUIDE.md` — full user guide
 - `store/listing.txt` — Chrome Web Store copy
@@ -58,6 +62,7 @@ Before publishing to Chrome Web Store:
 ## Design Tokens
 - Light: white bg, #111827 text, #2563eb accent
 - Dark: #0f0f10 bg, #f3f4f6 text, #3b82f6 accent
+- Status (light / dark): danger #dc2626 / #f87171, success #047857 / #34d399, kebab #b45309 / #f97316
 - Brand: Red #ef4444, Amber #f59e0b, Teal #14b8a6, Purple #8b5cf6
 - Font: 'Segoe UI', system-ui, sans-serif
 - Radii: 6px sm, 10px default, 14px lg, 100px pill

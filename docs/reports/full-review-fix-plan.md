@@ -131,10 +131,13 @@ The extension ships zero npm dependencies; "third parties" are CI actions, the B
 | Saved settings | stored retired/deprecated model IDs | migrate on load to provider default | |
 
 ## Status (2026-10-08)
-All workstreams WS1–WS7 implemented and merged into `claude/sleepy-galileo-6w8h0l`; `bun test` 1081 pass / 0 fail (from 900).
+All workstreams WS1–WS7 implemented and merged into `claude/sleepy-galileo-6w8h0l`; `bun test` 1081 pass / 0 fail (from 900) at merge.
+Since then the branch also carries Settings → Features switches, the side-panel UI/UX overhaul (`docs/reports/uiux-after.md`), the worker rename to
+`tabkebab-service-worker.js` with `core/background/*` modules and `core/log.js`; `bun test` is now 1423 pass / 0 fail across 70 files.
 Integration fixes added during merge: auto-bookmark-on-stash only covers restorable (actually stashed) tabs; Drive settings import keeps
 `neverDeleteFromDrive` on and never shortens `driveRetentionDays`.
 Open / needs live verification:
 - ~~Gemini 3.x `thinkingLevel: "low"` casing~~ — verified 2026-10-08 with a live `gemini-3.8-flash` call (finishReason STOP); no change needed.
 - `core/focus.js` `handleDistraction` still calls `chrome.sidePanel.open` without a user gesture (already caught; no-op).
-- Not exercised in a real browser: all changes are covered by mocked-Chrome tests only.
+- Not exercised through the exact-package real-Chrome matrix: changes are covered by mocked-Chrome tests; only the UI/UX pass ran the unpacked panel in headless Chromium.
+- `sidepanel/drive-cleanup-result.js` still reports "Deleted N Drive files" although retention now moves files to the Drive trash.
