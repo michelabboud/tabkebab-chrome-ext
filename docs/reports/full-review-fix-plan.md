@@ -106,3 +106,9 @@ confirm-dialog,stash-list,session-manager,command-bar}.js`.
 1. Each workstream implemented in an isolated worktree with tests.
 2. Merge all into `claude/sleepy-galileo-6w8h0l`, resolve conflicts (`service-worker.js` is shared by WS1/2/4 on disjoint functions).
 3. Full `bun test` green, push.
+
+## Addendum — 4.11 Chrome bookmark nesting limits (user report)
+Scheduled/manual Chrome bookmark export (`saveToChromeBoomarks`) builds Bar › TabKebab › date › Windows|Groups|Domains › name › bookmark
+with no depth budget, ignores a moved/renamed root, and accumulates date folders forever.
+Fix (WS4): `MAX_BOOKMARK_DEPTH` budget with progressive flattening when the root sits deeper; persist root folder id;
+keep newest N date folders (removeTree only `YYYY-MM-DD` folders under the root); cap bookmarks per export.
