@@ -144,7 +144,8 @@ describe('WS2 2.5 OpenAI reasoning models and 4xx handling', () => {
       { userPrompt: 'hi', maxTokens: 100, temperature: 0.1 },
       { apiKey: 'k', model: 'o4-mini' },
     );
-    expect(requests[0].body.max_completion_tokens).toBe(100);
+    // WS7: reasoning models get a floor so hidden reasoning cannot starve output.
+    expect(requests[0].body.max_completion_tokens).toBe(4096);
     expect(requests[0].body.max_tokens).toBeUndefined();
     expect(requests[0].body.temperature).toBeUndefined();
 

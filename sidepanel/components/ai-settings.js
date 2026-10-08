@@ -6,9 +6,9 @@ import { sendOrThrow } from '../message-client.js';
 const PROVIDERS_WITH_KEY = ['openai', 'claude', 'gemini', 'custom'];
 const ALL_PROVIDERS = ['openai', 'claude', 'gemini', 'chrome-ai', 'custom'];
 const PROVIDER_DEFAULTS = Object.freeze({
-  openai: { model: 'gpt-4.1-nano' },
-  claude: { model: 'claude-haiku-4-5' },
-  gemini: { model: 'gemini-2.5-flash' },
+  openai: { model: 'gpt-6-luna' },
+  claude: { model: 'claude-haiku-5-5' },
+  gemini: { model: 'gemini-3.8-flash' },
   'chrome-ai': { model: 'default' },
   custom: { model: 'default', baseUrl: 'http://localhost:11434/v1' },
 });

@@ -136,9 +136,9 @@ TabKebab is a Chrome side-panel extension that tames tab chaos. Group, stash, sl
 
 ### AI Providers
 
-- **OpenAI** — GPT-4.1, GPT-5, o4-mini
-- **Anthropic Claude** — Haiku, Sonnet, Opus
-- **Google Gemini** — 2.5 Flash/Pro, 3.0 preview
+- **OpenAI** — GPT-6 Luna (default), GPT-5.x, GPT-4.1
+- **Anthropic Claude** — Haiku 5.5 (default), Sonnet, Opus
+- **Google Gemini** — 3.8 Flash (default), 3.x Flash-Lite, 3.1 Pro preview
 - **Chrome Built-in AI** — Gemini Nano, on-device, no API key needed
 - **Custom endpoint** — any OpenAI-compatible API (Ollama, LM Studio, Groq, Together AI)
 - **Encrypted API key storage** with AES-GCM 256-bit and optional passphrase

@@ -633,12 +633,14 @@
             <label class="input-label">Model</label>
             <div class="toolbar" style="margin-bottom: 12px;">
               <select id="openai-model" class="input">
-                <option value="gpt-4.1-nano">GPT-4.1 Nano (fastest)</option>
+                <option value="gpt-6-luna">GPT-6 Luna (fastest)</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
                 <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
                 <option value="gpt-4.1">GPT-4.1</option>
-                <option value="gpt-5-mini">GPT-5 Mini</option>
-                <option value="gpt-5.2">GPT-5.2</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
+                <option value="gpt-6-astra">GPT-6 Astra</option>
               </select>
               <button class="action-btn secondary btn-load-models" data-provider="openai" style="flex:0">Load</button>
             </div>
@@ -659,11 +661,12 @@
             <label class="input-label">Model</label>
             <div class="toolbar" style="margin-bottom: 12px;">
               <select id="claude-model" class="input">
-                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+                <option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest)</option>
+                <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
+                <option value="claude-opus-5-5">Claude Opus 5.5</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
                 <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
                 <option value="claude-opus-4-5">Claude Opus 4.5</option>
-                <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                <option value="claude-opus-4-20250514">Claude Opus 4</option>
               </select>
               <button class="action-btn secondary btn-load-models" data-provider="claude" style="flex:0">Load</button>
             </div>
@@ -684,10 +687,13 @@
             <label class="input-label">Model</label>
             <div class="toolbar" style="margin-bottom: 12px;">
               <select id="gemini-model" class="input">
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash (fastest)</option>
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini-3-flash-preview">Gemini 3 Flash (preview)</option>
-                <option value="gemini-3-pro-preview">Gemini 3 Pro (preview)</option>
+                <option value="gemini-3.8-flash">Gemini 3.8 Flash (recommended)</option>
+                <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (fastest)</option>
+                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (existing users only)</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (existing users only)</option>
               </select>
               <button class="action-btn secondary btn-load-models" data-provider="gemini" style="flex:0">Load</button>
             </div>

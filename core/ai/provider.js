@@ -9,12 +9,34 @@ export const ProviderId = Object.freeze({
 });
 
 export const PROVIDER_DEFAULTS = Object.freeze({
-  [ProviderId.OPENAI]:    { model: 'gpt-4.1-nano' },
-  [ProviderId.CLAUDE]:    { model: 'claude-haiku-4-5' },
-  [ProviderId.GEMINI]:    { model: 'gemini-2.5-flash' },
+  [ProviderId.OPENAI]:    { model: 'gpt-6-luna' },
+  [ProviderId.CLAUDE]:    { model: 'claude-haiku-5-5' },
+  [ProviderId.GEMINI]:    { model: 'gemini-3.8-flash' },
   [ProviderId.CHROME_AI]: { model: 'default' },
   [ProviderId.CUSTOM]:    { model: 'default', baseUrl: 'http://localhost:11434/v1' },
 });
+
+/**
+ * Model IDs that the vendor has deprecated or shut down. A saved setting that
+ * still names one is migrated to the provider default when settings are read;
+ * any other saved model is left exactly as the user chose it.
+ * (Gemini 2.5 models are access-restricted for new users but still served, so
+ * they are intentionally not listed.)
+ */
+export const RETIRED_MODELS = Object.freeze({
+  [ProviderId.OPENAI]: Object.freeze(['gpt-4.1-nano']),
+  [ProviderId.CLAUDE]: Object.freeze(['claude-opus-4-20250514', 'claude-sonnet-4-20250514']),
+  [ProviderId.GEMINI]: Object.freeze(['gemini-3-pro-preview']),
+});
+
+/** Returns the model to use for a saved model ID, migrating retired IDs. */
+export function migrateRetiredModel(providerId, model) {
+  const retired = RETIRED_MODELS[providerId];
+  if (retired && typeof model === 'string' && retired.includes(model)) {
+    return PROVIDER_DEFAULTS[providerId].model;
+  }
+  return model;
+}
 
 export const PROVIDER_NAMES = Object.freeze({
   [ProviderId.OPENAI]:    'OpenAI',

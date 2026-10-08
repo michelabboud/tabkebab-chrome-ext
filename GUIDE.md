@@ -609,9 +609,9 @@ Click **Disconnect** to remove Chrome's cached OAuth token and stop syncing in T
 
 | Provider | Models | API Key Required | Notes |
 |----------|--------|-----------------|-------|
-| **OpenAI** | GPT-4.1, GPT-5, o4-mini | Yes | Most popular option |
-| **Anthropic Claude** | Haiku, Sonnet, Opus | Yes | Strong reasoning |
-| **Google Gemini** | 2.5 Flash, 2.5 Pro, 3.0 | Yes | Google's models |
+| **OpenAI** | GPT-6 Luna (default), GPT-5.x, GPT-4.1 | Yes | Most popular option |
+| **Anthropic Claude** | Haiku 5.5 (default), Sonnet, Opus | Yes | Strong reasoning |
+| **Google Gemini** | 3.8 Flash (default), 3.x Flash-Lite, 3.1 Pro | Yes | Google's models |
 | **Chrome Built-in AI** | Gemini Nano | No | Runs on-device in a supported Chrome side panel |
 | **Custom Endpoint** | Any | Depends | OpenAI-compatible API (Ollama, LM Studio, etc.) |
 

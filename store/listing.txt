@@ -55,7 +55,7 @@ TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, an
 • Google Drive sync (optional)
 
 🤖 AI PROVIDERS (all optional, bring your own key)
-• OpenAI (GPT-4.1, GPT-5, o4-mini)
+• OpenAI (GPT-6, GPT-5, GPT-4.1)
 • Anthropic Claude (Haiku, Sonnet, Opus)
 • Google Gemini (2.5 Flash/Pro, 3.0 preview)
 • Chrome Built-in AI (Gemini Nano, on-device, no API key needed)

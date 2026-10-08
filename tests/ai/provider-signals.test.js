@@ -34,7 +34,7 @@ const HTTP_PROVIDERS = Object.freeze([
     provider: ClaudeProvider,
     config: { apiKey: 'claude-test-key', model: 'claude-haiku-4-5' },
     completionBody: {
-      content: [{ text: 'answer' }],
+      content: [{ type: 'text', text: 'answer' }],
       usage: { input_tokens: 1, output_tokens: 1 },
     },
     modelsBody: {

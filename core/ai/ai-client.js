@@ -13,6 +13,7 @@ import { CustomProvider } from './provider-custom.js';
 import {
   ProviderId,
   PROVIDER_DEFAULTS,
+  migrateRetiredModel,
   AIAbortError,
   AIAuthError,
   AIDisabledError,
@@ -407,7 +408,7 @@ function storedModel(settings, providerId) {
     value.length <= MAX_AI_FIELD_LENGTH &&
     value === value.trim()
   ) {
-    return value;
+    return migrateRetiredModel(providerId, value);
   }
   return PROVIDER_DEFAULTS[providerId].model;
 }
