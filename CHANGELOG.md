@@ -4,6 +4,76 @@ All notable changes to TabKebab are documented in this file.
 
 ---
 
+## [1.3.0] — 2026-10-08
+
+Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
+
+### Changed
+
+- Default AI models updated: OpenAI `gpt-6-luna` (replaces deprecated
+  `gpt-4.1-nano`), Claude `claude-haiku-5-5`, Gemini `gemini-3.8-flash`.
+  Saved settings that name a retired model move to the provider default.
+  Request bodies follow each model family's rules (reasoning models, thinking
+  controls, no unsupported sampling parameters).
+- Added the `unlimitedStorage` permission so large session and stash
+  histories are not lost to the 10 MB storage quota.
+- New API keys use 600,000 PBKDF2 iterations; existing keys still decrypt.
+- CI uses `actions/checkout@v7` and `actions/upload-artifact@v7`; tests are
+  pinned to Bun 1.4.2.
+
+### Fixed
+
+- **Stash data loss:** tabs that restore cannot reopen (extension pages such as
+  tab suspenders, `about:`, `data:`, `edge:`) are no longer stashed and closed;
+  they stay open.
+- **Focus:** a stash containing such tabs no longer leaves Focus stuck in its
+  ending state; "+5 min" no longer ends open-ended sessions; the group action
+  groups per window and leaves pinned and already-grouped tabs alone; blocked
+  sites accept pasted URLs and `*.domain` entries; finished Focus stashes are
+  cleaned up; `armorgames.com` blocklist typo.
+- **AI commands:** close confirmations are built from the actual matching tabs
+  (count, windows, pinned, titles) instead of AI-written text; over-broad
+  filters are rejected; group/move validate colors and names, group per window,
+  and ask for confirmation across windows or above 20 tabs.
+- **AI reliability:** failed responses are no longer cached; client errors are
+  not retried; Gemini thinking no longer exhausts the output budget; opening a
+  second side panel no longer cancels running Chrome AI requests; timeouts fire
+  even when Chrome AI never answers; cache writes are serialized.
+- **Drive sync:** deletion records expire after 180 days and are capped, so
+  sync can no longer break permanently; interrupted folder/file creates no
+  longer produce duplicates, and existing duplicates resolve to the oldest;
+  retention keeps the newest export of every stash and moves files to the Drive
+  trash instead of deleting them; `Retry-After` is parsed correctly and capped;
+  profile listing reads all pages.
+- **Imports:** settings files can no longer enable AI, change the AI provider or
+  endpoint, or weaken Drive retention.
+- **Bookmarks:** Chrome bookmark exports stay within 4 folder levels (flattening
+  titles when the TabKebab folder sits deeper), reuse a renamed or moved
+  TabKebab folder, keep the newest 30 date folders, cap one export at 5,000
+  bookmarks, and replace the day's snapshot instead of duplicating it.
+  Auto-bookmark on stash now bookmarks exactly the stashed tabs. Fixed a
+  script-injection issue in the exported HTML bookmark page's search box.
+- **Scheduling:** browser restarts and settings saves no longer reset alarm
+  timers, so long-interval jobs (e.g. 24 h Drive sync) actually run.
+- **Privacy:** incognito tabs are excluded from sessions, stashes, and
+  bookmark exports.
+- **Reliability:** stash database writes can no longer hang the extension;
+  partial tab closes report the real count; audible tabs are not discarded or
+  auto-stashed and pinned tabs are not auto-stashed.
+- **Grouping engine:** pinned tabs and tabs in popup/app windows are left
+  alone; AI results listing a tab twice or with invalid indices no longer
+  scramble groups; closing a tab mid-run no longer recreates groups; the
+  user's own New Tab pages are no longer closed.
+- **Side panel:** close/ungroup actions re-check live tabs before acting and
+  never close the last copy of a page as a duplicate; the active view refreshes
+  when tabs change; the Domains list no longer renders twice; shortcuts ignore
+  modifier keys and open dialogs (Ctrl/Cmd+F works again); dialogs close on
+  Escape and trap focus; headers and tab rows are keyboard accessible; "Ungroup
+  All" asks first; concurrent restores keep their own progress; missing worker
+  responses show a clear error.
+
+---
+
 ## [1.2.20] — 2026-07-24
 
 ### Added

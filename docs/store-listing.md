@@ -75,7 +75,7 @@ bookmark HTML exports can load favicon images from Google's s2 service. See
 
 ## Why these permissions
 
-This list mirrors `manifest.json` version 1.2.20 exactly.
+This list mirrors `manifest.json` version 1.3.0 exactly.
 
 ### Chrome permissions
 
@@ -98,6 +98,10 @@ This list mirrors `manifest.json` version 1.2.20 exactly.
   retention cleanup, bookmark snapshots, and the active Focus timer.
 - **`bookmarks`** — Reads the Chrome bookmark tree and creates user-enabled
   TabKebab bookmark snapshot folders and entries.
+- **`unlimitedStorage`** — Lifts the 10 MB `chrome.storage.local` quota so
+  saved sessions, stashes, and bookmark snapshot history of heavy users are not
+  silently dropped when the quota is reached. It grants no access to any
+  additional data.
 
 ### Host permissions
 
