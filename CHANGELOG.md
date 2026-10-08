@@ -63,7 +63,14 @@ Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
 - **Grouping engine:** pinned tabs and tabs in popup/app windows are left
   alone; AI results listing a tab twice or with invalid indices no longer
   scramble groups; closing a tab mid-run no longer recreates groups; the
-  user's own New Tab pages are no longer closed.
+  user's own New Tab pages are no longer closed. Group by Domain no longer
+  creates groups for `about:blank` / New Tab pages.
+- **Sessions:** saved sessions no longer include pages that cannot be
+  reopened, and restoring an older session that contains them no longer
+  reports "incomplete" when everything else was restored.
+- **Focus HUD:** open-ended sessions show elapsed time and a single "End
+  Session" button instead of a stuck 0% progress bar.
+- **AI group command:** pinned tabs are never grouped (Chrome would unpin them).
 - **Side panel:** close/ungroup actions re-check live tabs before acting and
   never close the last copy of a page as a duplicate; the active view refreshes
   when tabs change; the Domains list no longer renders twice; shortcuts ignore
