@@ -958,7 +958,9 @@ async function saveStashThenAutoBookmark(stash, capturedTabs, {
     const anyFormat = settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains;
     if (!settings.autoBookmarkOnStash || !anyFormat) return;
     await bookmark({
-      tabs: capturedTabs,
+      tabs: Array.isArray(capturedTabs)
+        ? capturedTabs.filter((tab) => isRestorableUrl(tab?.url))
+        : [],
       stashName: typeof stash?.name === 'string' ? stash.name : 'Stash',
     });
   } catch (e) {
