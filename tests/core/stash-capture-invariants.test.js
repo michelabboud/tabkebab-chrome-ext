@@ -24,7 +24,7 @@ describe('stash capture commit invariant', () => {
 
     const closed = [];
     await expect(worker.persistCapturedStash({
-      stash: { id: 'stash-1', tabCount: 1, windows: [{ tabCount: 1, tabs: [{}] }] },
+      stash: { id: 'stash-1', tabCount: 1, windows: [{ tabCount: 1, tabs: [{ url: 'https://captured.test/' }] }] },
       capturedTabs: [{ id: 7, url: 'https://captured.test/' }],
       emptyError: 'No stashable tabs in window',
       save: async () => { throw new Error('synthetic stash write failure'); },
@@ -59,7 +59,14 @@ describe('stash capture commit invariant', () => {
     const order = [];
     const closed = [];
     await expect(worker.persistCapturedStash({
-      stash: { id: 'stash-1', tabCount: 2, windows: [{ tabCount: 2, tabs: [{}, {}] }] },
+      stash: {
+        id: 'stash-1',
+        tabCount: 2,
+        windows: [{
+          tabCount: 2,
+          tabs: [{ url: 'https://captured.test/' }, { url: 'chrome://settings/' }],
+        }],
+      },
       capturedTabs: [
         { id: 7, url: 'https://captured.test/' },
         { id: 8, url: 'chrome://settings/' },

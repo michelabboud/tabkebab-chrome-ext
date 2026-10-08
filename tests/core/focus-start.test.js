@@ -183,7 +183,9 @@ describe('Focus startup policy and tab actions', () => {
     }));
 
     expect(harness.calls.tabs.group).toHaveLength(1);
-    expect(harness.calls.tabs.group[0][0].tabIds).toEqual([1, 2]);
+    // Tab 2 already belongs to the user's group: it is a focus tab but is not regrouped.
+    expect(harness.calls.tabs.group[0][0].tabIds).toEqual([1]);
+    expect(harness.snapshot().tabs.find(({ id }) => id === 2).groupId).toBe(12);
     expect(state.focusTabCount).toBe(2);
     expect(state.focusGroupId).toBeNumber();
     expect(state.focusGroupOwnershipToken).toBe(`focus-group:${state.runId}`);

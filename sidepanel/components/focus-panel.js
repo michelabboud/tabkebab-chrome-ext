@@ -1,12 +1,28 @@
 // sidepanel/components/focus-panel.js — Focus Mode UI: setup, timer HUD, report, history
 
 import { showToast } from './toast.js';
-import { createAllowlistEntry, normalizeAllowlistPreferences } from '../../core/focus-policy.js';
+import {
+  createAllowlistEntry,
+  normalizeAllowlistPreferences,
+  normalizeBlockedDomain,
+  normalizeBlockedDomains,
+} from '../../core/focus-policy.js';
 import { createFocusRunCommand, handleFocusPanelMessage } from '../focus-events.js';
 import { sendOrThrow } from '../message-client.js';
 import { renderActionableEmptyState } from './actionable-empty-state.js';
 
 const PROFILE_PREFS_KEY = 'focusProfilePrefs';
+
+/**
+ * Start a new render of the panel container. Returns a predicate that turns
+ * true once any later render (setup, HUD or report) has replaced this one, so
+ * a superseded async render stops before wiring events onto the new DOM.
+ */
+function beginRender(panel) {
+  const generation = (panel._renderGeneration || 0) + 1;
+  panel._renderGeneration = generation;
+  return () => generation !== panel._renderGeneration;
+}
 
 export class FocusPanel {
   constructor(rootEl, {
@@ -20,6 +36,11 @@ export class FocusPanel {
     this.timerInterval = null;
     this._profilePrefs = {};
     this.notify = notify;
+    // Monotonic tokens: a slower, superseded async render or preference load
+    // must never wire events or apply state over a newer one.
+    this._renderGeneration = 0;
+    this._refreshSeq = 0;
+    this._prefsLoadSeq = 0;
 
     // Listen for focus events from service worker
     if (listenForRuntimeEvents) {
@@ -33,9 +54,14 @@ export class FocusPanel {
 
   async refresh() {
     this._stopTimer();
-    this.state = await this.send({ action: 'getFocusState' });
-    this.profiles = await this.send({ action: 'getFocusProfiles' });
+    const refreshSeq = (this._refreshSeq || 0) + 1;
+    this._refreshSeq = refreshSeq;
+    const state = await this.send({ action: 'getFocusState' });
+    const profiles = await this.send({ action: 'getFocusProfiles' });
     const settings = await this.send({ action: 'getSettings' });
+    if (refreshSeq !== this._refreshSeq) return;
+    this.state = state;
+    this.profiles = profiles;
     this.settings = settings;
 
     if (this.state?.status === 'active' || this.state?.status === 'paused') {
@@ -48,6 +74,7 @@ export class FocusPanel {
   // ── Setup View ──
 
   async _renderSetup() {
+    const isStale = beginRender(this);
     if (!this.profiles.length) {
       renderActionableEmptyState(this.container, {
         message: 'Focus profiles are unavailable, so a focus session cannot start yet.',
@@ -166,7 +193,7 @@ export class FocusPanel {
     // Store current selections
     this._selectedProfile = profile;
     this._allowlist = normalizeAllowlistPreferences(profile.allowedDomains);
-    this._blockedDomains = [...(profile.blockedDomains || [])];
+    this._blockedDomains = normalizeBlockedDomains(profile.blockedDomains);
     this._blockedCategories = [...(profile.blockedCategories || [])];
     this._strictMode = false;
     this._aiBlocking = false;
@@ -174,6 +201,7 @@ export class FocusPanel {
 
     // Load saved preferences for default profile (overrides defaults)
     await this._loadProfilePrefs(profile.id);
+    if (isStale()) return;
 
     // Update UI with loaded preferences
     const strictCb = this.container.querySelector('#focus-strict-mode');
@@ -182,10 +210,12 @@ export class FocusPanel {
     if (aiCb) aiCb.checked = this._aiBlocking;
 
     await this._loadChromeGroups();
+    if (isStale()) return;
     this._renderAllowlistTags();
     this._renderDomainTags();
     this._renderCategoryChips();
     await this._checkAIAvailability();
+    if (isStale()) return;
     this._wireSetupEvents();
     await this._loadHistory();
   }
@@ -225,17 +255,24 @@ export class FocusPanel {
     }
   }
 
+  /**
+   * Apply saved preferences for one profile. Returns false when a newer load
+   * started while this one was pending, in which case nothing is applied.
+   */
   async _loadProfilePrefs(profileId) {
+    const loadSeq = (this._prefsLoadSeq || 0) + 1;
+    this._prefsLoadSeq = loadSeq;
     await this._loadAllProfilePrefs();
+    if (loadSeq !== this._prefsLoadSeq) return false;
     const prefs = this._profilePrefs[profileId];
-    if (!prefs) return;
+    if (!prefs) return true;
 
     // Apply saved preferences
     if (prefs.blockedCategories) this._blockedCategories = [...prefs.blockedCategories];
     if (prefs.allowlist) {
       this._allowlist = normalizeAllowlistPreferences(prefs.allowlist);
     }
-    if (prefs.blockedDomains) this._blockedDomains = [...prefs.blockedDomains];
+    if (prefs.blockedDomains) this._blockedDomains = normalizeBlockedDomains(prefs.blockedDomains);
     if (prefs.strictMode !== undefined) this._strictMode = prefs.strictMode;
     if (prefs.aiBlocking !== undefined) this._aiBlocking = prefs.aiBlocking;
     if (prefs.duration !== undefined) {
@@ -243,9 +280,11 @@ export class FocusPanel {
       if (durInput) durInput.value = prefs.duration;
     }
     if (prefs.tabAction) {
-      const radio = this.container.querySelector(`input[name="focus-action"][value="${prefs.tabAction}"]`);
+      const radio = [...this.container.querySelectorAll('input[name="focus-action"]')]
+        .find((input) => input.value === prefs.tabAction);
       if (radio) radio.checked = true;
     }
+    return true;
   }
 
   async _saveProfilePrefs(profileId) {
@@ -343,29 +382,17 @@ export class FocusPanel {
   }
 
   _renderDomainTags() {
-    const allowedEl = this.container.querySelector('#focus-allowed-tags');
     const blockedEl = this.container.querySelector('#focus-blocked-tags');
-    if (allowedEl) {
-      allowedEl.innerHTML = this._allowedDomains.map(d =>
-        `<span class="focus-domain-tag">${this._esc(d)}<button class="focus-tag-remove" data-type="allowed" data-domain="${this._esc(d)}">&times;</button></span>`
-      ).join('') || '<span class="focus-domain-empty">Any domain allowed</span>';
-    }
-    if (blockedEl) {
-      blockedEl.innerHTML = this._blockedDomains.map(d =>
-        `<span class="focus-domain-tag focus-domain-tag-blocked">${this._esc(d)}<button class="focus-tag-remove" data-type="blocked" data-domain="${this._esc(d)}">&times;</button></span>`
-      ).join('') || '<span class="focus-domain-empty">No domains blocked</span>';
-    }
+    if (!blockedEl) return;
+    blockedEl.innerHTML = this._blockedDomains.map(d =>
+      `<span class="focus-domain-tag focus-domain-tag-blocked">${this._esc(d)}<button class="focus-tag-remove" data-type="blocked" data-domain="${this._esc(d)}">&times;</button></span>`
+    ).join('') || '<span class="focus-domain-empty">No domains blocked</span>';
 
-    // Wire remove buttons
-    this.container.querySelectorAll('.focus-tag-remove').forEach(btn => {
+    // Wire only the blocked-domain remove buttons; allowlist tags own theirs.
+    blockedEl.querySelectorAll('.focus-tag-remove').forEach(btn => {
       btn.addEventListener('click', () => {
-        const type = btn.dataset.type;
         const domain = btn.dataset.domain;
-        if (type === 'allowed') {
-          this._allowedDomains = this._allowedDomains.filter(d => d !== domain);
-        } else {
-          this._blockedDomains = this._blockedDomains.filter(d => d !== domain);
-        }
+        this._blockedDomains = this._blockedDomains.filter(d => d !== domain);
         this._renderDomainTags();
       });
     });
@@ -382,7 +409,7 @@ export class FocusPanel {
 
         // Set defaults from profile
         this._allowlist = normalizeAllowlistPreferences(profile.allowedDomains);
-        this._blockedDomains = [...(profile.blockedDomains || [])];
+        this._blockedDomains = normalizeBlockedDomains(profile.blockedDomains);
         this._blockedCategories = [...(profile.blockedCategories || [])];
         this._strictMode = false;
         this._aiBlocking = false;
@@ -390,8 +417,9 @@ export class FocusPanel {
         const durInput = this.container.querySelector('#focus-duration');
         if (durInput) durInput.value = profile.suggestedDuration || 25;
 
-        // Load saved preferences (overrides defaults)
-        await this._loadProfilePrefs(profileId);
+        // Load saved preferences (overrides defaults). A newer chip click
+        // supersedes this one; never apply or render its stale preferences.
+        if (!await this._loadProfilePrefs(profileId)) return;
 
         this.container.querySelectorAll('.focus-profile-chip').forEach(c => c.classList.remove('active'));
         chip.classList.add('active');
@@ -466,10 +494,16 @@ export class FocusPanel {
     const addBlocked = this.container.querySelector('#btn-add-blocked');
     const blockedInput = this.container.querySelector('#focus-add-blocked');
     const addBlockedDomain = () => {
-      const val = blockedInput?.value.trim().toLowerCase();
-      if (val && !this._blockedDomains.includes(val)) {
+      const raw = blockedInput?.value ?? '';
+      if (!raw.trim()) return;
+      const val = normalizeBlockedDomain(raw);
+      if (!val) {
+        showToast('Enter a valid domain.', 'error');
+        return;
+      }
+      blockedInput.value = '';
+      if (!this._blockedDomains.includes(val)) {
         this._blockedDomains.push(val);
-        blockedInput.value = '';
         this._renderDomainTags();
       }
     };
@@ -530,6 +564,8 @@ export class FocusPanel {
   _renderHUD() {
     const state = this.state;
     if (!state) return;
+    beginRender(this);
+    const openEnded = !(Number(state.duration) > 0);
 
     const isPaused = state.status === 'paused';
     const profileColor = this._getProfileColor(state.profileColor);
@@ -566,7 +602,7 @@ export class FocusPanel {
 
         <div class="focus-hud-actions">
           <button class="action-btn secondary" id="btn-pause-focus">${isPaused ? 'Resume' : 'Pause'}</button>
-          <button class="action-btn secondary" id="btn-extend-focus">+5 min</button>
+          ${openEnded ? '' : '<button class="action-btn secondary" id="btn-extend-focus">+5 min</button>'}
           <button class="action-btn danger" id="btn-end-focus">End Session</button>
         </div>
       </div>
@@ -696,6 +732,7 @@ export class FocusPanel {
 
   _showReport(record) {
     this._stopTimer();
+    beginRender(this);
     if (!record) {
       void this.refresh().catch((err) => {
         showToast('Failed to load Focus Mode: ' + err.message, 'error');
@@ -784,9 +821,13 @@ export class FocusPanel {
     return sendOrThrow(msg);
   }
 
+  /** Escape for both text content and quoted attribute values. */
   _esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str ?? '';
-    return div.innerHTML;
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }

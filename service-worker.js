@@ -12,7 +12,7 @@ import { Prompts } from './core/ai/prompts.js';
 import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
-import { sanitizeCapturedGroupTitle, sanitizeCapturedTab } from './core/tab-restore.js';
+import { isRestorableUrl, sanitizeCapturedGroupTitle, sanitizeCapturedTab, sanitizeStashableTab } from './core/tab-restore.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, saveSettings, validateSettingsPatch } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
@@ -221,7 +221,8 @@ async function autoStashOldTabsUnlocked() {
       if (tab.active) continue;
       if (keepAwake.has(extractDomain(tab.url))) continue;
       if ((tab.lastAccessed || Date.now()) > cutoff) continue;
-      if (tab.url.startsWith('chrome://')) continue;
+      // Never select a tab restore could not reopen: it must stay open.
+      if (!isRestorableUrl(tab.url)) continue;
 
       if (!windowBuckets.has(tab.windowId)) windowBuckets.set(tab.windowId, []);
       windowBuckets.get(tab.windowId).push(tab);
@@ -233,7 +234,7 @@ async function autoStashOldTabsUnlocked() {
       const stashTabs = [];
       const capturedTabs = [];
       for (const t of oldTabs) {
-        const saved = sanitizeCapturedTab({
+        const saved = sanitizeStashableTab({
           url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
         });
         if (!saved) continue;
@@ -279,17 +280,31 @@ export async function persistCapturedStash({
   save = saveStash,
   close = closeTabs,
 }) {
-  if (!Array.isArray(capturedTabs) || capturedTabs.length === 0) {
+  // Restore refuses non-restorable URLs (chrome:, about:, data:, extension
+  // pages…), so such tabs are neither stored nor closed: they stay open.
+  const restorableTabs = Array.isArray(capturedTabs)
+    ? capturedTabs.filter((tab) => isRestorableUrl(tab?.url))
+    : [];
+  if (stash && Array.isArray(stash.windows)) {
+    let total = 0;
+    const windows = [];
+    for (const window of stash.windows) {
+      const tabs = Array.isArray(window?.tabs)
+        ? window.tabs.filter((tab) => isRestorableUrl(tab?.url))
+        : [];
+      if (tabs.length === 0) continue;
+      total += tabs.length;
+      windows.push({ ...window, tabs, tabCount: tabs.length });
+    }
+    stash = { ...stash, windows, tabCount: total };
+  }
+  if (restorableTabs.length === 0 || !(stash?.tabCount > 0)) {
     return { error: emptyError };
   }
 
   await save(stash);
-  const closableIds = capturedTabs
-    .filter((tab) => (
-      Number.isInteger(tab?.id) &&
-      typeof tab.url === 'string' &&
-      !tab.url.startsWith('chrome://')
-    ))
+  const closableIds = restorableTabs
+    .filter((tab) => Number.isInteger(tab?.id))
     .map((tab) => tab.id);
   if (closableIds.length > 0) await close(closableIds);
   return { success: true, stash };
