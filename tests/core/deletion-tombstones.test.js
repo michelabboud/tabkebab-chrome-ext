@@ -192,12 +192,15 @@ describe('pure deletion tombstone timestamp policy', () => {
     for (let index = 0; index < MAX_DRIVE_TOMBSTONES_PER_KIND; index += 1) {
       full[`id-${index}`] = 1;
     }
-    expect(() => DriveSync.recordDeletionTombstones(
+    // At the cap, a new deletion evicts the oldest tombstone instead of failing.
+    const atCap = DriveSync.recordDeletionTombstones(
       tombstones({ sessions: full }),
       'sessions',
       [{ id: 'new-id', entity: session('new-id') }],
       2,
-    )).toThrow(/10,000|limit|capacity/i);
+    );
+    expect(Object.keys(atCap.nextTombstones.sessions)).toHaveLength(MAX_DRIVE_TOMBSTONES_PER_KIND);
+    expect(atCap.nextTombstones.sessions['new-id']).toBe(2);
     expect(DriveSync.recordDeletionTombstones(
       tombstones({ sessions: full }),
       'sessions',
@@ -661,7 +664,7 @@ describe('transactional manual-group deletion', () => {
     expect(json(initial)).toBe(before);
   });
 
-  test('supports future and ceiling timestamps plus tombstone-cap updates but rejects additions', async () => {
+  test('supports future and ceiling timestamps plus tombstone-cap updates and evicts the oldest on additions', async () => {
     let harness = installChromeMock({
       local: {
         manualGroups: { future: group('Future', 5) },
@@ -719,8 +722,13 @@ describe('transactional manual-group deletion', () => {
         driveSyncTombstones: tombstones({ manualGroups: full }),
       },
     });
-    await expect(Grouping.deleteManualGroup('new-id', 2)).rejects.toThrow(/10,000|limit/i);
-    expect(harness.calls.storage.local.set).toEqual([]);
+    await expect(Grouping.deleteManualGroup('new-id', 2)).resolves.toEqual({
+      deleted: true,
+      tombstoneAt: 2,
+    });
+    const capped = harness.snapshot().local.driveSyncTombstones.manualGroups;
+    expect(Object.keys(capped)).toHaveLength(MAX_DRIVE_TOMBSTONES_PER_KIND);
+    expect(capped['new-id']).toBe(2);
   });
 
   test('missing, invalid, unrepresentable, and rejected writes never partially mutate state', async () => {
