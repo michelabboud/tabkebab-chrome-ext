@@ -126,3 +126,12 @@ The extension ships zero npm dependencies; "third parties" are CI actions, the B
 | Gemini default | `gemini-2.5-flash` (restricted to existing users) | `gemini-3.8-flash` | drop shut-down `gemini-3-pro-preview` from list; thinking control per model family; raise output budget |
 | Claude default | `claude-haiku-4-5` | `claude-haiku-5-5` | no non-default `temperature` (400), no prefill, thinking on by default → `output_config.effort: "low"` + adequate `max_tokens`; drop deprecated `*-20250514` IDs; list Haiku/Sonnet/Opus 5.5; `anthropic-version: 2023-06-01` unchanged |
 | Saved settings | stored retired/deprecated model IDs | migrate on load to provider default | |
+
+## Status (2026-10-08)
+All workstreams WS1–WS7 implemented and merged into `claude/sleepy-galileo-6w8h0l`; `bun test` 1081 pass / 0 fail (from 900).
+Integration fixes added during merge: auto-bookmark-on-stash only covers restorable (actually stashed) tabs; Drive settings import keeps
+`neverDeleteFromDrive` on and never shortens `driveRetentionDays`.
+Open / needs live verification:
+- Gemini 3.x `thinkingConfig.thinkingLevel` is sent as `"low"`; REST enum is `LOW` — confirm with a live call.
+- `core/focus.js` `handleDistraction` still calls `chrome.sidePanel.open` without a user gesture (already caught; no-op).
+- Not exercised in a real browser: all changes are covered by mocked-Chrome tests only.
