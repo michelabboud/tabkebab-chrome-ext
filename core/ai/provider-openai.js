@@ -1,6 +1,6 @@
 // core/ai/provider-openai.js — OpenAI API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError } from './provider.js';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -35,6 +35,24 @@ async function readErrorText(response, signal) {
   }
 }
 
+/**
+ * o-series and gpt-5 reasoning models reject `max_tokens` and any non-default
+ * `temperature` on Chat Completions.
+ */
+export function isOpenAIReasoningModel(model) {
+  if (typeof model !== 'string') return false;
+  const id = model.trim().toLowerCase().replace(/^openai\//, '');
+  return /^o\d/.test(id) || /^gpt-5(?![\d])/.test(id);
+}
+
+function applyTokenLimit(body, model, maxTokens) {
+  if (isOpenAIReasoningModel(model)) {
+    body.max_completion_tokens = maxTokens;
+  } else {
+    body.max_tokens = maxTokens;
+  }
+}
+
 export const OpenAIProvider = {
   id: 'openai',
   name: 'OpenAI',
@@ -48,11 +66,16 @@ export const OpenAIProvider = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({
-          model: config.model || 'gpt-4.1-nano',
-          messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
-          max_tokens: 5,
-        }),
+        body: JSON.stringify((() => {
+          const model = config.model || 'gpt-4.1-nano';
+          const testBody = {
+            model,
+            messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
+          };
+          // Reasoning models spend hidden tokens before answering; 5 is too few.
+          applyTokenLimit(testBody, model, isOpenAIReasoningModel(model) ? 64 : 5);
+          return testBody;
+        })()),
         signal,
       });
       ensureNotAborted(signal);
@@ -73,12 +96,12 @@ export const OpenAIProvider = {
     }
     messages.push({ role: 'user', content: request.userPrompt });
 
-    const body = {
-      model: config.model || 'gpt-4.1-nano',
-      messages,
-      max_tokens: request.maxTokens || 1024,
-      temperature: request.temperature ?? 0.3,
-    };
+    const model = config.model || 'gpt-4.1-nano';
+    const body = { model, messages };
+    applyTokenLimit(body, model, request.maxTokens || 1024);
+    if (!isOpenAIReasoningModel(model)) {
+      body.temperature = request.temperature ?? 0.3;
+    }
 
     if (request.responseFormat === 'json') {
       body.response_format = { type: 'json_object' };
@@ -109,7 +132,7 @@ export const OpenAIProvider = {
     }
     if (!response.ok) {
       const text = await readErrorText(response, signal);
-      throw new AINetworkError(`OpenAI API error ${response.status}: ${text.slice(0, 200)}`);
+      throw providerHttpError('OpenAI', response.status, text);
     }
 
     const data = await abortAware(() => response.json(), signal);

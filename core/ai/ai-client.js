@@ -4,7 +4,7 @@ import { Storage } from '../storage.js';
 import { AICache } from './cache.js';
 import { AIQueue } from './queue.js';
 import { runAbortableAttempt } from './request-lifecycle.js';
-import { encryptApiKey, decryptApiKey } from './crypto.js';
+import { encryptApiKey, decryptApiKey, isValidIterationCount } from './crypto.js';
 import { OpenAIProvider } from './provider-openai.js';
 import { ClaudeProvider } from './provider-claude.js';
 import { GeminiProvider } from './provider-gemini.js';
@@ -20,6 +20,7 @@ import {
   AIMalformedResultError,
   AINetworkError,
   AIRateLimitError,
+  AIRequestError,
   AITimeoutError,
   AIUnavailableError,
 } from './provider.js';
@@ -197,6 +198,7 @@ function sanitizeProviderFailure(error) {
   if (error instanceof AIUnavailableError) return new AIUnavailableError();
   if (error instanceof AIMalformedResultError) return new AIMalformedResultError();
   if (error instanceof AIDisabledError) return new AIDisabledError();
+  if (error instanceof AIRequestError) return new AIRequestError();
   return new AINetworkError();
 }
 
@@ -341,11 +343,17 @@ function isEncryptedBlob(value) {
   } catch {
     return false;
   }
+  // Legacy records have exactly four fields; current records also carry the
+  // PBKDF2 iteration count used to derive their key.
+  const hasIterations = keys.includes('iterations');
   if (
     keys.some((key) => typeof key !== 'string') ||
-    keys.length !== 4 ||
+    keys.length !== (hasIterations ? 5 : 4) ||
     !['ciphertext', 'salt', 'iv', 'usesPassphrase'].every((key) => keys.includes(key))
   ) {
+    return false;
+  }
+  if (hasIterations && !isValidIterationCount(safeOwnDataValue(value, 'iterations'))) {
     return false;
   }
   const ciphertext = safeOwnDataValue(value, 'ciphertext');
@@ -434,6 +442,9 @@ async function fingerprintBlob(providerId, blob, settings) {
     blob.ciphertext,
     blob.salt,
     blob.iv,
+    // Appended only when present so legacy fingerprints (and unlocked
+    // sessions keyed by them) stay stable.
+    ...(Object.hasOwn(blob, 'iterations') ? [blob.iterations] : []),
   ]);
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(canonical));
   return [...new Uint8Array(digest)]
@@ -618,6 +629,14 @@ async function responseCacheScope(settings, providerId, request) {
   };
 }
 
+export function isCacheableResponse(request, response) {
+  if (!response || typeof response !== 'object') return false;
+  if (request?.responseFormat === 'json') {
+    return response.parsed !== null && typeof response.parsed === 'object';
+  }
+  return typeof response.text === 'string' && response.text.trim().length > 0;
+}
+
 async function completeWithResolvedProvider(request, {
   providerId,
   config,
@@ -656,7 +675,11 @@ async function completeWithResolvedProvider(request, {
   if (config.apiKey && containsPrivatePlaintext(response, config.apiKey)) {
     throw new AINetworkError();
   }
-  await AICache.set(cacheKey, response);
+  // Only cache usable responses: a transient empty or unparseable answer must
+  // not be replayed for the cache TTL.
+  if (isCacheableResponse(request, response)) {
+    await AICache.set(cacheKey, response);
+  }
   return { ...response, fromCache: false };
 }
 

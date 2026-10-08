@@ -1,6 +1,6 @@
 // core/ai/provider-gemini.js — Google Gemini API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError } from './provider.js';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -35,6 +35,25 @@ async function readErrorText(response, signal) {
   }
 }
 
+/**
+ * Gemini 2.5 Flash models "think" by default, and thinking tokens count against
+ * maxOutputTokens, which can leave an empty answer. Our tasks are short
+ * classification/JSON jobs, so disable thinking where the model allows it.
+ * (2.5 Pro cannot disable thinking and is left at its default.)
+ */
+export function geminiThinkingConfig(model) {
+  if (typeof model !== 'string') return null;
+  const id = model.trim().toLowerCase().replace(/^models\//, '');
+  if (/^gemini-2\.5-flash/.test(id)) return { thinkingBudget: 0 };
+  return null;
+}
+
+function withThinkingConfig(generationConfig, model) {
+  const thinkingConfig = geminiThinkingConfig(model);
+  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
+  return generationConfig;
+}
+
 export const GeminiProvider = {
   id: 'gemini',
   name: 'Google Gemini',
@@ -51,7 +70,10 @@ export const GeminiProvider = {
         },
         body: JSON.stringify({
           contents: [{ parts: [{ text: 'Reply with the word "ok".' }] }],
-          generationConfig: { maxOutputTokens: 5 },
+          generationConfig: withThinkingConfig(
+            { maxOutputTokens: 5 },
+            config.model || 'gemini-2.5-flash',
+          ),
         }),
         signal,
       });
@@ -80,6 +102,8 @@ export const GeminiProvider = {
         temperature: request.temperature ?? 0.3,
       },
     };
+
+    withThinkingConfig(body.generationConfig, model);
 
     if (request.systemPrompt) {
       body.systemInstruction = { parts: [{ text: request.systemPrompt }] };
@@ -114,7 +138,7 @@ export const GeminiProvider = {
     }
     if (!response.ok) {
       const errText = await readErrorText(response, signal);
-      throw new AINetworkError(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`);
+      throw providerHttpError('Gemini', response.status, errText);
     }
 
     const data = await abortAware(() => response.json(), signal);

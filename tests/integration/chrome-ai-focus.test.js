@@ -153,11 +153,11 @@ describe('Chrome AI Focus foreground boundary', () => {
     }
   });
 
-  test('a newer panel port cannot overlap provider work from the replaced generation', async () => {
+  test('a newer panel port keeps old work alive and serializes new work behind it', async () => {
     const oldPair = createRuntimePortPair(CHROME_AI_PORT_NAME);
     const newPair = createRuntimePortPair(CHROME_AI_PORT_NAME);
     const client = new ChromeAIBrokerClient();
-    const cleanupGate = deferred();
+    const oldGate = deferred();
     let oldSignal;
     let active = 0;
     let maxActive = 0;
@@ -171,12 +171,7 @@ describe('Chrome AI Focus foreground boundary', () => {
         try {
           if (attempt > 1) return { text: 'new', parsed: null, tokensUsed: 1 };
           oldSignal = signal;
-          return await new Promise((resolve, reject) => {
-            signal.addEventListener('abort', async () => {
-              await cleanupGate.promise;
-              reject(new AIAbortError());
-            }, { once: true });
-          });
+          return await oldGate.promise;
         } finally {
           active -= 1;
         }
@@ -196,7 +191,7 @@ describe('Chrome AI Focus foreground boundary', () => {
 
     try {
       const oldPending = client.complete({
-        userPrompt: 'Cancel before switching documents.',
+        userPrompt: 'Keep running while another panel opens.',
         maxTokens: 64,
         temperature: 0,
       });
@@ -204,34 +199,37 @@ describe('Chrome AI Focus foreground boundary', () => {
       await waitFor(() => active === 1, 'old document provider did not start');
 
       client.attachPort(newPair.workerPort);
-      await waitFor(() => oldSignal?.aborted === true,
-        'replacement did not cancel the old document provider');
-      expect(client.port).toBe(oldPair.workerPort);
-      expect(client.pending.size).toBe(1);
-      expect(active).toBe(1);
-      expect(maxActive).toBe(1);
-
-      cleanupGate.resolve();
-      await expect(oldPending).rejects.toMatchObject({ code: 'AI_FOREGROUND_REQUIRED' });
       expect(client.port).toBe(newPair.workerPort);
-      expect(active).toBe(0);
+      expect(oldSignal.aborted).toBeFalse();
 
-      await expect(client.complete({
-        userPrompt: 'Run only after the old document settled.',
+      let newSettled = false;
+      const newer = client.complete({
+        userPrompt: 'Wait behind the old document via the provider lock.',
         maxTokens: 64,
         temperature: 0,
-      })).resolves.toEqual({ text: 'new', parsed: null, tokensUsed: 1 });
+      });
+      newer.finally(() => { newSettled = true; }).catch(() => {});
+      await Bun.sleep(5);
+      expect(newSettled).toBeFalse();
+      expect(client.pending.size).toBe(2);
+      expect(active).toBe(1);
+
+      oldGate.resolve({ text: 'old', parsed: null, tokensUsed: 1 });
+      await expect(oldPending).resolves.toEqual({ text: 'old', parsed: null, tokensUsed: 1 });
+      await expect(newer).resolves.toEqual({ text: 'new', parsed: null, tokensUsed: 1 });
+      expect(oldSignal.aborted).toBeFalse();
       expect(maxActive).toBe(1);
       expect(active).toBe(0);
+      expect(client.pending.size).toBe(0);
     } finally {
-      cleanupGate.resolve();
+      oldGate.resolve({ text: 'cleanup', parsed: null, tokensUsed: 1 });
       client.disconnect();
       oldBroker.disconnect();
       newBroker.disconnect();
     }
   });
 
-  test('replacement plus old-port loss cannot overlap cleanup and keeps the candidate usable', async () => {
+  test('old-port loss after a second panel opens cannot overlap cleanup and keeps the candidate usable', async () => {
     const oldPair = createRuntimePortPair(CHROME_AI_PORT_NAME);
     const candidatePair = createRuntimePortPair(CHROME_AI_PORT_NAME);
     const reconnectPair = createRuntimePortPair(CHROME_AI_PORT_NAME);
@@ -301,9 +299,12 @@ describe('Chrome AI Focus foreground boundary', () => {
           return candidateReconnects.length;
         },
       });
-      await waitFor(() => oldSignal?.aborted === true, 'replacement did not abort old work');
+      // Opening another panel no longer cancels in-flight work.
+      await Bun.sleep(1);
+      expect(oldSignal.aborted).toBeFalse();
       await oldPair.workerPort.disconnect();
       await expect(oldPending).rejects.toMatchObject({ code: 'AI_FOREGROUND_REQUIRED' });
+      await waitFor(() => oldSignal?.aborted === true, 'old-port loss did not abort old work');
 
       if (candidateReconnects.length > 0) {
         expect(candidateReconnects[0].delay).toBe(100);

@@ -59,6 +59,30 @@ export class AINetworkError extends Error {
   }
 }
 
+/**
+ * A request the provider rejected as invalid (4xx other than auth/rate-limit).
+ * Retrying the identical request cannot succeed, so the queue never retries it.
+ */
+export class AIRequestError extends Error {
+  constructor(msg = 'AI provider rejected the request') {
+    super(msg);
+    this.name = 'AIRequestError';
+    this.code = 'AI_REQUEST';
+  }
+}
+
+/**
+ * Map a non-OK HTTP status (after 401/403/429 handling) to a typed error.
+ * Client errors are permanent; 408/5xx and anything else stay retryable.
+ */
+export function providerHttpError(label, status, detail = '') {
+  const message = `${label} API error ${status}: ${String(detail).slice(0, 200)}`;
+  if (Number.isInteger(status) && status >= 400 && status < 500 && status !== 408) {
+    return new AIRequestError(message);
+  }
+  return new AINetworkError(message);
+}
+
 export class AIAbortError extends Error {
   constructor(msg = 'Request cancelled') {
     super(msg);
