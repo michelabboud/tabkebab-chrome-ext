@@ -496,6 +496,9 @@ describe('ending and recovery', () => {
         restoreStashTabs: async () => {
           order.push(`restore:${readStorageArea('local').focusState.status}`);
         },
+        deleteStash: async (id) => {
+          order.push(`delete-stash:${id}`);
+        },
         ungroupTabs: async (ids) => {
           order.push(`ungroup:${ids.join(',')}:${readStorageArea('local').focusState.status}`);
         },
@@ -504,6 +507,7 @@ describe('ending and recovery', () => {
 
     expect(order[0]).toBe('state:ending');
     expect(order).toContain('restore:ending');
+    expect(order).toContain('delete-stash:stash-1');
     expect(order).toContain('ungroup:8:ending');
     expect(order.at(-1)).toBe('remove:focusState');
     expect(harness.calls.tabs.query).toContainEqual([{ groupId: 0 }]);

@@ -130,6 +130,48 @@ export function createAllowlistEntry(type, value, liveGroups = []) {
   return { type: 'group', value: group.title };
 }
 
+/**
+ * Normalize one blocked-domain input to the same canonical host the allowlist
+ * stores. Accepts a bare host, a full URL (scheme/path/port are stripped) or a
+ * wildcard such as `*.example.com` (the domain already covers subdomains).
+ * Returns null for anything that is not a usable host.
+ */
+export function normalizeBlockedDomain(value) {
+  if (typeof value !== 'string') return null;
+  let candidate = value.trim();
+  if (!candidate) return null;
+
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      candidate = parsed.hostname;
+    } catch {
+      return null;
+    }
+  } else {
+    candidate = candidate.split(/[/?#]/, 1)[0].replace(/:\d+$/, '');
+  }
+
+  candidate = candidate.replace(/^(\*\.)+/, '').replace(/^\.+/, '');
+  if (!candidate || candidate.includes('*')) return null;
+  return canonicalDomain(candidate);
+}
+
+/** Normalize and de-duplicate a stored blocked-domain list, dropping invalid entries. */
+export function normalizeBlockedDomains(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const value of list) {
+    const domain = normalizeBlockedDomain(value);
+    if (!domain || seen.has(domain)) continue;
+    seen.add(domain);
+    normalized.push(domain);
+  }
+  return normalized;
+}
+
 /** Normalize title-only preferences and keep one entry per stable type/value identity. */
 export function normalizeAllowlistPreferences(allowList) {
   if (!Array.isArray(allowList)) return [];

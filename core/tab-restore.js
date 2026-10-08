@@ -90,14 +90,32 @@ export function sanitizeCapturedTab(tab) {
   return captured;
 }
 
-function isRestorableUrl(url) {
-  if (typeof url !== 'string' || url.length === 0) return false;
+/**
+ * The single predicate deciding whether a saved URL can be reopened by
+ * restoreTabWindows. Every capture-and-close path (stash, auto-stash, Focus
+ * stash) must use it so a tab is only closed when restore can bring it back.
+ */
+export function isRestorableUrl(url) {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return false;
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(trimmed);
     return !FORBIDDEN_PROTOCOLS.has(parsed.protocol.toLowerCase());
   } catch {
     return false;
   }
+}
+
+/**
+ * Capture one tab for a stash that will close its source: sanitized like
+ * sanitizeCapturedTab, and null when restore would refuse to reopen the URL,
+ * so the caller leaves that tab open instead of destroying it.
+ */
+export function sanitizeStashableTab(tab) {
+  const captured = sanitizeCapturedTab(tab);
+  if (!captured || !isRestorableUrl(captured.url)) return null;
+  return captured;
 }
 
 function errorMessage(error) {

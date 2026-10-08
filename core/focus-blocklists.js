@@ -69,7 +69,7 @@ export const BLOCKLIST_CATEGORIES = {
       'games.com', 'www.games.com',
       'y8.com', 'www.y8.com',
       'friv.com', 'www.friv.com',
-      'armor games.com', 'www.armorgames.com',
+      'armorgames.com', 'www.armorgames.com',
       'newgrounds.com', 'www.newgrounds.com',
     ],
   },

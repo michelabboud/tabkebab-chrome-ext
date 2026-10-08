@@ -2,12 +2,14 @@
 
 import { Storage } from './storage.js';
 import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs } from './tabs-api.js';
-import { saveStash, restoreStashTabs, getStash } from './stash-db.js';
+import { saveStash, restoreStashTabs, getStash, deleteStash } from './stash-db.js';
+import { sanitizeStashableTab } from './tab-restore.js';
 import { getProfileById, getAllProfiles } from './focus-profiles.js';
 import {
   evaluateFocusPolicy,
   isAllowed,
   isInternalUrl,
+  normalizeBlockedDomains,
   rebindFocusAllowlist,
   resolveGroupAllowlist,
 } from './focus-policy.js';
@@ -254,10 +256,26 @@ function createFocusGroupOwnershipToken(runId) {
   return `focus-group:${runId}`;
 }
 
-async function setFocusGroupOwnership(runId, token, groupId = null) {
+async function setFocusGroupOwnership(runId, token, groupId = null, groupIds = null) {
+  const ownership = { runId, token, groupId };
+  if (Array.isArray(groupIds) && groupIds.length > 1) ownership.groupIds = [...groupIds];
   await chrome.storage.session.set({
-    [FOCUS_GROUP_OWNERSHIP_KEY]: { runId, token, groupId },
+    [FOCUS_GROUP_OWNERSHIP_KEY]: ownership,
   });
+}
+
+function isValidGroupId(groupId) {
+  return Number.isInteger(groupId) && groupId >= 0;
+}
+
+/** Every Chrome group a Focus run (or its ownership proof) claims, legacy single-ID included. */
+function focusGroupIdsOf(record) {
+  const ids = Array.isArray(record?.focusGroupIds) && record.focusGroupIds.length > 0
+    ? record.focusGroupIds
+    : Array.isArray(record?.groupIds) && record.groupIds.length > 0
+      ? record.groupIds
+      : [record?.focusGroupId ?? record?.groupId];
+  return [...new Set(ids.filter(isValidGroupId))].sort((a, b) => a - b);
 }
 
 async function clearFocusGroupOwnership(runId, token) {
@@ -318,6 +336,12 @@ async function findFocusGroupMutationTabIds(focusTabs) {
     .map(({ value }) => value)
     .filter((tab) => tab.groupId !== originalGroupIds.get(tab.id))
     .map((tab) => tab.id);
+}
+
+function groupableFocusTabs(focusTabs) {
+  return focusTabs.filter((tab) => (
+    Number.isInteger(tab.id) && !tab.pinned && !isValidGroupId(tab.groupId)
+  ));
 }
 
 function clearFailedFocusStartCache() {
@@ -558,13 +582,14 @@ async function performStartFocus({
     profileColor,
     tabAction: tabAction || 'none',
     allowedDomains: allowedDomains || [],
-    blockedDomains: blockedDomains || [],
+    blockedDomains: normalizeBlockedDomains(blockedDomains),
     // New blocking modes
     strictMode: strictMode || false,
     blockedCategories: blockedCategories || [],
     aiBlocking: aiBlocking || false,
     stashId: null,
     focusGroupId: null,
+    focusGroupIds: [],
     focusGroupOwnershipToken: null,
     distractionsBlocked: 0,
     focusTabCount: 0,
@@ -589,28 +614,47 @@ async function performStartFocus({
       try { await chrome.tabs.discard(tab.id); } catch { /* tab may be active */ }
     }
   } else if (tabAction === 'stash' && nonFocusTabs.length > 0) {
-    const stashTabs = nonFocusTabs.map(t => ({
-      url: t.pendingUrl || t.url,
-      title: t.title,
-      favIconUrl: t.favIconUrl,
-      pinned: t.pinned || false,
-    }));
-    const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const stash = {
-      id: stashId,
-      name: `[Focus] ${profileName} session`,
-      source: 'domain',
-      sourceDetail: 'focus-mode',
-      createdAt: Date.now(),
-      tabCount: stashTabs.length,
-      windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
-    };
-    await persistStash(stash);
-    state.stashId = stashId;
-    const closableIds = nonFocusTabs.map(t => t.id);
-    if (closableIds.length > 0) await closeTabs(closableIds);
-  } else if (tabAction === 'group' && focusTabs.length > 0) {
-    const focusTabIds = focusTabs.map(t => t.id);
+    // Capture only tabs restore can reopen. Anything else stays open: closing
+    // it would lose it, and an unrestorable stash entry would keep the Focus
+    // run from ever completing its end-of-session restore.
+    const stashTabs = [];
+    const capturedTabs = [];
+    for (const t of nonFocusTabs) {
+      const saved = sanitizeStashableTab({
+        url: t.pendingUrl || t.url,
+        title: t.title,
+        favIconUrl: t.favIconUrl,
+        pinned: t.pinned || false,
+      });
+      if (!saved) continue;
+      stashTabs.push(saved);
+      capturedTabs.push(t);
+    }
+    if (stashTabs.length > 0) {
+      const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const stash = {
+        id: stashId,
+        name: `[Focus] ${profileName} session`,
+        source: 'domain',
+        sourceDetail: 'focus-mode',
+        createdAt: Date.now(),
+        tabCount: stashTabs.length,
+        windows: [{ tabCount: stashTabs.length, tabs: stashTabs }],
+      };
+      await persistStash(stash);
+      state.stashId = stashId;
+      await closeTabs(capturedTabs.map(t => t.id));
+    }
+  } else if (tabAction === 'group' && groupableFocusTabs(focusTabs).length > 0) {
+    // Group per window, and only tabs the user has not already arranged:
+    // pinned tabs would be unpinned and grouped tabs pulled out of their group.
+    const groupTabs = groupableFocusTabs(focusTabs);
+    const focusTabIds = groupTabs.map(t => t.id);
+    const tabsByWindow = new Map();
+    for (const tab of groupTabs) {
+      if (!tabsByWindow.has(tab.windowId)) tabsByWindow.set(tab.windowId, []);
+      tabsByWindow.get(tab.windowId).push(tab.id);
+    }
     const profileColor = profile?.color || 'blue';
     const chromeColor = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'].includes(profileColor)
       ? profileColor : 'blue';
@@ -619,13 +663,16 @@ async function performStartFocus({
     // Chrome to mutate tabs. Browser restart clears this provisional marker.
     await setFocusGroupOwnership(runId, ownershipToken);
 
-    let groupId = null;
+    const groupIds = [];
     try {
-      groupId = await createNativeGroup(focusTabIds, profileName, chromeColor);
+      for (const windowTabIds of tabsByWindow.values()) {
+        const groupId = await createNativeGroup(windowTabIds, profileName, chromeColor);
+        if (isValidGroupId(groupId)) groupIds.push(groupId);
+      }
     } catch (groupError) {
       let mutationTabIds;
       try {
-        mutationTabIds = await findFocusGroupMutationTabIds(focusTabs);
+        mutationTabIds = await findFocusGroupMutationTabIds(groupTabs);
       } catch (inspectionError) {
         await rejectAfterFocusGroupRollback(
           new AggregateError(
@@ -654,9 +701,9 @@ async function performStartFocus({
       // A pre-group Chrome failure made no tab mutation; startup can continue.
     }
 
-    if (Number.isInteger(groupId) && groupId >= 0) {
+    if (groupIds.length > 0) {
       try {
-        await setFocusGroupOwnership(runId, ownershipToken, groupId);
+        await setFocusGroupOwnership(runId, ownershipToken, groupIds[0], groupIds);
       } catch (ownershipError) {
         // The provisional proof is not enough to authorize future teardown.
         // Roll back the just-created group before allowing startup to fail.
@@ -666,7 +713,8 @@ async function performStartFocus({
           tabIds: focusTabIds,
         });
       }
-      state.focusGroupId = groupId;
+      state.focusGroupId = groupIds[0];
+      state.focusGroupIds = [...groupIds];
       state.focusGroupOwnershipToken = ownershipToken;
       createdFocusGroup = { tabIds: focusTabIds, token: ownershipToken };
     }
@@ -730,6 +778,7 @@ export function endFocus(options = {}) {
 async function performEndFocus(expectedRunId, {
   getStash: loadStash = getStash,
   restoreStashTabs: restoreTabs = restoreStashTabs,
+  deleteStash: removeStash = deleteStash,
   ungroupTabs: ungroup = ungroupTabs,
 } = {}, legacyCleanupRunId = null) {
   await cacheReady;
@@ -782,13 +831,22 @@ async function performEndFocus(expectedRunId, {
       const stash = await loadStash(state.stashId);
       if (stash) {
         const outcome = await restoreTabs(stash, { mode: 'here' });
-        if (outcome && outcome.complete === false) {
+        if (outcome && outcome.complete === false && !isSettledExceptInvalid(outcome)) {
           restoreRetryPending = true;
           captureFailure('restore', new Error(
             `Focus stash restore was incomplete (${outcome.restoredCount ?? 0}/${outcome.requestedCount ?? 0}).`,
           ));
         } else {
           restoreCanCheckpoint = true;
+          // A fully restored Focus stash has served its purpose. A stash with
+          // unrestorable entries is kept so the user still has a record of them.
+          if (!outcome || outcome.complete !== false) {
+            try {
+              await removeStash(state.stashId);
+            } catch (error) {
+              captureFailure('stash-delete', error);
+            }
+          }
         }
       } else {
         restoreCanCheckpoint = true;
@@ -806,22 +864,26 @@ async function performEndFocus(expectedRunId, {
     }
   }
 
-  if (Number.isInteger(state.focusGroupId) && state.focusGroupId >= 0 &&
-      !state.teardownCompleted?.ungroup) {
+  const stateGroupIds = focusGroupIdsOf(state);
+  if (stateGroupIds.length > 0 && !state.teardownCompleted?.ungroup) {
     try {
       const ownership = await getFocusGroupOwnership();
       if (typeof state.focusGroupOwnershipToken !== 'string' ||
           state.focusGroupOwnershipToken.length === 0 ||
           ownership?.runId !== runId ||
           ownership.token !== state.focusGroupOwnershipToken ||
-          ownership.groupId !== state.focusGroupId) {
+          JSON.stringify(focusGroupIdsOf(ownership)) !== JSON.stringify(stateGroupIds)) {
         captureFailure('ungroup-ownership', new Error(
           'Focus group ownership could not be verified.',
         ));
       } else {
-        const groupTabs = await chrome.tabs.query({ groupId: state.focusGroupId });
-        if (groupTabs.length > 0) {
-          await ungroup(groupTabs.map((tab) => tab.id));
+        const groupTabIds = [];
+        for (const groupId of stateGroupIds) {
+          const groupTabs = await chrome.tabs.query({ groupId });
+          groupTabIds.push(...groupTabs.map((tab) => tab.id));
+        }
+        if (groupTabIds.length > 0) {
+          await ungroup(groupTabIds);
         }
         await markTeardownStepCompleted(runId, 'ungroup');
         await clearFocusGroupOwnership(runId, state.focusGroupOwnershipToken);
@@ -896,6 +958,19 @@ async function performEndFocus(expectedRunId, {
     console.warn('[TabKebab] Focus teardown completed with failures:', teardownFailures);
   }
   return record;
+}
+
+/**
+ * True when a restore settled every tab and its only shortfall is entries
+ * restore can never reopen. Retrying cannot improve that outcome, so it must
+ * not hold a Focus run in ENDING (and re-open tabs on every worker wake).
+ */
+function isSettledExceptInvalid(outcome) {
+  if (!outcome || !Array.isArray(outcome.errors) || outcome.errors.length > 0) return false;
+  const restored = Number(outcome.restoredCount) || 0;
+  const duplicate = Number(outcome.skippedDuplicate) || 0;
+  const invalid = Number(outcome.skippedInvalid) || 0;
+  return invalid > 0 && restored + duplicate + invalid === outcome.requestedCount;
 }
 
 // ── Pause / Resume ──
@@ -982,10 +1057,17 @@ export async function extendFocus(minutes, expectedRunId = null) {
   const state = await getFocusState();
   if (!isRuntimeFocusState(state) || !hasRunId(state)) return null;
   if (expectedRunId && state.runId !== expectedRunId) return null;
+  // Open-ended runs (duration 0) have no deadline to extend.
+  if (!(Number(state.duration) > 0)) return state;
   const extended = await mutateFocusState({
     runId: state.runId,
     statuses: [state.status],
-  }, (current) => ({ ...current, duration: current.duration + minutes }));
+  }, (current) => {
+    // duration 0 means open-ended; adding minutes would turn it into a
+    // countdown that has already expired and end the session on next tick.
+    if (!(Number(current.duration) > 0)) return current;
+    return { ...current, duration: current.duration + minutes };
+  });
   if (!extended) return null;
   if (!await getMatchingFocusState(state.runId, [state.status])) return null;
   if (!await updateBadge(extended, state.runId)) return null;
