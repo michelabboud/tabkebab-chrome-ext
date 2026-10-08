@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { installChromeMock } from '../helpers/chrome-mock.js';
+import { readWorkerSource } from '../helpers/worker-source.js';
 import * as DriveSync from '../../core/drive-sync.js';
 import * as Sessions from '../../core/sessions.js';
 import * as Grouping from '../../core/grouping.js';
@@ -1054,7 +1055,7 @@ describe('retention and worker ownership', () => {
   });
 
   test('source contains no direct retention deletion or optimistic panel success path', async () => {
-    const workerSource = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
+    const workerSource = readWorkerSource();
     const sessionPanel = await Bun.file(
       new URL('../../sidepanel/components/session-manager.js', import.meta.url),
     ).text();

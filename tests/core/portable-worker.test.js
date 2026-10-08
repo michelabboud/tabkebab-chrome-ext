@@ -4,6 +4,7 @@ import { encryptApiKey } from '../../core/ai/crypto.js';
 import { applyPortableImport } from '../../core/export-import.js';
 import { createPortableExportDocument } from '../../core/export-schema.js';
 import { installChromeMock } from '../helpers/chrome-mock.js';
+import { findHandler, handlerBody, readWorkerModule, readWorkerSource, sliceBetween } from '../helpers/worker-source.js';
 
 let workerNonce = 0;
 
@@ -576,15 +577,9 @@ describe('portable import worker boundary', () => {
   });
 
   test('every import-affected worker action has one outer mutation-lock boundary', async () => {
-    const source = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
-    const actionBody = (action) => {
-      const start = source.indexOf(`case '${action}'`);
-      expect(start).toBeGreaterThan(-1);
-      const nextCase = source.indexOf("case '", start + 6);
-      const nextDefault = source.indexOf('default:', start + 6);
-      const candidates = [nextCase, nextDefault].filter((index) => index >= 0);
-      return source.slice(start, Math.min(...candidates));
-    };
+    const actionBody = handlerBody;
+    const bookmarksSource = readWorkerModule('core/background/bookmarks.js');
+    const stashSource = readWorkerModule('core/background/stash.js');
 
     for (const action of [
       'saveSettings',
@@ -615,17 +610,21 @@ describe('portable import worker boundary', () => {
     }
 
     expect(actionBody('createBookmarks')).toContain('return createBookmarks(');
-    expect(source).toMatch(/export async function createBookmarks[\s\S]*?withStateMutationLock/);
-    expect(source).toMatch(/export async function autoStashOldTabs[\s\S]*?withStateMutationLock/);
+    expect(bookmarksSource).toMatch(/export async function createBookmarks\([\s\S]*?withStateMutationLock/);
+    expect(stashSource).toMatch(/export async function autoStashOldTabs\([\s\S]*?withStateMutationLock/);
 
-    const autoStashUnlocked = source.slice(
-      source.indexOf('async function autoStashOldTabsUnlocked'),
-      source.indexOf('export async function autoStashOldTabs'),
+    const autoStashUnlocked = sliceBetween(
+      stashSource,
+      'async function autoStashOldTabsUnlocked',
+      'export async function autoStashOldTabs(',
     );
-    const bookmarksUnlocked = source.slice(
-      source.indexOf('async function createBookmarksUnlocked'),
-      source.indexOf('export async function createBookmarks'),
+    const bookmarksUnlocked = sliceBetween(
+      bookmarksSource,
+      'async function createBookmarksUnlocked',
+      'export async function createBookmarks(',
     );
+    expect(autoStashUnlocked).toContain('persistCapturedStash(');
+    expect(bookmarksUnlocked).toContain('saveToChromeBookmarks(');
     expect(autoStashUnlocked).not.toContain('withStateMutationLock');
     expect(bookmarksUnlocked).not.toContain('withStateMutationLock');
   });
@@ -866,8 +865,8 @@ describe('AI credential worker boundary', () => {
       passphrase: null,
     }, { aiClient })).resolves.toEqual({ error: 'Unknown action' });
     expect(calls).toEqual([]);
-    const source = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
-    expect(source).not.toContain("case 'setAIApiKey'");
+    expect(findHandler('setAIApiKey')).toBeNull();
+    expect(readWorkerSource()).not.toContain('setAIApiKey');
   });
 
   test('atomic save and unlock remain queued behind an in-flight portable import', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readWorkerSource } from '../helpers/worker-source.js';
 
-const workerSource = readFileSync(new URL('../../service-worker.js', import.meta.url), 'utf8');
+const workerSource = readWorkerSource();
 
 async function loadWorker() {
   return import('../../service-worker.js?stash-capture-invariants');

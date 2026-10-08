@@ -13,6 +13,7 @@ import { CustomProvider } from '../../core/ai/provider-custom.js';
 import { GeminiProvider } from '../../core/ai/provider-gemini.js';
 import { OpenAIProvider } from '../../core/ai/provider-openai.js';
 import { AISettings } from '../../sidepanel/components/ai-settings.js';
+import { findHandler, handlerBody, readWorkerSource } from '../helpers/worker-source.js';
 import {
   installChromeMock,
   readStorageArea,
@@ -2083,21 +2084,12 @@ describe('Task 12 worker message and lock boundary', () => {
   });
 
   test('gives save and unlock exactly one outer worker mutation-lock boundary', async () => {
-    const source = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
-    const actionBody = (action) => {
-      const start = source.indexOf(`case '${action}'`);
-      expect(start).toBeGreaterThan(-1);
-      const nextCase = source.indexOf("case '", start + 6);
-      const nextDefault = source.indexOf('default:', start + 6);
-      const candidates = [nextCase, nextDefault].filter((index) => index >= 0);
-      return source.slice(start, Math.min(...candidates));
-    };
-
     for (const action of ['saveAISettings', 'unlockAIApiKey']) {
-      const body = actionBody(action);
+      const body = handlerBody(action);
       expect(body.match(/withStateMutationLock/g) || []).toHaveLength(1);
     }
-    expect(source.includes("case 'setAIApiKey'")).toBeFalse();
+    expect(findHandler('setAIApiKey')).toBeNull();
+    expect(readWorkerSource().includes('setAIApiKey')).toBeFalse();
 
     const clientSource = await Bun.file(
       new URL('../../core/ai/ai-client.js', import.meta.url),

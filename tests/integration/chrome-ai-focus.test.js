@@ -11,6 +11,7 @@ import { AIAbortError, AITimeoutError } from '../../core/ai/provider.js';
 import { runAbortableAttempt } from '../../core/ai/request-lifecycle.js';
 import { startChromeAIBroker } from '../../sidepanel/chrome-ai-broker.js';
 import { deferred } from '../helpers/deferred.js';
+import { readWorkerSource } from '../helpers/worker-source.js';
 import {
   createRuntimePortPair,
   installChromeMock,
@@ -630,7 +631,7 @@ describe('Chrome AI Focus foreground boundary', () => {
 
   test('keeps the Prompt API executor out of the worker import graph', async () => {
     const [worker, aiClient, panelBroker, panel] = await Promise.all([
-      Bun.file(new URL('../../service-worker.js', import.meta.url)).text(),
+      Promise.resolve(readWorkerSource()),
       Bun.file(new URL('../../core/ai/ai-client.js', import.meta.url)).text(),
       Bun.file(new URL('../../sidepanel/chrome-ai-broker.js', import.meta.url)).text(),
       Bun.file(new URL('../../sidepanel/panel.js', import.meta.url)).text(),

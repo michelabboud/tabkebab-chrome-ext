@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 
 import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
+import { readWorkerModule, sliceBetween } from '../helpers/worker-source.js';
 
 let importNonce = 0;
 
@@ -146,10 +146,11 @@ describe('1.1 one restorable-URL predicate for capture, close and restore', () =
   });
 
   test('auto-stash selects and captures through the shared restorable predicate', () => {
-    const source = readFileSync(new URL('../../service-worker.js', import.meta.url), 'utf8');
-    const start = source.indexOf('async function autoStashOldTabsUnlocked');
-    const end = source.indexOf('export async function autoStashOldTabs');
-    const body = source.slice(start, end);
+    const body = sliceBetween(
+      readWorkerModule('core/background/stash.js'),
+      'async function autoStashOldTabsUnlocked',
+      'export async function autoStashOldTabs(',
+    );
     expect(body).toContain('if (!isRestorableUrl(tab.url)) continue;');
     expect(body).toContain('sanitizeStashableTab(');
     expect(body).not.toContain("startsWith('chrome://')");

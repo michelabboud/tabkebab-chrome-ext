@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { installChromeMock } from '../helpers/chrome-mock.js';
 import { sendOrThrow } from '../../sidepanel/message-client.js';
+import { handlerBody, readWorkerModule, sliceBetween } from '../helpers/worker-source.js';
 
 let importNonce = 0;
 
@@ -526,15 +527,19 @@ describe('service-worker portable-state ownership', () => {
   });
 
   test('internal sync/export helpers contain no nested lock acquisition and legacy group writers are gone', async () => {
-    const workerSource = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
-    const unlockedSync = workerSource.slice(
-      workerSource.indexOf('async function syncDriveStateUnlocked'),
-      workerSource.indexOf('export async function syncDriveState'),
+    const driveSource = readWorkerModule('core/background/drive.js');
+    const unlockedSync = sliceBetween(
+      driveSource,
+      'async function syncDriveStateUnlocked',
+      'export async function syncDriveState',
     );
-    const exportHelper = workerSource.slice(
-      workerSource.indexOf('async function exportDriveSubfolders'),
-      workerSource.indexOf('async function setCompletedDriveState'),
+    const exportHelper = sliceBetween(
+      driveSource,
+      'async function exportDriveSubfolders',
+      'async function setCompletedDriveState',
     );
+    expect(unlockedSync).toContain('reconcileDriveSync(');
+    expect(exportHelper).toContain('exportToSubfolder(');
     expect(unlockedSync).not.toContain('withStateMutationLock');
     expect(unlockedSync).not.toContain('chrome.runtime.sendMessage');
     expect(exportHelper).not.toContain('withStateMutationLock');
@@ -545,6 +550,21 @@ describe('service-worker portable-state ownership', () => {
       'saveManualGroup', 'addTabToManualGroup', 'removeTabFromManualGroup', 'removeTabFromAllGroups',
     ]) {
       expect(groupingSource).not.toContain(`function ${legacy}`);
+    }
+  });
+
+  test('every state-mutating worker action keeps exactly one outer mutation-lock boundary', () => {
+    for (const action of [
+      'saveSession', 'deleteSession', 'undoDeleteSession',
+      'createManualGroup', 'moveTabToManualGroup', 'deleteManualGroup',
+      'buildPortableExport', 'buildPortableSessionExport', 'buildPortableStashExport', 'importPortableData',
+      'saveSettings', 'importDriveSettings', 'undoDriveSettings', 'saveFocusProfilePrefs',
+      'unlockAIApiKey', 'saveAISettings',
+      'saveKeepAwakeList', 'toggleKeepAwakeDomain', 'setKeepAwake',
+      'stashWindow', 'stashGroup', 'stashDomain', 'restoreStash', 'deleteStash', 'undoDeleteStash', 'importStashes',
+      'startFocus', 'endFocus', 'pauseFocus', 'resumeFocus', 'extendFocus',
+    ]) {
+      expect(handlerBody(action).match(/withStateMutationLock/g) || []).toHaveLength(1);
     }
   });
 

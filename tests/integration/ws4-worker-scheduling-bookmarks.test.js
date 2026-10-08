@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import { readFileSync } from 'node:fs';
 
 import { installChromeMock } from '../helpers/chrome-mock.js';
+import { readWorkerSource } from '../helpers/worker-source.js';
 
 let workerNonce = 0;
 async function freshWorker(label) {
@@ -565,7 +566,7 @@ describe('Chrome bookmark export layout (4.4, 4.11)', () => {
 
 describe('side panel open requires a user gesture (4.10)', () => {
   test('the worker never calls chrome.sidePanel.open outside a gesture handler', () => {
-    const source = readFileSync(new URL('../../service-worker.js', import.meta.url), 'utf8');
+    const source = readWorkerSource();
     expect(source).not.toMatch(/chrome\.sidePanel\.open\(/);
   });
 
