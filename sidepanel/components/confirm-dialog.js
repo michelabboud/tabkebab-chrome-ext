@@ -14,6 +14,84 @@ export function isConfirmOpen() {
   return activeDialog !== null;
 }
 
+let activeTraps = 0;
+
+/** True while any modal (confirm dialog or a focus-trapped dialog) is open. */
+export function isModalOpen() {
+  return activeDialog !== null || activeTraps > 0;
+}
+
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]';
+
+function focusableWithin(container) {
+  return [...container.querySelectorAll(FOCUSABLE_SELECTOR)].filter((el) =>
+    !el.disabled && !el.hidden && el.getAttribute('tabindex') !== '-1');
+}
+
+/**
+ * Make `container` modal for keyboard users — the same pattern showConfirm
+ * uses: Escape (and any `closeKeys`) calls `onClose`, Tab/Shift+Tab cycle
+ * inside, focus that escapes is pulled back, and `release()` returns focus to
+ * the element that was focused before. Keys are handled in the capture phase
+ * so the panel's global shortcuts never see them.
+ *
+ * @param {Element} container - The dialog element (role="dialog").
+ * @param {object} [opts]
+ * @param {Function} [opts.onClose] - Called on Escape / closeKeys.
+ * @param {Element} [opts.initialFocus] - Element to focus first.
+ * @param {string[]} [opts.closeKeys] - Extra keys that close (e.g. '?').
+ * @returns {{ release: Function }}
+ */
+export function createFocusTrap(container, { onClose = () => {}, initialFocus = null, closeKeys = [] } = {}) {
+  const previouslyFocused = document.activeElement;
+
+  const onKeydown = (e) => {
+    if (e.key === 'Escape' || closeKeys.includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const items = focusableWithin(container);
+      e.preventDefault();
+      e.stopPropagation();
+      if (items.length === 0) return;
+      const index = items.indexOf(document.activeElement);
+      const next = e.shiftKey
+        ? (index <= 0 ? items.length - 1 : index - 1)
+        : (index < 0 || index === items.length - 1 ? 0 : index + 1);
+      items[next].focus();
+    }
+    // Other keys pass through; the panel's shortcut handler checks
+    // isModalOpen() and ignores them while a dialog is open.
+  };
+
+  const onFocusIn = (e) => {
+    if (!container.contains(e.target)) (initialFocus || focusableWithin(container)[0])?.focus();
+  };
+
+  document.addEventListener('keydown', onKeydown, true);
+  document.addEventListener('focusin', onFocusIn, true);
+  activeTraps += 1;
+  (initialFocus || focusableWithin(container)[0])?.focus();
+
+  let released = false;
+  return {
+    release({ restoreFocus = true } = {}) {
+      if (released) return;
+      released = true;
+      activeTraps = Math.max(0, activeTraps - 1);
+      document.removeEventListener('keydown', onKeydown, true);
+      document.removeEventListener('focusin', onFocusIn, true);
+      if (restoreFocus && previouslyFocused && previouslyFocused !== document.body &&
+          previouslyFocused.isConnected !== false && typeof previouslyFocused.focus === 'function') {
+        try { previouslyFocused.focus(); } catch { /* element no longer focusable */ }
+      }
+    },
+  };
+}
+
 /**
  * Show a confirmation dialog. Returns a Promise that resolves true (confirm) or false (cancel).
  * @param {object} opts
