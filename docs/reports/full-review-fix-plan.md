@@ -112,3 +112,17 @@ Scheduled/manual Chrome bookmark export (`saveToChromeBoomarks`) builds Bar › 
 with no depth budget, ignores a moved/renamed root, and accumulates date folders forever.
 Fix (WS4): `MAX_BOOKMARK_DEPTH` budget with progressive flattening when the root sits deeper; persist root folder id;
 keep newest N date folders (removeTree only `YYYY-MM-DD` folders under the root); cap bookmarks per export.
+
+## WS7 — Third-party upgrades (runs after WS2 merges; shares `core/ai/provider-*.js`)
+The extension ships zero npm dependencies; "third parties" are CI actions, the Bun toolchain, and AI provider models/APIs.
+
+| Item | Current | Target | Notes |
+|------|---------|--------|-------|
+| `actions/checkout` | v4 | v7 | Node 24 runtime (Node 20 removed from runners Sep 2026); workflow uses `pull_request`, unaffected by v7 fork restriction |
+| `actions/upload-artifact` | v4 | v7 | |
+| `oven-sh/setup-bun` | v2 | v2 (≥ 2.2.0, Node 24) | |
+| `.bun-version` | 1.3.11 | 1.4.2 | latest stable; suite already passes on 1.4.2 |
+| OpenAI default | `gpt-4.1-nano` (**deprecated**) | current low-cost model (verify ID on developers.openai.com) | reasoning-model params via WS2 2.5 |
+| Gemini default | `gemini-2.5-flash` (restricted to existing users) | `gemini-3.8-flash` | drop shut-down `gemini-3-pro-preview` from list; thinking control per model family; raise output budget |
+| Claude default | `claude-haiku-4-5` | `claude-haiku-5-5` | no non-default `temperature` (400), no prefill, thinking on by default → `output_config.effort: "low"` + adequate `max_tokens`; drop deprecated `*-20250514` IDs; list Haiku/Sonnet/Opus 5.5; `anthropic-version: 2023-06-01` unchanged |
+| Saved settings | stored retired/deprecated model IDs | migrate on load to provider default | |
