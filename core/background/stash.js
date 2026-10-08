@@ -5,7 +5,7 @@ import { getAllTabs, excludeIncognitoTabs, closeTabs, extractDomain } from '../t
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from '../stash-db.js';
 import { isRestorableUrl, sanitizeCapturedGroupTitle, sanitizeStashableTab } from '../tab-restore.js';
 import { shouldDeleteRestoredSource } from '../restore-outcome.js';
-import { getSettings } from '../settings.js';
+import { getSettings, isFeatureOn } from '../settings.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { getKeepAwakeList } from './tabs.js';
 import { createBookmarksUnlocked } from './bookmarks.js';
@@ -135,6 +135,7 @@ async function saveStashThenAutoBookmark(stash, capturedTabs, {
   try {
     const settings = await loadSettings();
     const anyFormat = settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains;
+    if (!isFeatureOn(settings, 'bookmarks')) return;
     if (!settings.autoBookmarkOnStash || !anyFormat) return;
     await bookmark({
       tabs: Array.isArray(capturedTabs)

@@ -688,6 +688,39 @@ Access settings via the **gear icon** in the header.
 | Default view | Tabs | Which view opens on launch |
 | Theme | System | Light, Dark, or follow system preference |
 
+### Features
+
+TabKebab is a toolbox: keep everything, or switch off what you don't use to
+declutter the panel. The **Features** card (right after General) has one
+switch per feature. Every switch is **on** by default, changes save and apply
+immediately (no reload), and turning a feature off **never deletes its data**:
+turn it back on and everything is where you left it.
+
+| Switch | What turning it off does |
+|--------|--------------------------|
+| Focus Mode | Hides the Focus button, the Focus banner and the `F` shortcut. A session that is already running finishes normally; new sessions can't start. |
+| AI | Hides the AI status icon, Smart group, AI summaries, AI keep-awake suggestions, the command bar and the AI settings card. Your provider settings and keys stay saved. |
+| AI command bar | Hides only the natural-language command bar (it also needs AI on). |
+| Search | Hides the search button and the `Ctrl+K` / `/` search. |
+| Windows view | Hides the Windows view and window consolidation. |
+| Stash | Hides the Stash view and every Stash button, and stops auto-stash. Existing stashes stay stored and restorable. |
+| Sessions | Hides the Sessions view and stops auto-save. Saved sessions are kept. |
+| Duplicates | Hides the Duplicates sub-tab and badge and stops the background duplicate scan. |
+| Automation | Stops the auto-save, auto-kebab and auto-stash schedules (and old auto-save pruning) and hides the Automation card. |
+| Bookmarks | Stops bookmark snapshots (Bookmark Now, auto-bookmark on stash) and hides the Bookmarks card. |
+| Google Drive | Stops Drive sync and Drive retention, hides the Drive status icon, Drive buttons and the Drive card. Nothing is removed from Drive. |
+
+Notes:
+
+- The number-key shortcuts follow the visible views: with Windows off,
+  `1` Tabs, `2` Stash, `3` Sessions. The help overlay (`?`) lists only what is
+  switched on, and the getting-started guide skips steps for features that are off.
+- If the view you're on is switched off, the panel goes back to Tabs.
+- Recovery always works: listing and restoring stashes and sessions, undo,
+  and **Backup & restore** / Export stay available whatever is switched off.
+- The switches are part of exported settings. Importing settings merges them
+  per feature and never weakens the Drive retention guards.
+
 ### Tab Limits
 
 | Setting | Default | Description |

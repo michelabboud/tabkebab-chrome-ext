@@ -1,7 +1,7 @@
 // core/background/alarms.js — Managed alarm schedule (reconcile with
 // settings) and alarm → automation dispatch.
 
-import { getSettings } from '../settings.js';
+import { getSettings, isFeatureOn } from '../settings.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { autoSaveSession } from './sessions.js';
 import { autoKebabOldTabs } from './tabs.js';
@@ -27,16 +27,40 @@ export const ALARM_FOCUS_TICK = 'focusTick';
  */
 export function desiredManagedAlarmPeriods(settings) {
   const bookmarkFormat = settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains;
+  // Feature switches (Settings → Features). An off feature has no alarms.
+  const automation = isFeatureOn(settings, 'automation');
+  const drive = isFeatureOn(settings, 'drive');
+  const bookmarks = isFeatureOn(settings, 'bookmarks');
+  const stash = isFeatureOn(settings, 'stash');
+  const sessions = isFeatureOn(settings, 'sessions');
   return {
-    [ALARM_AUTO_SAVE]: (settings.autoSaveIntervalHours || 24) * 60,
-    [ALARM_AUTO_KEBAB]: settings.autoKebabAfterHours > 0 ? 60 : null,
-    [ALARM_AUTO_STASH]: settings.autoStashAfterDays > 0 ? 360 : null,
-    [ALARM_AUTO_SYNC_DRIVE]: settings.autoSyncToDriveIntervalHours > 0
+    [ALARM_AUTO_SAVE]: automation && sessions ? (settings.autoSaveIntervalHours || 24) * 60 : null,
+    [ALARM_AUTO_KEBAB]: automation && settings.autoKebabAfterHours > 0 ? 60 : null,
+    [ALARM_AUTO_STASH]: automation && stash && settings.autoStashAfterDays > 0 ? 360 : null,
+    [ALARM_AUTO_SYNC_DRIVE]: drive && settings.autoSyncToDriveIntervalHours > 0
       ? settings.autoSyncToDriveIntervalHours * 60
       : null,
-    [ALARM_RETENTION_CLEANUP]: 720,
-    [ALARM_AUTO_BOOKMARK]: settings.autoBookmarkOnStash && bookmarkFormat ? 720 : null,
+    // Retention prunes old auto-saves (automation) and old Drive files (drive).
+    [ALARM_RETENTION_CLEANUP]: automation || drive ? 720 : null,
+    [ALARM_AUTO_BOOKMARK]: bookmarks && settings.autoBookmarkOnStash && bookmarkFormat ? 720 : null,
   };
+}
+
+/**
+ * Feature(s) each managed alarm belongs to. A scheduled run whose feature
+ * was switched off after the alarm fired is skipped. Retention is handled
+ * inside runRetentionCleanup (it serves two features).
+ */
+export const ALARM_FEATURES = Object.freeze({
+  [ALARM_AUTO_SAVE]: Object.freeze(['automation', 'sessions']),
+  [ALARM_AUTO_KEBAB]: Object.freeze(['automation']),
+  [ALARM_AUTO_STASH]: Object.freeze(['automation', 'stash']),
+  [ALARM_AUTO_SYNC_DRIVE]: Object.freeze(['drive']),
+  [ALARM_AUTO_BOOKMARK]: Object.freeze(['bookmarks']),
+});
+
+function loadFeatureSettings() {
+  return getSettings();
 }
 
 /**
@@ -109,7 +133,18 @@ export function createAlarmHandler({ onFocusTick }) {
     runAutoSync = autoSyncDrive,
     runRetention = runRetentionCleanup,
     runAutoBookmark = () => createBookmarks(),
+    loadSettings = loadFeatureSettings,
   } = {}) {
+    const features = Object.hasOwn(ALARM_FEATURES, alarm.name) ? ALARM_FEATURES[alarm.name] : null;
+    if (features) {
+      let settings = null;
+      try {
+        settings = await loadSettings();
+      } catch {
+        settings = null; // unreadable settings: never block a scheduled run
+      }
+      if (settings && features.some((feature) => !isFeatureOn(settings, feature))) return null;
+    }
     switch (alarm.name) {
       case ALARM_AUTO_SAVE:      return runAutoSave();
       case ALARM_AUTO_KEBAB:     return runAutoKebab();

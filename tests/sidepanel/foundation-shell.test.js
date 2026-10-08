@@ -56,11 +56,11 @@ describe('navigation order and shortcuts', () => {
     }
   });
 
-  test('panel.js maps number keys through VIEW_SHORTCUTS and builds help rows from it', async () => {
+  test('panel.js maps number keys through the visible-view shortcuts and builds help rows from them', async () => {
     const panel = await read('sidepanel/panel.js');
-    expect(panel).toContain('const tabKeys = { ...VIEW_SHORTCUTS };');
+    expect(panel).toContain('const tabKeys = visibleViewShortcuts();');
     expect(panel).not.toMatch(/'1':\s*'windows'/);
-    expect(panel).toMatch(/Object\.entries\(VIEW_SHORTCUTS\)/);
+    expect(panel).toMatch(/Object\.entries\(visibleViewShortcuts\(\)\)/);
     expect(panel).toContain('setupRovingTablist(navButtons)');
     expect(panel).toContain("panel.setAttribute('role', 'tabpanel')");
   });

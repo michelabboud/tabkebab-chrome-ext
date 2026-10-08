@@ -49,6 +49,7 @@ describe('U4 settings layout', () => {
     const markup = await settingsMarkup();
     const order = [
       'settings-general-section',
+      'settings-features-section',
       'settings-sleep-section',
       'settings-ai-section',
       'settings-automation-section',
@@ -67,6 +68,7 @@ describe('U4 settings layout', () => {
     const targets = [...markup.matchAll(/data-settings-target="([\w-]+)"/g)].map((m) => m[1]);
     expect(targets).toEqual([
       'settings-general-section',
+      'settings-features-section',
       'settings-sleep-section',
       'settings-ai-section',
       'settings-automation-section',

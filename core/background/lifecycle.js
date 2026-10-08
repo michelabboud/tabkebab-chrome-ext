@@ -3,15 +3,36 @@
 // at the top level of service-worker.js.
 
 import { AIClient } from '../ai/ai-client.js';
+import { getSettings, isFeatureOn } from '../settings.js';
 import { FocusStatus, updateBadge } from '../focus.js';
 import { autoSaveSession } from './sessions.js';
 import { ALARM_AUTO_SAVE, ALARM_FOCUS_TICK, reconfigureManagedAlarms } from './alarms.js';
+
+/**
+ * Startup/install auto-save is an Automation chore that writes a session:
+ * skipped while Automation or Sessions is switched off.
+ */
+export async function autoSaveIfEnabled({
+  loadSettings = getSettings,
+  autoSave = autoSaveSession,
+} = {}) {
+  let settings = null;
+  try {
+    settings = await loadSettings();
+  } catch {
+    settings = null; // unreadable settings: keep the historical behavior
+  }
+  if (settings && (!isFeatureOn(settings, 'automation') || !isFeatureOn(settings, 'sessions'))) {
+    return null;
+  }
+  return autoSave();
+}
 
 // Auto-save on browser startup
 export function onBrowserStartup() {
   setTimeout(async () => {
     try {
-      await autoSaveSession();
+      await autoSaveIfEnabled();
       await reconfigureManagedAlarms();
     } catch (error) {
       console.warn('[TabKebab] Startup alarm reconciliation failed:', error);
@@ -36,7 +57,7 @@ export async function onExtensionInstalled(details) {
 
   setTimeout(async () => {
     try {
-      await autoSaveSession();
+      await autoSaveIfEnabled();
       await reconfigureManagedAlarms();
     } catch (error) {
       console.warn('[TabKebab] Install/update alarm reconciliation failed:', error);

@@ -359,6 +359,7 @@ export class StashList {
     driveBtn.title = 'Save to Google Drive';
     driveBtn.setAttribute('aria-label', `Save ${label} to Google Drive`);
     if (!this.driveConnected) driveBtn.hidden = true;
+    driveBtn.dataset.feature = 'drive'; // hidden while Drive is switched off
 
     const deleteBtn = this.createBtn('Delete', 'action-btn ghost-danger', async () => {
       await this.deleteStash(stash);

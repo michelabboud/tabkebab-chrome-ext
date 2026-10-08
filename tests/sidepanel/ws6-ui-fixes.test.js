@@ -409,7 +409,7 @@ describe('6.3 keyboard shortcuts and confirm dialog', () => {
     const guard = handler.indexOf('isPlainShortcutAllowed(e, { dialogOpen: isConfirmOpen() })');
     expect(handler.indexOf('if (isConfirmOpen()) return;')).toBeGreaterThan(-1);
     expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(handler.indexOf("const tabKeys = {"));
+    expect(guard).toBeLessThan(handler.indexOf("const tabKeys ="));
     expect(guard).toBeLessThan(handler.indexOf("e.key === 'f'"));
   });
 

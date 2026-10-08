@@ -3,6 +3,7 @@
 import { sendOrThrow } from '../message-client.js';
 import { makeKeyboardActivatable } from './keyboard-activate.js';
 import { displayStashName } from '../record-format.js';
+import { isFeatureEnabled } from '../feature-flags.js';
 
 export const SEARCH_UNAVAILABLE_MESSAGE = 'Search unavailable — try again.';
 const TAB_ACTIVATION_FAILURE_MESSAGE = 'Could not open tab — try again.';
@@ -166,8 +167,10 @@ export class GlobalSearch {
       ]);
 
       const tabs = flattenGroupedTabs(tabData);
-      const validStashes = validateCurrentWindowRecords(stashes);
-      const validSessions = validateCurrentWindowRecords(sessions);
+      // Records of a feature switched off in Settings → Features stay stored
+      // but are left out of search results.
+      const validStashes = isFeatureEnabled('stash') ? validateCurrentWindowRecords(stashes) : [];
+      const validSessions = isFeatureEnabled('sessions') ? validateCurrentWindowRecords(sessions) : [];
       if (!ownsView()) return false;
       this._tabs = tabs;
       this._stashes = validStashes;
@@ -464,7 +467,7 @@ export class GlobalSearch {
     const selector = `[data-restore-id="${String(id).replace(/["\\]/g, '')}"]`;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       // The panel may be torn down between retries.
-      if (typeof document === 'undefined') return null;
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null;
       const card = document.querySelector(selector);
       if (card) {
         card.scrollIntoView?.({ block: 'nearest' });

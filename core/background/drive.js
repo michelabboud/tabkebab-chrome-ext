@@ -4,7 +4,7 @@
 import { deleteSessions } from '../sessions.js';
 import { Storage } from '../storage.js';
 import { listStashes as listStashesDB, getStash } from '../stash-db.js';
-import { getSettings } from '../settings.js';
+import { getSettings, isFeatureOn } from '../settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from '../drive-client.js';
 import { coordinateDriveRetention, emptyDriveRetentionResult, retentionCutoff, validateDriveRetentionDays } from '../drive-retention.js';
 import { reconcileDriveSync } from '../drive-sync.js';
@@ -160,8 +160,11 @@ async function runRetentionCleanupUnlocked({
 } = {}) {
   try {
     const settings = await loadSettings();
+    const automationOn = isFeatureOn(settings, 'automation');
+    const driveOn = isFeatureOn(settings, 'drive');
 
-    // Clean old auto-saves locally
+    // Clean old auto-saves locally (an automation chore: skipped while
+    // Automation is switched off, so turning it off never prunes data)
     const retentionMs = (settings.autoSaveRetentionDays || 7) * 24 * 60 * 60 * 1000;
     const nowMs = now();
     const cutoff = nowMs - retentionMs;
@@ -176,10 +179,11 @@ async function runRetentionCleanupUnlocked({
       }
     }
 
-    if (idsToDelete.size > 0) {
+    if (automationOn && idsToDelete.size > 0) {
       await deleteSessionsOperation([...idsToDelete], nowMs);
     }
 
+    if (!driveOn) return emptyDriveRetentionResult();
     const driveState = await getStorage('driveSync');
     return await runDriveFileRetention({
       mode: 'scheduled',

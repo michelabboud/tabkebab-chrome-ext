@@ -41,13 +41,22 @@ export class SettingsManager {
   constructor(rootEl, {
     confirm = showConfirm,
     notify = showToast,
+    onFeaturesChanged = () => {},
   } = {}) {
     this.root = rootEl;
     this.confirm = confirm;
     this.notify = notify;
+    this.onFeaturesChanged = onFeaturesChanged;
 
     // Collect all setting inputs by data-setting attribute
     this.inputs = rootEl.querySelectorAll('[data-setting]');
+
+    // Settings → Features: one toggle per feature switch. Each change saves
+    // just the features patch and applies it to the panel right away.
+    this.featureInputs = rootEl.querySelectorAll('[data-feature-setting]');
+    this.featureInputs.forEach((input) => {
+      input.addEventListener('change', () => { void this.saveFeaturesFromUI(); });
+    });
 
     // Sticky in-page index: chips scroll to their section.
     this.indexEl = rootEl.querySelector('#settings-index');
@@ -86,6 +95,12 @@ export class SettingsManager {
     const exportSettingsBtn = rootEl.querySelector('#btn-export-settings');
     if (exportSettingsBtn) {
       exportSettingsBtn.addEventListener('click', () => this.exportSettings());
+    }
+    // Full backup lives here too, so it stays reachable when the Sessions
+    // view (which also offers it) is switched off in Settings → Features.
+    const exportAllBtn = rootEl.querySelector('#btn-export-all-data');
+    if (exportAllBtn) {
+      exportAllBtn.addEventListener('click', () => this.exportAllData());
     }
     const importSettingsInput = rootEl.querySelector('#btn-import-settings');
     if (importSettingsInput) {
@@ -159,8 +174,36 @@ export class SettingsManager {
       }
     });
 
+    // Feature switches (missing keys read as on)
+    this.featureInputs?.forEach((input) => {
+      input.checked = settings.features?.[input.dataset.featureSetting] !== false;
+    });
+
     // Apply retention disabled state based on never-delete toggle
     this.updateRetentionState(settings.neverDeleteFromDrive);
+  }
+
+  /** Current feature switches as shown by the Features card. */
+  readFeaturesFromUI() {
+    const features = {};
+    this.featureInputs?.forEach((input) => {
+      features[input.dataset.featureSetting] = input.checked === true;
+    });
+    return features;
+  }
+
+  async saveFeaturesFromUI() {
+    const features = this.readFeaturesFromUI();
+    try {
+      const saved = await this.send({ action: 'saveSettings', settings: { features } });
+      const applied = saved?.features || features;
+      this.onFeaturesChanged(applied);
+      return applied;
+    } catch (err) {
+      this.notify('Failed to save settings: ' + err.message, 'error');
+      void this.refresh({ notifyFailure: false }); // show the stored switches again
+      return null;
+    }
   }
 
   /** Gray out Drive retention row when "never delete" is ON, and reset counter on toggle. */
@@ -279,6 +322,16 @@ export class SettingsManager {
       showToast('Settings exported', 'success');
     } catch (err) {
       showToast('Export failed: ' + err.message, 'error');
+    }
+  }
+
+  async exportAllData() {
+    try {
+      const payload = await this.send({ action: 'buildPortableExport', kind: 'full' });
+      downloadJson(payload, `tabkebab-export-${Date.now()}.json`);
+      this.notify('Data exported', 'success');
+    } catch (err) {
+      this.notify('Export failed: ' + err.message, 'error');
     }
   }
 

@@ -3995,3 +3995,24 @@ body.focus-blink {
     animation: none !important;
   }
 }
+
+/* ── Settings → Features switches ──
+   A switched-off feature is hidden, never deleted. Static controls get
+   .feature-off (sidepanel/feature-flags.js); controls rendered later are
+   matched through <body data-features-off="…">. */
+.feature-off { display: none !important; }
+body[data-features-off~="focus"] [data-feature~="focus"],
+body[data-features-off~="ai"] [data-feature~="ai"],
+body[data-features-off~="ai"] .ai-feature,
+body[data-features-off~="drive"] [data-feature~="drive"],
+body[data-features-off~="bookmarks"] [data-feature~="bookmarks"],
+body[data-features-off~="automation"] [data-feature~="automation"],
+body[data-features-off~="duplicates"] [data-feature~="duplicates"],
+body[data-features-off~="sessions"] [data-feature~="sessions"],
+body[data-features-off~="stash"] [data-feature~="stash"],
+body[data-features-off~="stash"] .stash-btn,
+body[data-features-off~="windows"] [data-feature~="windows"],
+body[data-features-off~="commandBar"] [data-feature~="commandBar"],
+body[data-features-off~="search"] [data-feature~="search"] {
+  display: none !important;
+}

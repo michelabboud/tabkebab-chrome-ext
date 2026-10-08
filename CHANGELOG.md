@@ -8,6 +8,18 @@ All notable changes to TabKebab are documented in this file.
 
 Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
 
+### Added
+
+- **Feature switches** (Settings → Features): turn Focus Mode, AI, the AI
+  command bar, Search, the Windows view, Stash, Sessions, Duplicates,
+  Automation, Bookmarks and Google Drive on or off to declutter the panel.
+  Everything defaults on, so nothing changes until you switch something off.
+  A switched-off feature is hidden, its schedules stop and its actions are
+  refused with a clear message; its data is never deleted, and recovery
+  (listing/restoring stashes and sessions, undo, exports) always works.
+  Number-key shortcuts, the help overlay and the getting-started guide follow
+  the switches. See the GUIDE's Settings Reference → Features.
+
 ### Changed
 
 - Default AI models updated: OpenAI `gpt-6-luna` (replaces deprecated

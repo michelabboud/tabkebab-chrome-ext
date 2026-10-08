@@ -20,6 +20,7 @@ describe('service-worker entry point', () => {
       'tabs.onRemoved',
       'tabs.onUpdated',
       'runtime.onMessage',
+      'storage.onChanged',
     ]);
     for (const match of listeners) expect(match[1]).toBe('');
 

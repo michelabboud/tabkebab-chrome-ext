@@ -26,6 +26,7 @@ export const FIRST_RUN_STEPS = Object.freeze([
     destination: { view: 'tabs' },
     subtab: 'domains',
     highlight: ['#sub-domains .stash-btn', '.stash-btn', '#sub-domains .domain-group-header'],
+    feature: 'stash',
     missingHint: 'Open a few tabs first: each domain row gets its own Stash button.',
   },
   {
@@ -33,6 +34,7 @@ export const FIRST_RUN_STEPS = Object.freeze([
     description: 'Open **Stash** any time and bring the tabs back in one click.',
     actionLabel: 'Open Stash',
     destination: { view: 'stash' },
+    feature: 'stash',
   },
 ]);
 
@@ -77,6 +79,7 @@ export class FirstRunWalkthrough {
     findTarget = defaultFindTarget,
     selectSubtab = defaultSelectSubtab,
     delay = wait,
+    isFeatureEnabled = () => true,
   } = {}) {
     this.root = rootEl;
     this.storage = storage;
@@ -85,6 +88,7 @@ export class FirstRunWalkthrough {
     this.findTarget = findTarget;
     this.selectSubtab = selectSubtab;
     this.delay = delay;
+    this.isFeatureEnabled = isFeatureEnabled;
     this._highlighted = null;
     this.currentStep = 0;
 
@@ -128,8 +132,16 @@ export class FirstRunWalkthrough {
     return true;
   }
 
+  /**
+   * Steps for the features that are switched on (Settings → Features). A
+   * step tied to a switched-off feature is skipped.
+   */
+  get steps() {
+    return FIRST_RUN_STEPS.filter((step) => !step.feature || this.isFeatureEnabled(step.feature));
+  }
+
   launch(stepIndex = 0) {
-    this.currentStep = Math.max(0, Math.min(stepIndex, FIRST_RUN_STEPS.length - 1));
+    this.currentStep = Math.max(0, Math.min(stepIndex, this.steps.length - 1));
     this.root.hidden = false;
     this.render();
   }
@@ -147,7 +159,7 @@ export class FirstRunWalkthrough {
   }
 
   next() {
-    if (this.currentStep >= FIRST_RUN_STEPS.length - 1) {
+    if (this.currentStep >= this.steps.length - 1) {
       this.dismiss();
       return;
     }
@@ -161,7 +173,8 @@ export class FirstRunWalkthrough {
    * @returns {Promise<HTMLElement|null>} the highlighted control, if any
    */
   async runStepAction() {
-    const step = FIRST_RUN_STEPS[this.currentStep];
+    const step = this.steps[this.currentStep];
+    if (!step) return null;
     if (step.destination) this.navigate({ ...step.destination });
     if (step.subtab) this.selectSubtab(step.subtab);
     if (!step.highlight) return null;
@@ -209,14 +222,16 @@ export class FirstRunWalkthrough {
   }
 
   render() {
-    const step = FIRST_RUN_STEPS[this.currentStep];
-    this.stepEl.textContent = `${this.currentStep + 1} of ${FIRST_RUN_STEPS.length}`;
+    const steps = this.steps;
+    this.currentStep = Math.max(0, Math.min(this.currentStep, steps.length - 1));
+    const step = steps[this.currentStep];
+    this.stepEl.textContent = `${this.currentStep + 1} of ${steps.length}`;
     this.titleEl.textContent = step.title;
     this.renderDescription(step.description);
     this.actionEl.hidden = !step.actionLabel;
     this.actionEl.textContent = step.actionLabel || '';
     this.backEl.hidden = this.currentStep === 0;
     this.nextEl.textContent =
-      this.currentStep === FIRST_RUN_STEPS.length - 1 ? 'Finish' : 'Next';
+      this.currentStep === steps.length - 1 ? 'Finish' : 'Next';
   }
 }

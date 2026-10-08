@@ -4,6 +4,7 @@ import {
   PORTABLE_SETTINGS_KEYS,
   SETTINGS_CONSTRAINTS,
   SETTINGS_DEFAULTS,
+  assertFeaturesPatch,
 } from './settings.js';
 import {
   MAX_DRIVE_TIMESTAMP,
@@ -517,6 +518,14 @@ function validateBookmarksCanonical(value) {
 
 function validateSettingValue(key, value) {
   const constraint = SETTINGS_CONSTRAINTS[key];
+  if (constraint.type === 'features') {
+    try {
+      assertFeaturesPatch(value);
+    } catch (error) {
+      fail(`settings.${error.message}`);
+    }
+    return;
+  }
   if (constraint.type === 'boolean') {
     if (typeof value !== 'boolean') fail(`settings.${key} must be a boolean`);
     return;
@@ -532,6 +541,12 @@ function validateSettingValue(key, value) {
   }
 }
 
+function sortedFeatures(value) {
+  const output = Object.create(null);
+  for (const key of Object.keys(value).sort(lexicalCompare)) output[key] = value[key];
+  return output;
+}
+
 function validateSettingsCanonical(value) {
   if (!isPlainRecord(value)) fail('settings must be an object');
   const allowed = new Set(PORTABLE_SETTINGS_KEYS);
@@ -539,7 +554,7 @@ function validateSettingsCanonical(value) {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) fail(`settings contain unknown key ${key}`);
     validateSettingValue(key, value[key]);
-    entries.push([key, value[key]]);
+    entries.push([key, key === 'features' ? sortedFeatures(value[key]) : value[key]]);
   }
   return sortedNullMap(entries);
 }
@@ -1096,7 +1111,16 @@ function protectRetentionSettings(local, merged) {
 
 function mergeSettings(local, incoming) {
   const merged = new Map(Object.entries(local || {}));
-  for (const [key, value] of Object.entries(incoming || {})) merged.set(key, value);
+  for (const [key, value] of Object.entries(incoming || {})) {
+    // Feature switches merge per feature: an export from an older version
+    // (or a partial one) never silently flips switches it does not mention.
+    if (key === 'features' && isPlainRecord(value)) {
+      const localFeatures = isPlainRecord(local?.features) ? local.features : {};
+      merged.set(key, { ...localFeatures, ...value });
+    } else {
+      merged.set(key, value);
+    }
+  }
   protectRetentionSettings(local, merged);
   const result = validateSettingsCanonical(sortedNullMap(merged.entries()));
   assertSettingsRelationship(result);

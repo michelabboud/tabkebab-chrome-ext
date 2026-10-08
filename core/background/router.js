@@ -8,7 +8,132 @@
 
 const UNKNOWN_ACTION_RESPONSE = Object.freeze({ error: 'Unknown action' });
 
-export function createRouter() {
+// ── Feature gating ──
+//
+// Settings → Features can switch a feature off. Every runtime action that
+// *uses* a feature is listed here with the feature(s) it needs; the router
+// refuses it while any of them is off. Gating lives only here: handlers stay
+// feature-agnostic.
+//
+// Deliberately NOT gated (always allowed, so data stays recoverable and the
+// panel can still read state while a feature is hidden):
+//   - listing/reading: listSessions, listStashes, getFocusState,
+//     getFocusHistory, getFocusProfiles, getAISettings, needsAIPassphrase,
+//     listLocalBookmarks, getWindowStats, getTabs, getGroupedTabs
+//   - recovery: restoreSession, restoreStash, undoDeleteSession,
+//     undoDeleteStash, undoDriveSettings
+//   - exports / backup: buildPortableExport, buildPortableSessionExport,
+//     buildPortableStashExport, importPortableData
+//   - a running Focus session: endFocus, pauseFocus, resumeFocus,
+//     extendFocus (switching Focus off never strands a live session)
+//   - housekeeping: clearAICache, getSettings, saveSettings
+export const ACTION_FEATURES = Object.freeze({
+  // Focus: block starting new sessions.
+  startFocus: Object.freeze(['focus']),
+  saveFocusProfilePrefs: Object.freeze(['focus']),
+  // AI
+  unlockAIApiKey: Object.freeze(['ai']),
+  saveAISettings: Object.freeze(['ai']),
+  isAIAvailable: Object.freeze(['ai']),
+  testAIConnection: Object.freeze(['ai']),
+  listModels: Object.freeze(['ai']),
+  summarizeTabs: Object.freeze(['ai']),
+  classifyKeepAwake: Object.freeze(['ai']),
+  applySmartGroups: Object.freeze(['ai']),
+  // AI command bar (natural-language commands need both switches)
+  executeNLCommand: Object.freeze(['ai', 'commandBar']),
+  confirmNLCommand: Object.freeze(['ai', 'commandBar']),
+  // Google Drive
+  exportStashToDrive: Object.freeze(['drive']),
+  syncStashesToDrive: Object.freeze(['drive']),
+  syncDriveState: Object.freeze(['drive']),
+  syncAllToDrive: Object.freeze(['drive']),
+  cleanDriveFiles: Object.freeze(['drive']),
+  importDriveSettings: Object.freeze(['drive']),
+  // Bookmarks
+  createBookmarks: Object.freeze(['bookmarks']),
+  // Duplicates
+  findDuplicates: Object.freeze(['duplicates']),
+  findEmptyPages: Object.freeze(['duplicates']),
+  // Sessions (create/delete only)
+  saveSession: Object.freeze(['sessions']),
+  deleteSession: Object.freeze(['sessions']),
+  // Stash (create/delete/import only)
+  stashWindow: Object.freeze(['stash']),
+  stashGroup: Object.freeze(['stash']),
+  stashDomain: Object.freeze(['stash']),
+  deleteStash: Object.freeze(['stash']),
+  importStashes: Object.freeze(['stash']),
+  // Windows
+  consolidateWindows: Object.freeze(['windows']),
+});
+
+export function featureOffResponse(feature) {
+  return { error: `Feature "${feature}" is turned off in Settings` };
+}
+
+/** First feature `action` needs that is off in `features`, or null. */
+export function disabledFeatureForAction(action, features) {
+  const needed = Object.hasOwn(ACTION_FEATURES, action) ? ACTION_FEATURES[action] : null;
+  if (!needed) return null;
+  for (const feature of needed) {
+    if (features?.[feature] === false) return feature;
+  }
+  return null;
+}
+
+/**
+ * Cached view of `settings.features` for synchronous gating. Gating from a
+ * cache keeps the router's dispatch synchronous for every message once the
+ * switches are known, so messages enter their handlers (and the shared state
+ * lock) in arrival order. `get()` returns the features object, or a promise
+ * while the first load (or an explicit refresh) is in flight.
+ *
+ * @param {() => Promise<object|null>} load resolves the current features
+ */
+export function createFeatureCache(load) {
+  let value = null;
+  let loaded = false;
+  let pending = null;
+
+  function refresh() {
+    const attempt = Promise.resolve()
+      .then(load)
+      .then((features) => features ?? null, () => null) // unreadable: never gate
+      .then((features) => {
+        if (pending === attempt) {
+          value = features;
+          loaded = true;
+          pending = null;
+        }
+        return features;
+      });
+    pending = attempt;
+    return attempt;
+  }
+
+  return {
+    refresh,
+    set(features) {
+      value = features ?? null;
+      loaded = true;
+      pending = null;
+    },
+    get() {
+      if (pending) return pending;
+      if (!loaded) return refresh();
+      return value;
+    },
+  };
+}
+
+/**
+ * @param {object} [options]
+ * @param {() => (object|null|Promise<object|null>)} [options.getFeatures]
+ *   returns the current `settings.features` (or a promise of it). Only called
+ *   for gated actions. Without it the router never gates.
+ */
+export function createRouter({ getFeatures = null } = {}) {
   const handlers = new Map();
 
   function registerHandlers(map) {
@@ -33,7 +158,18 @@ export function createRouter() {
       const { ...overrides } = options;
       const handler = handlers.get(msg.action);
       if (!handler) return Promise.resolve({ ...UNKNOWN_ACTION_RESPONSE });
-      return handler(msg, { ...overrides, ...runtime });
+      const ctx = { ...overrides, ...runtime };
+      if (!getFeatures || !Object.hasOwn(ACTION_FEATURES, msg.action)) {
+        return handler(msg, ctx);
+      }
+      const gate = (features) => {
+        const off = disabledFeatureForAction(msg.action, features);
+        if (off) return Promise.resolve(featureOffResponse(off));
+        return handler(msg, ctx);
+      };
+      const features = getFeatures();
+      if (features && typeof features.then === 'function') return features.then(gate);
+      return gate(features);
     } catch (error) {
       return Promise.reject(error);
     }

@@ -19,7 +19,16 @@ import { startChromeAIBroker } from './chrome-ai-broker.js';
 import { FirstRunWalkthrough } from './components/first-run-walkthrough.js';
 import { createFocusTrap, isConfirmOpen, isModalOpen } from './components/confirm-dialog.js';
 import {
-  VIEW_SHORTCUTS,
+  applyFeatureFlags,
+  fallbackSubtabFor,
+  fallbackViewFor,
+  getFeatureFlags,
+  isFeatureEnabled,
+  isViewEnabled,
+  pruneDisabledFeatureNodes,
+  visibleViewShortcuts,
+} from './feature-flags.js';
+import {
   applyStatusIcon,
   countDuplicateTabs,
   createDebounced,
@@ -60,7 +69,9 @@ const aiSettingsCtrl = new AISettings(settingsRoot, {
     ]);
   },
 });
-const settingsManagerCtrl = new SettingsManager(settingsRoot);
+const settingsManagerCtrl = new SettingsManager(settingsRoot, {
+  onFeaturesChanged: (features) => applyPanelFeatures(features),
+});
 
 const controllers = {
   tabs: new TabList(document.getElementById('sub-domains'), {
@@ -143,6 +154,8 @@ function visibleViewName() {
 }
 
 function navigatePanel({ view, sectionId } = {}) {
+  // A view switched off in Settings → Features is never opened.
+  if (view && !isViewEnabled(view)) return;
   if (view === 'settings') {
     settingsBtn.click();
   } else if (view === 'focus') {
@@ -203,6 +216,7 @@ document.addEventListener('click', (e) => {
 const walkthroughRoot = document.getElementById('first-run-walkthrough');
 const walkthrough = new FirstRunWalkthrough(walkthroughRoot, {
   navigate: navigatePanel,
+  isFeatureEnabled: (name) => isFeatureEnabled(name),
 });
 document.getElementById('btn-relaunch-walkthrough').addEventListener('click', () => {
   walkthrough.launch();
@@ -217,9 +231,11 @@ const focusPanel = new FocusPanel(document.getElementById('view-focus'), {
   listenForRuntimeEvents: false,
   navigate: (target) => navigatePanel(target),
 });
-focusPanel.mountBanner(document.querySelector('.view-container'));
+const focusBannerEl = focusPanel.mountBanner(document.querySelector('.view-container'));
+if (focusBannerEl?.dataset) focusBannerEl.dataset.feature = 'focus';
 
 function showFocusView() {
+  if (!isFeatureEnabled('focus')) return;
   showView('focus');
   void refreshController(focusPanel, 'Focus Mode');
 }
@@ -307,6 +323,7 @@ document.addEventListener('dupesUpdated', (e) => {
 
 // --- Periodic duplicate check (every 60s) ---
 async function checkDuplicates() {
+  if (!isFeatureEnabled('duplicates')) return;
   try {
     const dupes = await sendOrThrow({ action: 'findDuplicates' });
     updateDupeBadge(countDuplicateTabs(dupes));
@@ -380,8 +397,48 @@ function applyTheme(theme) {
 // --- Default view ---
 function applyDefaultView(view) {
   if (!view || view === 'tabs') return; // tabs is already the default active view
+  if (!isViewEnabled(view)) return; // switched off in Settings → Features
   const targetBtn = document.querySelector(`.tab-nav [data-view="${view}"]`);
   if (targetBtn) targetBtn.click();
+}
+
+// --- Settings → Features switches ---
+// Applied on load and whenever settings change (Features card, import).
+// A switched-off feature is hidden, never deleted.
+const NAV_LABELS = { tabs: 'Tabs', windows: 'Windows', stash: 'Stash', sessions: 'Sessions' };
+
+let panelFeaturesApplied = false;
+
+function applyPanelFeatures(features) {
+  const before = JSON.stringify(getFeatureFlags());
+  const applied = applyFeatureFlags(features);
+  const changed = !panelFeaturesApplied || JSON.stringify(applied) !== before;
+  panelFeaturesApplied = true;
+
+  // Nav tooltips follow the remapped number keys.
+  const shortcutByView = Object.fromEntries(
+    Object.entries(visibleViewShortcuts()).map(([key, view]) => [view, key]),
+  );
+  navButtons.forEach((btn) => {
+    const view = btn.dataset.view;
+    const key = shortcutByView[view];
+    btn.title = key ? `${NAV_LABELS[view] || view} (${key})` : (NAV_LABELS[view] || view);
+  });
+
+  // The open view (or Duplicates sub-tab) was switched off: back to Tabs.
+  const fallback = fallbackViewFor(visibleViewName());
+  if (fallback) document.querySelector(`.tab-nav [data-view="${fallback}"]`)?.click();
+  const activeSub = document.querySelector('#view-tabs .sub-nav [role="tab"].active');
+  const subFallback = fallbackSubtabFor(activeSub?.dataset.subtab);
+  if (subFallback) document.querySelector(`#view-tabs .sub-nav [data-subtab="${subFallback}"]`)?.click();
+
+  if (!isFeatureEnabled('search')) globalSearch.close?.();
+  if (!changed) return;
+  if (isFeatureEnabled('duplicates')) void checkDuplicates();
+
+  // AI-dependent controls re-read availability (AI off reads as unavailable).
+  void updateAIVisibility();
+  void updateAIStatusIcon();
 }
 
 // --- Load settings on startup ---
@@ -389,6 +446,7 @@ async function initSettings() {
   try {
     const settings = await sendOrThrow({ action: 'getSettings' });
     if (settings) {
+      applyPanelFeatures(settings.features);
       applyTheme(settings.theme);
       applyDefaultView(settings.defaultView);
     }
@@ -406,6 +464,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       const newSettings = changes.tabkebabSettings.newValue;
       if (newSettings) {
         applyTheme(newSettings.theme);
+        applyPanelFeatures(newSettings.features);
       }
     }
     if (changes.aiSettings) {
@@ -595,6 +654,7 @@ document.addEventListener('keydown', (e) => {
 
   // Ctrl+K / Cmd+K: toggle search (works even when focused in inputs)
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') {
+    if (!isFeatureEnabled('search')) return;
     e.preventDefault();
     globalSearch.toggle();
     return;
@@ -614,8 +674,9 @@ document.addEventListener('keydown', (e) => {
   // must stay the browser's find) or when another handler claimed the key.
   if (!isPlainShortcutAllowed(e, { dialogOpen: isConfirmOpen() })) return;
 
-  // 1-4: switch main tabs in nav order (1 Tabs, 2 Windows, 3 Stash, 4 Sessions)
-  const tabKeys = { ...VIEW_SHORTCUTS };
+  // 1-N: switch main tabs in nav order, numbering only the views that are
+  // switched on (all on: 1 Tabs, 2 Windows, 3 Stash, 4 Sessions)
+  const tabKeys = visibleViewShortcuts();
   if (tabKeys[e.key]) {
     e.preventDefault();
     const btn = document.querySelector(`.tab-nav [data-view="${tabKeys[e.key]}"]`);
@@ -624,7 +685,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // F: toggle focus view
-  if (e.key === 'f' || e.key === 'F') {
+  if ((e.key === 'f' || e.key === 'F') && isFeatureEnabled('focus')) {
     e.preventDefault();
     showFocusView();
     return;
@@ -632,11 +693,13 @@ document.addEventListener('keydown', (e) => {
 
   // /: focus AI command bar, or open search when AI is not set up
   if (e.key === '/') {
-    e.preventDefault();
     const aiInput = document.getElementById('ai-command-input');
-    if (aiInput && !aiInput.closest('[hidden]')) {
+    const commandBarOn = isFeatureEnabled('ai') && isFeatureEnabled('commandBar');
+    if (commandBarOn && aiInput && !aiInput.closest('[hidden]')) {
+      e.preventDefault();
       aiInput.focus();
-    } else {
+    } else if (isFeatureEnabled('search')) {
+      e.preventDefault();
       globalSearch.open();
     }
     return;
@@ -702,7 +765,7 @@ function toggleHelp() {
   closeBtn.textContent = '×';
   header.append(title, closeBtn);
 
-  const shortcutRows = Object.entries(VIEW_SHORTCUTS)
+  const shortcutRows = Object.entries(visibleViewShortcuts())
     .map(([key, view]) => `<div class="help-row"><kbd>${key}</kbd><span>${VIEW_LABELS[view]} view</span></div>`)
     .join('');
 
@@ -712,25 +775,25 @@ function toggleHelp() {
         <div class="help-group">
           <h3>Views</h3>
           <div class="help-feature"><strong>Tabs</strong> &mdash; Group tabs by domain or AI, manage custom groups, find duplicates.</div>
-          <div class="help-feature"><strong>Windows</strong> &mdash; See all open windows, tab counts, health indicators, and consolidate windows.</div>
-          <div class="help-feature"><strong>Stash</strong> &mdash; Save and close tabs to free memory. Restore them later.</div>
-          <div class="help-feature"><strong>Sessions</strong> &mdash; Snapshot all windows and restore entire sessions.</div>
+          <div class="help-feature" data-feature="windows"><strong>Windows</strong> &mdash; See all open windows, tab counts, health indicators, and consolidate windows.</div>
+          <div class="help-feature" data-feature="stash"><strong>Stash</strong> &mdash; Save and close tabs to free memory. Restore them later.</div>
+          <div class="help-feature" data-feature="sessions"><strong>Sessions</strong> &mdash; Snapshot all windows and restore entire sessions.</div>
         </div>
         <div class="help-group">
           <h3>Key Features</h3>
           <div class="help-feature"><strong>Kebab</strong> &mdash; Put inactive tabs to sleep to save memory. Keep-awake domains are protected.</div>
-          <div class="help-feature"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain. Chrome's built-in AI works without a key when available.</div>
-          <div class="help-feature"><strong>Drive Sync</strong> &mdash; Back up sessions, stashes, and bookmarks to Google Drive.</div>
-          <div class="help-feature"><strong>Bookmarks</strong> &mdash; Export tabs as Chrome bookmarks, local JSON, or Drive HTML.</div>
-          <div class="help-feature"><strong>Focus Mode</strong> &mdash; Start a timed focus session. Distracting tabs are blocked, non-focus tabs can be kebab'd or stashed.</div>
+          <div class="help-feature" data-feature="ai"><strong>Smart Group</strong> &mdash; AI groups tabs by topic instead of domain. Chrome's built-in AI works without a key when available.</div>
+          <div class="help-feature" data-feature="drive"><strong>Drive Sync</strong> &mdash; Back up sessions, stashes, and bookmarks to Google Drive.</div>
+          <div class="help-feature" data-feature="bookmarks"><strong>Bookmarks</strong> &mdash; Export tabs as Chrome bookmarks, local JSON, or Drive HTML.</div>
+          <div class="help-feature" data-feature="focus"><strong>Focus Mode</strong> &mdash; Start a timed focus session. Distracting tabs are blocked, non-focus tabs can be kebab'd or stashed.</div>
         </div>
         <div class="help-group">
           <h3>Keyboard Shortcuts</h3>
           ${shortcutRows}
           <div class="help-row"><kbd>&larr; &rarr;</kbd><span>Move between views in the view bar</span></div>
-          <div class="help-row"><kbd>F</kbd><span>Focus Mode</span></div>
-          <div class="help-row"><kbd>Ctrl+K</kbd><span>Search everything</span></div>
-          <div class="help-row"><kbd>/</kbd><span>AI command bar (or search)</span></div>
+          <div class="help-row" data-feature="focus"><kbd>F</kbd><span>Focus Mode</span></div>
+          <div class="help-row" data-feature="search"><kbd>Ctrl+K</kbd><span>Search everything</span></div>
+          <div class="help-row" data-feature="search"><kbd>/</kbd><span>AI command bar (or search)</span></div>
           <div class="help-row"><kbd>Esc</kbd><span>Close / back to Tabs</span></div>
           <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
         </div>
@@ -738,8 +801,8 @@ function toggleHelp() {
           <h3>Tips</h3>
           <div class="help-feature">Click any tab to switch to it. Click the &times; to close it.</div>
           <div class="help-feature">Drag tabs between custom groups in the Groups sub-view.</div>
-          <div class="help-feature">Use the AI command bar to run natural language actions like &ldquo;close YouTube tabs&rdquo;.</div>
-          <div class="help-feature">Stashed tabs are stored in IndexedDB and survive extension updates.</div>
+          <div class="help-feature" data-feature="ai commandBar">Use the AI command bar to run natural language actions like &ldquo;close YouTube tabs&rdquo;.</div>
+          <div class="help-feature" data-feature="stash">Stashed tabs are stored in IndexedDB and survive extension updates.</div>
         </div>
         <div class="help-footer">
           <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/GUIDE.md" target="_blank" rel="noopener">Full Guide</a>
@@ -747,6 +810,9 @@ function toggleHelp() {
           <a href="https://github.com/michelabboud/tabkebab-chrome-ext/issues" target="_blank" rel="noopener">Report Issue</a>
         </div>
   `;
+
+  // Leave out help for features switched off in Settings → Features.
+  pruneDisabledFeatureNodes(body);
 
   panel.append(header, body);
   overlay.appendChild(panel);

@@ -145,16 +145,22 @@ export function selectTab(tabs, selected) {
   }
 }
 
+/** A tab switched off in Settings → Features (or otherwise hidden) is skipped. */
+function isRovingTabAvailable(tab) {
+  return !tab.hidden && !tab.classList?.contains?.('feature-off');
+}
+
 /**
  * Wire the ARIA tab pattern onto `tabs` (buttons with role="tab"):
  * arrow keys / Home / End move focus and activate (automatic activation).
  * `activate(tab)` performs the switch (usually `tab.click()`).
  */
 export function setupRovingTablist(tabs, { activate = (tab) => tab.click() } = {}) {
-  const list = [...tabs];
-  for (const tab of list) {
+  const all = [...tabs];
+  for (const tab of all) {
     tab.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const list = all.filter((candidate) => candidate === tab || isRovingTabAvailable(candidate));
       const index = nextRovingIndex(e.key, list.indexOf(tab), list.length);
       if (index < 0) return;
       e.preventDefault();

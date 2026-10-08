@@ -5,7 +5,7 @@
 import { getWindowStats } from '../grouping.js';
 import { getAllTabs, excludeIncognitoTabs, extractDomain } from '../tabs-api.js';
 import { Storage } from '../storage.js';
-import { getSettings } from '../settings.js';
+import { getSettings, isFeatureOn } from '../settings.js';
 import { exportToSubfolder, exportRawToSubfolder } from '../drive-client.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 
@@ -422,7 +422,7 @@ export async function createBookmarksUnlocked(options = {}) {
   }
 
   // Save to Google Drive
-  if (!isStash && (destination === 'drive' || destination === 'all')) {
+  if (!isStash && isFeatureOn(settings, 'drive') && (destination === 'drive' || destination === 'all')) {
     try {
       const driveState = await Storage.get('driveSync');
       if (driveState?.connected) {

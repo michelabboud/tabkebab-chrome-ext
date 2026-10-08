@@ -8,7 +8,12 @@
 //      guard, message router), and
 //   3. re-exports the worker's public surface.
 
-import { createRouter, createRuntimeMessageListener } from './core/background/router.js';
+import {
+  createFeatureCache,
+  createRouter,
+  createRuntimeMessageListener,
+} from './core/background/router.js';
+import { getSettings, mergeFeatures } from './core/settings.js';
 import { tabHandlers, notifyPanel } from './core/background/tabs.js';
 import { sessionHandlers } from './core/background/sessions.js';
 import { groupingHandlers } from './core/background/grouping.js';
@@ -64,7 +69,11 @@ export { attachChromeAIPort };
 // One router per worker instance. registerHandlers throws on a duplicate
 // action, so two features can never silently claim the same message.
 
-const router = createRouter();
+// Settings → Features switches gate actions in the router (see
+// ACTION_FEATURES). The cache is refreshed whenever settings change.
+const featureCache = createFeatureCache(async () => (await getSettings()).features);
+const router = createRouter({ getFeatures: () => featureCache.get() });
+void featureCache.refresh();
 router.registerHandlers(tabHandlers);
 router.registerHandlers(groupingHandlers);
 router.registerHandlers(sessionHandlers);
@@ -79,9 +88,24 @@ router.registerHandlers(focusHandlers);
  * Handle one runtime message. `options` overrides injectable operations
  * (tests); the Focus startup barrier is always this worker's own.
  */
+const SETTINGS_WRITER_ACTIONS = new Set([
+  'saveSettings',
+  'importDriveSettings',
+  'undoDriveSettings',
+  'importPortableData',
+]);
+
 export function handleMessage(msg, options = {}) {
-  return router.dispatch(msg, options, { focusReadiness });
+  const result = router.dispatch(msg, options, { focusReadiness });
+  if (!SETTINGS_WRITER_ACTIONS.has(msg?.action)) return result;
+  // A settings write may flip feature switches: re-read them before the
+  // reply, so the panel's next message is gated by the new values.
+  return result.then(async (value) => {
+    await featureCache.refresh();
+    return value;
+  });
 }
+
 
 // ── Lifecycle Events ──
 
@@ -130,3 +154,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // Message handler — side panel communicates via chrome.runtime.sendMessage
 chrome.runtime.onMessage.addListener(createRuntimeMessageListener(handleMessage));
+
+// Keep the feature-switch cache current. Any settings write (Settings UI,
+// portable import, Drive settings import/undo) lands in tabkebabSettings.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes?.tabkebabSettings) return;
+  const next = changes.tabkebabSettings.newValue;
+  if (next && typeof next === 'object') featureCache.set(mergeFeatures(next.features));
+  else void featureCache.refresh();
+});
