@@ -187,6 +187,10 @@ export class FocusPanel {
     this.banner = new FocusBanner({
       onOpen: () => this._openFocusView(),
       onEnd: () => {
+        // The banner may show a run started in another window's panel; its
+        // state (from durable storage) is the run the user is ending.
+        const shown = this.banner?.state;
+        if (shown?.runId && this.state?.runId !== shown.runId) this.state = shown;
         void this.requestEnd().catch((err) => {
           showToast('Failed to end focus session: ' + err.message, 'error');
         });

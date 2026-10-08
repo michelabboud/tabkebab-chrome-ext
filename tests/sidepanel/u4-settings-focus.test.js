@@ -525,4 +525,39 @@ describe('U4 focus banner', () => {
     expect(panel.banner.el.hidden).toBeTrue();
     expect(panel.banner.timer).toBeNull();
   });
+
+  test('a run started in another panel shows the banner, and its End ends that run', async () => {
+    const root = dom.el('section', { id: 'view-focus' });
+    dom.el('div', { id: 'focus-container', parent: root });
+    const panel = new FocusPanel(root, { listenForRuntimeEvents: false, confirm: async () => true });
+    const anchor = dom.el('div', { className: 'view-container' });
+    anchor.before = () => {};
+    panel.mountBanner(anchor);
+    const sent = [];
+    panel.send = async (msg) => { sent.push(msg); return msg.action === 'endFocus' ? { id: 'record-2' } : null; };
+    panel._showReport = () => {};
+
+    // panel.js feeds the durable state from chrome.storage into the banner only.
+    expect(panel.state).toBeNull();
+    panel.banner.update({ status: 'active', runId: 'run-elsewhere', profileName: 'Coding', duration: 0, startedAt: Date.now(), pausedElapsed: 0 });
+    expect(panel.banner.el.hidden).toBeFalse();
+
+    panel.banner.onEnd();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual([{ action: 'endFocus', expectedRunId: 'run-elsewhere' }]);
+    expect(panel.banner.el.hidden).toBeTrue();
+
+    // Ended elsewhere: the storage change hides a stale banner.
+    panel.banner.update({ status: 'active', runId: 'run-3', profileName: 'Coding', duration: 25, startedAt: Date.now(), pausedElapsed: 0 });
+    panel.banner.update(null);
+    expect(panel.banner.el.hidden).toBeTrue();
+    expect(panel.banner.timer).toBeNull();
+  });
+
+  test('panel.js keeps the banner and Focus button in step with focusState storage changes', async () => {
+    const source = await Bun.file(new URL('../../sidepanel/panel.js', import.meta.url)).text();
+    expect(source).toContain('focusIndicatorStateFromStorageChange(changes, area)');
+    expect(source).toContain('focusPanel.banner?.update?.(runtimeState)');
+    expect(source).toContain("focusBtn.classList.toggle('focus-active', Boolean(runtimeState))");
+  });
 });

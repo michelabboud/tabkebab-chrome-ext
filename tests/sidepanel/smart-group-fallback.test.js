@@ -180,6 +180,16 @@ describe('Smart Group graceful degradation', () => {
       .toBe('available');
   });
 
+  test('probeOnDeviceAI names the output language (no Chrome console warning)', async () => {
+    const { probeOnDeviceAI } =
+      await import('../../sidepanel/components/smart-group-fallback.js');
+    const calls = [];
+    await probeOnDeviceAI({ LanguageModel: { availability: async (options) => { calls.push(options); return 'available'; } } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].expectedOutputs).toEqual([{ type: 'text', languages: ['en'] }]);
+    expect(calls[0].expectedInputs).toEqual([{ type: 'text', languages: ['en'] }]);
+  });
+
   test('offers working domain and API-key settings paths inline', async () => {
     const root = createFallbackRoot();
     const destinations = [];

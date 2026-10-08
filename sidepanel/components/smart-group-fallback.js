@@ -6,6 +6,7 @@
 // domain now, or add an API key for topic grouping.
 
 import { sendOrThrow } from '../message-client.js';
+import { CHROME_AI_LANGUAGE_OPTIONS } from '../../core/ai/provider-chrome.js';
 
 const COPY = Object.freeze({
   'zero-config:unavailable':
@@ -46,7 +47,7 @@ export async function probeOnDeviceAI(scope = globalThis) {
   try {
     let status;
     if (typeof api.availability === 'function') {
-      status = await api.availability();
+      status = await api.availability(CHROME_AI_LANGUAGE_OPTIONS);
     } else if (typeof api.capabilities === 'function') {
       const caps = await api.capabilities();
       status = caps?.available === 'readily' ? 'available' : caps?.available;

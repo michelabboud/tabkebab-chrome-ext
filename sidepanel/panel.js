@@ -13,7 +13,7 @@ import { SettingsManager } from './components/settings-manager.js';
 import { GlobalSearch } from './components/global-search.js';
 import { FocusPanel } from './components/focus-panel.js';
 import { showToast } from './components/toast.js';
-import { routePanelFocusMessage } from './focus-events.js';
+import { focusIndicatorStateFromStorageChange, routePanelFocusMessage } from './focus-events.js';
 import { sendOrThrow } from './message-client.js';
 import { startChromeAIBroker } from './chrome-ai-broker.js';
 import { FirstRunWalkthrough } from './components/first-run-walkthrough.js';
@@ -255,6 +255,17 @@ async function updateFocusBtnState() {
   } catch {}
 }
 updateFocusBtnState();
+
+// A run started, paused or ended in another window's panel only changes the
+// durable state, so keep the banner and header button in step with storage.
+// focusPanel.state is left alone: it still has to match a late focusEnded
+// message, and the Focus view re-reads the state whenever it opens.
+chrome.storage.onChanged.addListener((changes, area) => {
+  const runtimeState = focusIndicatorStateFromStorageChange(changes, area);
+  if (runtimeState === undefined) return;
+  focusPanel.banner?.update?.(runtimeState);
+  focusBtn.classList.toggle('focus-active', Boolean(runtimeState));
+});
 
 // --- Sub-navigation (Domains / Groups / Duplicates inside Tabs view) ---
 const subNavButtons = document.querySelectorAll('#view-tabs .sub-nav [role="tab"]');

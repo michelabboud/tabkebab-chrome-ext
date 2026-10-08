@@ -343,6 +343,27 @@ describe('Task 13 Chrome Prompt API signal and cleanup contract', () => {
     expect(result).toEqual({ text: 'answer', parsed: null, tokensUsed: 3 });
   });
 
+  test('availability and create both name the input/output language', async () => {
+    let availabilityOptions;
+    let createOptions;
+    installLanguageModel({
+      async availability(options) { availabilityOptions = options; return 'available'; },
+      async create(options) {
+        createOptions = options;
+        return { async prompt() { return 'ok'; }, async destroy() {} };
+      },
+    });
+
+    await ChromeAIProvider.complete(REQUEST, {});
+
+    const language = [{ type: 'text', languages: ['en'] }];
+    expect(availabilityOptions.expectedOutputs).toEqual(language);
+    expect(availabilityOptions.expectedInputs).toEqual(language);
+    expect(createOptions.expectedOutputs).toEqual(language);
+    expect(createOptions.expectedInputs).toEqual(language);
+    expect(createOptions.systemPrompt).toBe(REQUEST.systemPrompt);
+  });
+
   test('waits for session destruction before exposing a prompt abort', async () => {
     const controller = new AbortController();
     let releaseDestroy;
