@@ -22,7 +22,7 @@ import {
 } from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
-import { isRestorableUrl, sanitizeCapturedGroupTitle, sanitizeCapturedTab, sanitizeStashableTab } from './core/tab-restore.js';
+import { isRestorableUrl, sanitizeCapturedGroupTitle, sanitizeStashableTab } from './core/tab-restore.js';
 import { shouldDeleteRestoredSource } from './core/restore-outcome.js';
 import { getSettings, preserveDriveRetentionGuards, saveSettings, validateSettingsPatch } from './core/settings.js';
 import { exportToSubfolder, exportRawToSubfolder, listAllDriveFiles, deleteDriveFile, findSyncFile, readSyncFile, writeSyncFile, writeSettingsFile } from './core/drive-client.js';
@@ -886,12 +886,17 @@ async function createBookmarksUnlocked(options = {}) {
   }
 
   const results = { created: 0, destinations: [] };
+  // A stash auto-bookmark covers only the stashed tabs: it writes the stash's
+  // own Chrome folder and never touches the full-snapshot history (local list,
+  // Drive JSON, Drive HTML), which it would otherwise overwrite or crowd out.
+  // It also keeps the stash path free of network work.
+  const isStash = typeof options.stashName === 'string';
 
   // Save to Chrome bookmarks
   if (destination === 'chrome' || destination === 'all') {
     try {
       const chromeResult = await saveToChromeBookmarks(bookmarkData, dateStr, {
-        stashLabel: typeof options.stashName === 'string' ? `Stash ${timeStr}` : null,
+        stashLabel: isStash ? `Stash ${timeStr}` : null,
       });
       results.created++;
       results.destinations.push('Chrome Bookmarks');
@@ -906,7 +911,7 @@ async function createBookmarksUnlocked(options = {}) {
   }
 
   // Save to IndexedDB (via storage)
-  if (destination === 'indexeddb' || destination === 'all') {
+  if (!isStash && (destination === 'indexeddb' || destination === 'all')) {
     try {
       const existing = (await Storage.get('tabkebabBookmarks')) || [];
       existing.unshift(bookmarkData);
@@ -919,7 +924,7 @@ async function createBookmarksUnlocked(options = {}) {
   }
 
   // Save to Google Drive
-  if (destination === 'drive' || destination === 'all') {
+  if (!isStash && (destination === 'drive' || destination === 'all')) {
     try {
       const driveState = await Storage.get('driveSync');
       if (driveState?.connected) {
@@ -2269,7 +2274,7 @@ export async function handleMessage(msg, options = {}) {
       const groupIds = new Set();
       const capturedTabs = [];
       for (const t of windowTabs) {
-        const saved = sanitizeCapturedTab({ url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false });
+        const saved = sanitizeStashableTab({ url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false });
         if (!saved) continue;
         if (t.groupId !== undefined && t.groupId !== -1) {
           saved.groupId = t.groupId;
@@ -2320,7 +2325,7 @@ export async function handleMessage(msg, options = {}) {
       const stashTabs = [];
       const capturedTabs = [];
       for (const t of groupTabs) {
-        const saved = sanitizeCapturedTab({
+        const saved = sanitizeStashableTab({
           url: t.url, title: t.title, favIconUrl: t.favIconUrl,
           pinned: t.pinned || false, groupId: msg.groupId,
         });
@@ -2361,7 +2366,7 @@ export async function handleMessage(msg, options = {}) {
       const windowMap = new Map();
       const capturedTabs = [];
       for (const t of domainTabs) {
-        const saved = sanitizeCapturedTab({
+        const saved = sanitizeStashableTab({
           url: t.url, title: t.title, favIconUrl: t.favIconUrl, pinned: t.pinned || false,
         });
         if (!saved) continue;

@@ -1,7 +1,7 @@
 // core/focus.js — Focus engine: state machine, timer, badge, distraction detection, history
 
 import { Storage } from './storage.js';
-import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs } from './tabs-api.js';
+import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs, excludeIncognitoTabs } from './tabs-api.js';
 import { saveStash, restoreStashTabs, getStash, deleteStash } from './stash-db.js';
 import { sanitizeStashableTab } from './tab-restore.js';
 import { getProfileById, getAllProfiles } from './focus-profiles.js';
@@ -617,9 +617,10 @@ async function performStartFocus({
     // Capture only tabs restore can reopen. Anything else stays open: closing
     // it would lose it, and an unrestorable stash entry would keep the Focus
     // run from ever completing its end-of-session restore.
+    // Incognito tabs are never persisted: they stay open and untouched.
     const stashTabs = [];
     const capturedTabs = [];
-    for (const t of nonFocusTabs) {
+    for (const t of excludeIncognitoTabs(nonFocusTabs)) {
       const saved = sanitizeStashableTab({
         url: t.pendingUrl || t.url,
         title: t.title,
@@ -1132,7 +1133,6 @@ export async function handleDistraction({
   });
   if (!target) return null;
 
-  const windowId = target.tab.windowId;
   let navigationApplied = false;
   try {
     // validateDistractionTarget was the immediately preceding await.
@@ -1156,14 +1156,6 @@ export async function handleDistraction({
     }
   }
   if (!navigationApplied) return null;
-
-  if (windowId && await getMatchingFocusState(runId, [FocusStatus.ACTIVE])) {
-    try {
-      await chrome.sidePanel.open({ windowId });
-    } catch {
-      // Side-panel availability must not undo an already-applied navigation block.
-    }
-  }
 
   let state = await mutateFocusState({
     runId,

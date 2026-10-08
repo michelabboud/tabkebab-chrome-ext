@@ -13,6 +13,7 @@ import {
 import {
   applyDomainGroupsToChrome,
   applyManualGroupToChrome,
+  consolidateWindows,
   getWindowStats,
   moveTabToManualGroup,
 } from '../../core/grouping.js';
@@ -281,5 +282,33 @@ describe('5.6 manual groups without tabUrls', () => {
     });
     await expect(applyManualGroupToChrome('g1')).resolves.toBeUndefined();
     expect(mock.calls.tabs.group).toHaveLength(0);
+  });
+});
+
+describe('consolidateWindows closed-window count', () => {
+  test('a source window that keeps only pinned tabs is not counted as closed', async () => {
+    const tabs = [];
+    for (let i = 0; i < 35; i++) tabs.push({ id: 1000 + i, windowId: 1, url: `https://big${i}.test/` });
+    tabs.push({ id: 2001, windowId: 2, url: 'https://pinned.test/', pinned: true });
+    tabs.push({ id: 2002, windowId: 2, url: 'https://loose2.test/' });
+    tabs.push({ id: 3001, windowId: 3, url: 'https://loose3.test/' });
+    installChromeMock({ windows: [{ id: 1, focused: true }, { id: 2 }, { id: 3 }], tabs });
+    // Chrome closes a window once its last tab moves out.
+    const move = chrome.tabs.move.bind(chrome.tabs);
+    chrome.tabs.move = async (...args) => {
+      const result = await move(...args);
+      const windows = await chrome.windows.getAll();
+      const live = await chrome.tabs.query({});
+      for (const w of windows) {
+        if (!live.some((t) => t.windowId === w.id)) await chrome.windows.remove(w.id);
+      }
+      return result;
+    };
+
+    const result = await consolidateWindows();
+
+    expect(result.windowsConsolidated).toBe(2);
+    expect(result.windowsClosed).toBe(1);
+    expect((await chrome.windows.getAll()).map((w) => w.id).sort()).toEqual([1, 2]);
   });
 });

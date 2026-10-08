@@ -161,6 +161,28 @@ describe('Focus startup policy and tab actions', () => {
     expect(harness.calls.tabGroups.query).toEqual([[{}]]);
   });
 
+  test('stash never captures or closes incognito tabs', async () => {
+    const saved = [];
+    const { focus, harness } = await loadFocus({
+      windows: [{ id: 1, focused: true }, { id: 2, incognito: true }],
+      tabs: [
+        { id: 1, windowId: 1, url: 'https://focus.test/', active: true },
+        { id: 2, windowId: 1, url: 'https://blocked.test/normal', title: 'Normal' },
+        { id: 3, windowId: 2, url: 'https://blocked.test/private', title: 'Private', incognito: true },
+      ],
+    });
+
+    await focus.startFocus(
+      makeStartOptions({ tabAction: 'stash', allowedDomains: ['focus.test'] }),
+      { saveStash: async (stash) => saved.push(structuredClone(stash)) },
+    );
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].windows[0].tabs.map(({ url }) => url)).toEqual(['https://blocked.test/normal']);
+    expect(harness.calls.tabs.remove).toEqual([[[2]]]);
+    expect(harness.snapshot().tabs.map(({ id }) => id)).toEqual([1, 3]);
+  });
+
   test('group action groups only eligible focus tabs and excludes internal pages', async () => {
     const { focus, harness } = await loadFocus({
       windows: [{ id: 1, focused: true }],

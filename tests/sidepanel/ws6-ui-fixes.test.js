@@ -20,6 +20,8 @@ import { CommandBar } from '../../sidepanel/components/command-bar.js';
 import { isConfirmOpen, showConfirm } from '../../sidepanel/components/confirm-dialog.js';
 import {
   createDebounced,
+  createDeferrableRefresh,
+  isEditingElement,
   isPlainShortcutAllowed,
   resolveTabsChangedRefreshKey,
 } from '../../sidepanel/panel-helpers.js';
@@ -249,7 +251,47 @@ describe('6.1 duplicate and group actions act only on live matching tabs', () =>
 
     const panel = await Bun.file(new URL('../../sidepanel/panel.js', import.meta.url)).text();
     expect(panel).toMatch(/message\.type === 'tabsChanged'\)\s*{\s*scheduleTabsChangedRefresh\(\);/);
-    expect(panel).toContain('createDebounced(refreshVisibleTabViews, 150)');
+    expect(panel).toContain('createDeferrableRefresh(refreshVisibleTabViews');
+    expect(panel).toContain('createDebounced(deferrableTabsChangedRefresh, 150)');
+  });
+
+  test('tabsChanged refresh is deferred while typing or dragging and runs once afterwards', () => {
+    let busy = true;
+    let runs = 0;
+    const refresh = createDeferrableRefresh(() => { runs += 1; }, { isBusy: () => busy });
+
+    refresh();
+    refresh();
+    expect(runs).toBe(0);
+    expect(refresh.isPending()).toBeTrue();
+
+    refresh.resume();
+    expect(runs).toBe(0);
+
+    busy = false;
+    refresh.resume();
+    expect(runs).toBe(1);
+    refresh.resume();
+    expect(runs).toBe(1);
+
+    refresh();
+    expect(runs).toBe(2);
+  });
+
+  test('editing elements are detected for the refresh guard', () => {
+    expect(isEditingElement({ tagName: 'INPUT' })).toBeTrue();
+    expect(isEditingElement({ tagName: 'TEXTAREA' })).toBeTrue();
+    expect(isEditingElement({ tagName: 'SELECT' })).toBeTrue();
+    expect(isEditingElement({ tagName: 'DIV', isContentEditable: true })).toBeTrue();
+    expect(isEditingElement({ tagName: 'BUTTON' })).toBeFalse();
+    expect(isEditingElement(null)).toBeFalse();
+  });
+
+  test('panel wires the refresh guard to focus and drag lifecycle events', async () => {
+    const panel = await Bun.file(new URL('../../sidepanel/panel.js', import.meta.url)).text();
+    expect(panel).toMatch(/addEventListener\('dragstart'/);
+    expect(panel).toMatch(/addEventListener\('dragend'[\s\S]*?deferrableTabsChangedRefresh\.resume\(\)/);
+    expect(panel).toMatch(/addEventListener\('focusout'[\s\S]*?deferrableTabsChangedRefresh\.resume\(\)/);
   });
 });
 

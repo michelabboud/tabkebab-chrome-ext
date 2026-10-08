@@ -86,6 +86,13 @@ describe('WS7 OpenAI request bodies', () => {
     }
   });
 
+  test('-chat variants of gpt-5+ are not reasoning models', () => {
+    for (const model of ['gpt-5-chat-latest', 'gpt-5-chat', 'gpt-5.1-chat-latest', 'openai/gpt-6-chat-latest']) {
+      expect(isOpenAIReasoningModel(model)).toBeFalse();
+      expect(openAIReasoningEffort(model)).toBeNull();
+    }
+  });
+
   test('reasoning effort is low except for non-reasoning and -pro models', () => {
     expect(openAIReasoningEffort('gpt-6-luna')).toBe('low');
     expect(openAIReasoningEffort('o3')).toBe('low');

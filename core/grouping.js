@@ -585,9 +585,11 @@ export async function consolidateWindows(onProgress) {
   report(Phase.SNAPSHOT, 'Re-grouping after consolidation...');
   const pipelineResult = await applyDomainGroupsToChrome(onProgress);
 
-  // Count how many source windows were closed
-  const postSnapshot = await takeSnapshot();
-  const survivingIds = new Set(postSnapshot.tabsByWindow.keys());
+  // Count how many source windows were closed. Ask Chrome for the live
+  // windows: a snapshot omits pinned tabs, so a window that kept only pinned
+  // tabs would otherwise look closed.
+  const liveWindows = await chrome.windows.getAll();
+  const survivingIds = new Set(liveWindows.map(w => w.id));
   const windowsClosed = sources.filter(s => !survivingIds.has(s.windowId)).length;
 
   return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, tabsRedistributed, groupsMoved, pipelineResult };

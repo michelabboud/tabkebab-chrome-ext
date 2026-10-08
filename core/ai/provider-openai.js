@@ -49,11 +49,13 @@ function normalizeOpenAIModelId(model) {
 /**
  * o-series and gpt-5+ (gpt-5, gpt-5.x, gpt-6, gpt-6.x, ...) reasoning models
  * reject `max_tokens` and any non-default `temperature` on Chat Completions.
+ * The `-chat` variants (gpt-5-chat-latest, ...) are non-reasoning chat models.
  */
 export function isOpenAIReasoningModel(model) {
   if (typeof model !== 'string') return false;
   const id = normalizeOpenAIModelId(model);
   if (/^o\d/.test(id)) return true;
+  if (/-chat(?:$|-)/.test(id)) return false;
   const match = /^gpt-(\d+)(?=$|[.-])/.exec(id);
   return Boolean(match) && Number(match[1]) >= 5;
 }

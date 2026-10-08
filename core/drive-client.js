@@ -172,7 +172,14 @@ async function driveRequest(url, options = {}, interactive = false) {
     if (RETRYABLE_STATUSES.has(resp.status)) {
       const delayMs = retryDelayMs(resp, attempt);
       if (delayMs === null) {
-        throw driveError(resp.status, ' (Retry-After exceeds the 60s limit)');
+        const error = driveError(resp.status, ' (Retry-After exceeds the 60s limit)');
+        if (resp.status !== 429 && !idempotent) {
+          // The create may still have been applied: let the caller look it
+          // up, but never retry it (retryDelayMs null) before Retry-After.
+          error.createMayHaveSucceeded = true;
+          error.retryDelayMs = null;
+        }
+        throw error;
       }
       if (resp.status !== 429 && !idempotent) {
         const error = driveError(resp.status);
@@ -204,6 +211,7 @@ async function createOrRecover(lookup, create) {
       if (!error?.createMayHaveSucceeded || attempt >= MAX_RETRIES) throw error;
       const existing = await lookup();
       if (existing) return { file: existing, recovered: true };
+      if (error.retryDelayMs === null) throw error;
       console.warn(`[TabKebab] Drive create failed (${error.status}), retry ${attempt + 1}/${MAX_RETRIES}`);
       await sleep(error.retryDelayMs ?? 0);
     }

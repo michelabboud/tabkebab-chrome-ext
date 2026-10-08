@@ -53,3 +53,35 @@ export function resolveTabsChangedRefreshKey({ visibleView, activeSubtab }) {
   }
   return null;
 }
+
+/** True when `el` is a form control or contenteditable the user may be typing in. */
+export function isEditingElement(el) {
+  const tag = el?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  return el?.isContentEditable === true;
+}
+
+/**
+ * Wrap an automatic refresh so it never re-renders under the user. While
+ * `isBusy()` is true (typing in the view, a drag in progress) the call is
+ * remembered instead of run; `.resume()` runs one deferred refresh once the
+ * view is idle again.
+ */
+export function createDeferrableRefresh(run, { isBusy }) {
+  let pending = false;
+  const request = () => {
+    if (isBusy()) {
+      pending = true;
+      return;
+    }
+    pending = false;
+    run();
+  };
+  request.resume = () => {
+    if (!pending || isBusy()) return;
+    pending = false;
+    run();
+  };
+  request.isPending = () => pending;
+  return request;
+}

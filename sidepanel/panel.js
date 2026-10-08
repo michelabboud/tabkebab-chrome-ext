@@ -20,6 +20,8 @@ import { FirstRunWalkthrough } from './components/first-run-walkthrough.js';
 import { isConfirmOpen } from './components/confirm-dialog.js';
 import {
   createDebounced,
+  createDeferrableRefresh,
+  isEditingElement,
   isPlainShortcutAllowed,
   resolveTabsChangedRefreshKey,
 } from './panel-helpers.js';
@@ -291,7 +293,28 @@ function refreshVisibleTabViews() {
   if (key) void refreshController(controllers[key], key);
   void refreshGlobalStats();
 }
-const scheduleTabsChangedRefresh = createDebounced(refreshVisibleTabViews, 150);
+// Re-rendering a view wipes in-progress input (manual group name/URL, search
+// boxes) and cancels drags, so automatic refreshes wait until the user is done.
+let tabDragActive = false;
+function isVisibleViewBusy() {
+  if (tabDragActive) return true;
+  const visibleViewEl = [...views].find(v => !v.classList.contains('hidden'));
+  const active = document.activeElement;
+  return Boolean(visibleViewEl && active && visibleViewEl.contains(active) && isEditingElement(active));
+}
+const deferrableTabsChangedRefresh = createDeferrableRefresh(refreshVisibleTabViews, {
+  isBusy: isVisibleViewBusy,
+});
+const scheduleTabsChangedRefresh = createDebounced(deferrableTabsChangedRefresh, 150);
+document.addEventListener('dragstart', () => { tabDragActive = true; }, true);
+document.addEventListener('dragend', () => {
+  tabDragActive = false;
+  deferrableTabsChangedRefresh.resume();
+}, true);
+// focusout fires before focus moves on; check once the new activeElement is set.
+document.addEventListener('focusout', () => {
+  setTimeout(() => deferrableTabsChangedRefresh.resume(), 0);
+}, true);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'tabsChanged') {

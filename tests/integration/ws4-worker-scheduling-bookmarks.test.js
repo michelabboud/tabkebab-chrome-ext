@@ -343,6 +343,36 @@ describe('auto-bookmark on stash bookmarks exactly the captured tabs (4.3)', () 
     expect(bookmarkUrls(harness)).not.toContain('https://keep.test/');
   });
 
+  test('a stash auto-bookmark writes only Chrome bookmarks, never the local history or Drive', async () => {
+    const harness = installChromeMock({
+      local: {
+        tabkebabSettings: { ...autoBookmarkSettings, bookmarkDestination: 'all', exportHtmlBookmarkToDrive: true },
+        driveSync: { connected: true },
+      },
+      windows: [{ id: 1 }, { id: 2, focused: true }],
+      tabs: [
+        { id: 1, windowId: 1, url: 'https://stash-a.test/', title: 'A' },
+        { id: 3, windowId: 2, url: 'https://keep.test/', title: 'Keep', active: true },
+      ],
+    });
+    const originalFetch = globalThis.fetch;
+    const fetched = [];
+    globalThis.fetch = async (url) => {
+      fetched.push(String(url));
+      throw new Error('network disabled in test');
+    };
+    try {
+      const worker = await freshWorker('stash-bookmark-chrome-only');
+      const result = await worker.handleMessage({ action: 'stashWindow', windowId: 1 });
+      expect(result.success).toBeTrue();
+      expect(bookmarkUrls(harness)).toEqual(['https://stash-a.test/']);
+      expect(harness.snapshot().local.tabkebabBookmarks).toBeUndefined();
+      expect(fetched).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('a bookmark failure never blocks the stash', async () => {
     installChromeMock({
       local: { tabkebabSettings: autoBookmarkSettings },
@@ -537,5 +567,36 @@ describe('side panel open requires a user gesture (4.10)', () => {
   test('the worker never calls chrome.sidePanel.open outside a gesture handler', () => {
     const source = readFileSync(new URL('../../service-worker.js', import.meta.url), 'utf8');
     expect(source).not.toMatch(/chrome\.sidePanel\.open\(/);
+  });
+
+  test('Focus distraction handling never calls chrome.sidePanel.open (no gesture there)', () => {
+    const source = readFileSync(new URL('../../core/focus.js', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/chrome\.sidePanel\.open\(/);
+  });
+});
+
+describe('stash names count only the tabs actually stored', () => {
+  test('stashWindow and stashGroup names exclude non-restorable tabs', async () => {
+    installChromeMock({
+      windows: [{ id: 1 }, { id: 2, focused: true }],
+      groups: [{ id: 10, windowId: 2, title: 'Research' }],
+      tabs: [
+        { id: 1, windowId: 1, url: 'https://a.test/', title: 'A' },
+        { id: 2, windowId: 1, url: 'chrome://settings/', title: 'Settings' },
+        { id: 3, windowId: 1, url: 'https://b.test/', title: 'B' },
+        { id: 4, windowId: 2, url: 'https://g.test/', title: 'G', groupId: 10 },
+        { id: 5, windowId: 2, url: 'chrome://history/', title: 'H', groupId: 10 },
+        { id: 6, windowId: 2, url: 'https://keep.test/', title: 'Keep', active: true },
+      ],
+    });
+    const worker = await freshWorker('stash-names');
+
+    const windowResult = await worker.handleMessage({ action: 'stashWindow', windowId: 1, windowNumber: 1 });
+    expect(windowResult.stash.name).toBe('Window 1 (2 tabs)');
+    expect(windowResult.stash.tabCount).toBe(2);
+
+    const groupResult = await worker.handleMessage({ action: 'stashGroup', groupId: 10 });
+    expect(groupResult.stash.name).toBe('Research [group] (1 tabs)');
+    expect(groupResult.stash.tabCount).toBe(1);
   });
 });

@@ -176,10 +176,12 @@ function quoteTitle(tab) {
  * shown, since the model reads tab titles and is therefore prompt-injectable.
  */
 export function buildNLConfirmation(action, tabs, details = {}) {
-  const list = Array.isArray(tabs) ? tabs : [];
+  const all = Array.isArray(tabs) ? tabs : [];
+  const pinned = all.filter((tab) => tab?.pinned === true).length;
+  // Grouping skips pinned tabs (Chrome would unpin them), so preview only what moves.
+  const list = action === 'group' ? all.filter((tab) => tab?.pinned !== true) : all;
   const count = list.length;
   const windows = windowCount(list);
-  const pinned = list.filter((tab) => tab?.pinned === true).length;
   const tabWord = count === 1 ? 'tab' : 'tabs';
 
   let verb;
@@ -190,7 +192,7 @@ export function buildNLConfirmation(action, tabs, details = {}) {
 
   const scope = [];
   if (windows > 1) scope.push(`across ${windows} windows`);
-  if (pinned > 0) scope.push(`including ${pinned} pinned`);
+  if (pinned > 0) scope.push(action === 'group' ? `skipping ${pinned} pinned` : `including ${pinned} pinned`);
   if (action === 'group' && windows > 1) scope.push('one group per window');
 
   const sample = list.slice(0, 3).map(quoteTitle).join(', ');
@@ -210,18 +212,21 @@ export async function executeNLAction(parsed, tabs) {
     : [];
 
   switch (parsed.action) {
-    case 'close':
-      await closeTabs(tabIds);
-      return { executed: true, message: `Closed ${tabIds.length} tab(s)` };
+    case 'close': {
+      const closed = await closeTabs(tabIds);
+      return { executed: true, message: `Closed ${closed} tab(s)` };
+    }
 
     case 'group': {
       const title = sanitizeGroupName(parsed.groupName);
       const color = sanitizeGroupColor(parsed.color);
       if (tabIds.length < 1) return { error: 'No tabs to group' };
+      // Grouping a pinned tab makes Chrome unpin it, so pinned tabs are left alone.
+      const groupable = tabs.filter((tab) => Number.isInteger(tab?.id) && tab.pinned !== true);
+      if (groupable.length < 1) return { error: 'Pinned tabs cannot be grouped; no unpinned tabs matched' };
       // chrome.tabs.group pulls every tab into one window; group per window instead.
       const byWindow = new Map();
-      for (const tab of tabs) {
-        if (!Number.isInteger(tab?.id)) continue;
+      for (const tab of groupable) {
         const key = tab.windowId ?? null;
         if (!byWindow.has(key)) byWindow.set(key, []);
         byWindow.get(key).push(tab.id);
@@ -230,7 +235,7 @@ export async function executeNLAction(parsed, tabs) {
         await createNativeGroup(ids, title, color);
       }
       const suffix = byWindow.size > 1 ? ` in ${byWindow.size} windows` : '';
-      return { executed: true, message: `Grouped ${tabIds.length} tab(s) as "${title}"${suffix}` };
+      return { executed: true, message: `Grouped ${groupable.length} tab(s) as "${title}"${suffix}` };
     }
 
     case 'focus':

@@ -319,6 +319,43 @@ describe('3.2 create POSTs are not blindly retried', () => {
     await expect(findSyncFile()).resolves.toMatchObject({ id: 'a-same-time' });
   });
 
+  test('a create 5xx with Retry-After over 60s is still recovered by lookup', async () => {
+    installChromeMock({ local: { driveProfileName: 'Profile' } });
+    let created = false;
+    installFetch({
+      handle: ({ url, method }) => {
+        const name = (url.searchParams.get('q') || '').match(/name='([^']+)'/)?.[1];
+        if (method === 'GET' && name === 'sessions') {
+          return jsonResponse({ files: created ? [{ id: 'sessions-created', name }] : [] });
+        }
+        if (method === 'POST' && url.pathname.endsWith('/files')) {
+          created = true;
+          return jsonResponse({}, 503, { 'Retry-After': '3600' });
+        }
+        return null;
+      },
+    });
+    const { getSessionsFolderId } = await freshDriveClient('folder-recover-long-retry');
+    await expect(getSessionsFolderId()).resolves.toBe('sessions-created');
+    expect(posts()).toHaveLength(1);
+  });
+
+  test('a create 5xx with Retry-After over 60s is not retried when the lookup finds nothing', async () => {
+    installChromeMock({ local: { driveProfileName: 'Profile' } });
+    installFetch({
+      missingFolders: new Set(['sessions']),
+      handle: ({ url, method }) => {
+        if (method === 'POST' && url.pathname.endsWith('/files')) {
+          return jsonResponse({}, 503, { 'Retry-After': '3600' });
+        }
+        return null;
+      },
+    });
+    const { getSessionsFolderId } = await freshDriveClient('folder-long-retry-absent');
+    await expect(getSessionsFolderId()).rejects.toThrow(/503.*60s/);
+    expect(posts()).toHaveLength(1);
+  });
+
   test('idempotent GETs are still retried on 5xx', async () => {
     installChromeMock({ local: { driveProfileName: 'Profile' } });
     let failures = 0;

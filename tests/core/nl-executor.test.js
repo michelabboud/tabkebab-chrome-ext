@@ -90,6 +90,49 @@ describe('executeNLAction live-tab authority', () => {
   });
 });
 
+describe('executeNLAction pinned tabs and close counts', () => {
+  test('group leaves pinned tabs out and reports only grouped tabs', async () => {
+    const pinnedTab = { id: 21, windowId: 1, url: 'https://github.com/pinned', title: 'Pinned', pinned: true };
+    const plainTab = { id: 22, windowId: 1, url: 'https://github.com/plain', title: 'Plain' };
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [pinnedTab, plainTab] });
+
+    const result = await executeNLAction({ action: 'group', groupName: 'Code' }, [pinnedTab, plainTab]);
+
+    expect(result).toEqual({ executed: true, message: 'Grouped 1 tab(s) as "Code"' });
+    expect(harness.calls.tabs.group.map(([options]) => options.tabIds)).toEqual([[22]]);
+    expect(harness.snapshot().tabs.find(({ id }) => id === 21).pinned).toBeTrue();
+  });
+
+  test('group with only pinned matches returns an error and groups nothing', async () => {
+    const pinnedTab = { id: 21, windowId: 1, url: 'https://github.com/pinned', title: 'Pinned', pinned: true };
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [pinnedTab] });
+
+    const result = await executeNLAction({ action: 'group', groupName: 'Code' }, [pinnedTab]);
+
+    expect(result.error).toContain('Pinned tabs cannot be grouped');
+    expect(harness.calls.tabs.group).toEqual([]);
+  });
+
+  test('group confirmation counts only unpinned tabs', async () => {
+    const { buildNLConfirmation } = await import('../../core/nl-executor.js');
+    const text = buildNLConfirmation('group', [
+      { id: 1, windowId: 1, title: 'A', pinned: true },
+      { id: 2, windowId: 1, title: 'B' },
+    ], { groupName: 'Code' });
+    expect(text).toContain('Group 1 tab as "Code"');
+    expect(text).toContain('skipping 1 pinned');
+  });
+
+  test('close reports the number of tabs actually closed', async () => {
+    const live = { id: 31, windowId: 1, url: 'https://github.com/live', title: 'Live' };
+    installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [live] });
+
+    const result = await executeNLAction({ action: 'close' }, [live, { id: 99, windowId: 1, url: 'https://github.com/gone' }]);
+
+    expect(result).toEqual({ executed: true, message: 'Closed 1 tab(s)' });
+  });
+});
+
 describe('filterTabs domain identity', () => {
   test('matches an exact host and true subdomains only', () => {
     const tabs = [
