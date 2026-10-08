@@ -3,6 +3,26 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { sendOrThrow } from '../message-client.js';
+import { makeKeyboardActivatable, setExpanded } from './keyboard-activate.js';
+
+/**
+ * Live member tab ids of a Chrome tab group, read at action time so tabs
+ * added to the group since the last render are included and tabs that left
+ * (or closed) are not touched.
+ */
+export async function queryLiveGroupTabIds(groupId) {
+  const tabs = await chrome.tabs.query({ groupId });
+  return (Array.isArray(tabs) ? tabs : [])
+    .filter((tab) => tab.groupId === groupId)
+    .map((tab) => tab.id);
+}
+
+function closedCount(result, fallback) {
+  for (const key of ['closed', 'closedCount']) {
+    if (Number.isFinite(result?.[key])) return result[key];
+  }
+  return fallback;
+}
 
 export class GroupEditor {
   constructor(rootEl) {
@@ -41,7 +61,9 @@ export class GroupEditor {
         contentEl.hidden = collapsed;
         if (chevron) chevron.textContent = collapsed ? '\u25b6' : '\u25bc';
         headerEl.classList.toggle('collapsed', collapsed);
+        setExpanded(headerEl, !collapsed);
       });
+      makeKeyboardActivatable(headerEl, { expanded: !contentEl.hidden });
     }
   }
 
@@ -690,8 +712,14 @@ export class GroupEditor {
   }
 
   async ungroupChromeGroup(group) {
-    const tabIds = group.tabs.map((tab) => tab.id);
+    let tabIds;
     try {
+      tabIds = await queryLiveGroupTabIds(group.id);
+      if (tabIds.length === 0) {
+        this.notify(`"${group.title}" no longer has any tabs`, 'info');
+        await this.refreshCommittedState('Group already empty');
+        return false;
+      }
       await this.send({ action: 'ungroupTabs', tabIds });
     } catch (err) {
       this.notify('Failed to ungroup tabs: ' + err.message, 'error');
@@ -704,14 +732,21 @@ export class GroupEditor {
   }
 
   async closeChromeGroup(group) {
-    const tabIds = group.tabs.map((tab) => tab.id);
+    let count;
     try {
-      await this.send({ action: 'closeTabs', tabIds });
+      const tabIds = await queryLiveGroupTabIds(group.id);
+      if (tabIds.length === 0) {
+        this.notify(`"${group.title}" no longer has any tabs`, 'info');
+        await this.refreshCommittedState('Group already empty');
+        return false;
+      }
+      const result = await this.send({ action: 'closeTabs', tabIds });
+      count = closedCount(result, tabIds.length);
     } catch (err) {
       this.notify('Failed to close tabs: ' + err.message, 'error');
       return false;
     }
-    const message = `Closed ${tabIds.length} tabs from "${group.title}"`;
+    const message = `Closed ${count} tabs from "${group.title}"`;
     const refreshed = await this.refreshCommittedState(message);
     if (refreshed) this.notify(message, 'success');
     return true;

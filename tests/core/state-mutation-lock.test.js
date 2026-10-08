@@ -827,6 +827,11 @@ describe('panel mutation and checked-message boundaries', () => {
       if (methods.some((method) => typeof GroupEditor.prototype[method] !== 'function')) return;
 
       installChromeMock({
+        // Live group membership is re-read at action time (WS6.1).
+        tabs: [
+          { id: 10, groupId: 4, url: 'https://a.test/' },
+          { id: 11, groupId: 4, url: 'https://b.test/' },
+        ],
         runtimeHandler: async ({ action }) => {
           if (action === 'discardTabs') return { discarded: 2, skipped: 1 };
           if (action === 'stashGroup') return { stash: { tabCount: 3 } };

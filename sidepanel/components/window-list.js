@@ -3,6 +3,7 @@
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
 import { sendOrThrow } from '../message-client.js';
+import { makeKeyboardActivatable, setExpanded } from './keyboard-activate.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -114,6 +115,9 @@ export class WindowList {
     }
 
     const data = await this.send({ action: 'getWindowStats' });
+    if (!data || !Array.isArray(data.windows)) {
+      throw new Error('No window data received from background');
+    }
     this.renderWindows(data.windows);
   }
 
@@ -245,7 +249,7 @@ export class WindowList {
       try {
         const result = await this.send({ action: 'stashWindow', windowId: win.windowId, windowNumber: win.windowNumber });
         if (!await this.refreshCommittedState('Window tabs were stashed')) return;
-        showToast(`Stashed ${result.stash.tabCount} tabs from Window ${win.windowNumber}`, 'success');
+        showToast(`Stashed ${result?.stash?.tabCount ?? 0} tabs from Window ${win.windowNumber}`, 'success');
       } catch (err) {
         showToast('Stash failed: ' + err.message, 'error');
       } finally {
@@ -266,7 +270,7 @@ export class WindowList {
       try {
         const result = await this.send({ action: 'discardTabs', scope: 'window', windowId: win.windowId });
         if (!await this.refreshCommittedState('Window tabs were kebabed')) return;
-        showToast(`Kebab'd ${result.discarded} tabs (${result.skipped} skipped)`, 'success');
+        showToast(`Kebab'd ${result?.discarded ?? 0} tabs (${result?.skipped ?? 0} skipped)`, 'success');
       } catch (err) {
         showToast('Kebab failed: ' + err.message, 'error');
       } finally {
@@ -316,11 +320,17 @@ export class WindowList {
         this.collapsed.delete(key);
         header.classList.remove('collapsed');
         body.classList.remove('collapsed');
+        setExpanded(header, true);
       } else {
         this.collapsed.add(key);
         header.classList.add('collapsed');
         body.classList.add('collapsed');
+        setExpanded(header, false);
       }
+    });
+    makeKeyboardActivatable(header, {
+      expanded: !isCollapsed,
+      label: `Window ${win.windowNumber}, ${win.tabCount} tab${win.tabCount !== 1 ? 's' : ''}`,
     });
 
     // Body
@@ -458,12 +468,15 @@ export class WindowList {
         this.collapsed.delete(key);
         sectionHeader.classList.remove('collapsed');
         sectionBody.classList.remove('collapsed');
+        setExpanded(sectionHeader, true);
       } else {
         this.collapsed.add(key);
         sectionHeader.classList.add('collapsed');
         sectionBody.classList.add('collapsed');
+        setExpanded(sectionHeader, false);
       }
     });
+    makeKeyboardActivatable(sectionHeader, { expanded: !isCollapsed });
 
     section.appendChild(sectionHeader);
     section.appendChild(sectionBody);
@@ -514,12 +527,15 @@ export class WindowList {
         this.collapsed.delete(key);
         sectionHeader.classList.remove('collapsed');
         sectionBody.classList.remove('collapsed');
+        setExpanded(sectionHeader, true);
       } else {
         this.collapsed.add(key);
         sectionHeader.classList.add('collapsed');
         sectionBody.classList.add('collapsed');
+        setExpanded(sectionHeader, false);
       }
     });
+    makeKeyboardActivatable(sectionHeader, { expanded: !isCollapsed });
 
     section.appendChild(sectionHeader);
     section.appendChild(sectionBody);
@@ -553,6 +569,7 @@ export class WindowList {
         showToast('Failed to focus tab: ' + err.message, 'error');
       }
     });
+    makeKeyboardActivatable(item, { label: `Switch to ${title.textContent}` });
 
     return item;
   }

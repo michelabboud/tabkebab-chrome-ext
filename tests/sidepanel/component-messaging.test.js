@@ -27,6 +27,7 @@ const AUDITED_SIDE_PANEL_FILES = [
   'sidepanel/components/focus-panel.js',
   'sidepanel/components/global-search.js',
   'sidepanel/components/group-editor.js',
+  'sidepanel/components/keyboard-activate.js',
   'sidepanel/components/session-manager.js',
   'sidepanel/components/settings-manager.js',
   'sidepanel/components/smart-group-fallback.js',
@@ -382,6 +383,11 @@ describe('checked component messaging boundary', () => {
     const calls = [];
     try {
       installChromeMock({
+        // Selections are re-validated against live tabs at action time (WS6.1).
+        tabs: [
+          { id: 1, url: 'https://duplicate.test/' },
+          { id: 2, url: 'https://duplicate.test/' },
+        ],
         runtimeHandler: async (message) => {
           calls.push(message);
           if (message.action === 'closeTabs') return { success: true };

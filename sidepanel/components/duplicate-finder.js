@@ -1,8 +1,88 @@
 // duplicate-finder.js — Scan and close duplicate tabs + empty pages
 
 import { showToast } from './toast.js';
-import { collectUndoUrls } from '../../core/duplicates.js';
+import { normalizeUrl } from '../../core/duplicates.js';
 import { sendOrThrow } from '../message-client.js';
+
+// Must stay in sync with findEmptyPages() in core/duplicates.js.
+const EMPTY_PAGE_URLS = new Set(['', 'about:blank', 'edge://newtab/']);
+
+function isStillEmptyPage(tab) {
+  if (!tab || tab.active) return false;
+  if (!EMPTY_PAGE_URLS.has(tab.url || '')) return false;
+  // A blank tab that has started navigating is about to have content.
+  if (tab.pendingUrl && !EMPTY_PAGE_URLS.has(tab.pendingUrl)) return false;
+  return true;
+}
+
+/**
+ * Re-validate the empty pages captured at scan time against live tabs.
+ * Returns the ids that still exist and are still blank, inactive pages.
+ */
+export function selectLiveEmptyPageIds(scannedEmptyPages, liveTabs) {
+  const liveById = new Map((liveTabs || []).map((tab) => [tab.id, tab]));
+  const ids = [];
+  for (const page of scannedEmptyPages || []) {
+    if (isStillEmptyPage(liveById.get(page?.id))) ids.push(page.id);
+  }
+  return ids;
+}
+
+/**
+ * Re-validate selected duplicate closes against live tabs.
+ *
+ * A selected tab is closed only if it still exists and its URL still
+ * normalizes to the duplicate group's URL. Each group keeps at least one
+ * live copy open, so if the kept tab was closed or navigated away the last
+ * remaining copy is never closed.
+ *
+ * @returns {{ tabIds: number[], urls: string[] }} ids to close + live URLs for undo
+ */
+export function selectLiveDuplicateCloses(duplicateGroups, selectedIds, liveTabs) {
+  const selected = new Set(selectedIds || []);
+  const liveTabsList = liveTabs || [];
+  const liveById = new Map(liveTabsList.map((tab) => [tab.id, tab]));
+  const tabIds = [];
+  const urls = [];
+
+  for (const group of duplicateGroups || []) {
+    if (!Array.isArray(group?.tabs)) continue;
+    const key = group.url;
+    const candidates = [];
+    for (const tab of group.tabs) {
+      if (!selected.has(tab?.id)) continue;
+      const live = liveById.get(tab.id);
+      if (live && normalizeUrl(live.url || '') === key) candidates.push(live);
+    }
+    if (candidates.length === 0) continue;
+
+    const candidateIds = new Set(candidates.map((tab) => tab.id));
+    const survivors = liveTabsList.filter(
+      (tab) => !candidateIds.has(tab.id) && normalizeUrl(tab.url || '') === key,
+    );
+    // Never close every remaining copy of a page.
+    if (survivors.length === 0) candidates.shift();
+
+    for (const tab of candidates) {
+      tabIds.push(tab.id);
+      urls.push(tab.url);
+    }
+  }
+  return { tabIds, urls };
+}
+
+/** Prefer the background's real closed count when it reports one. */
+function closedCount(result, fallback) {
+  for (const key of ['closed', 'closedCount']) {
+    if (Number.isFinite(result?.[key])) return result[key];
+  }
+  return fallback;
+}
+
+async function queryLiveTabs() {
+  const tabs = await chrome.tabs.query({});
+  return Array.isArray(tabs) ? tabs : [];
+}
 
 export class DuplicateFinder {
   constructor(rootEl) {
@@ -65,10 +145,23 @@ export class DuplicateFinder {
       return;
     }
 
-    const tabIds = this.emptyPages.map(t => t.id);
-    const count = tabIds.length;
+    // The scan may be stale: a "blank" tab may have loaded content since.
+    let tabIds;
     try {
-      await this.send({ action: 'closeTabs', tabIds });
+      tabIds = selectLiveEmptyPageIds(this.emptyPages, await queryLiveTabs());
+    } catch (err) {
+      showToast('Failed to check empty pages: ' + err.message, 'error');
+      return;
+    }
+    if (tabIds.length === 0) {
+      showToast('Those pages are no longer empty — nothing closed', 'info');
+      await this.scan().catch(() => {});
+      return;
+    }
+    let count;
+    try {
+      const result = await this.send({ action: 'closeTabs', tabIds });
+      count = closedCount(result, tabIds.length);
     } catch (err) {
       showToast('Failed to close empty pages: ' + err.message, 'error');
       return;
@@ -93,6 +186,12 @@ export class DuplicateFinder {
   }
 
   render() {
+    // Preserve the user's checkbox choices across re-renders (tabsChanged
+    // refreshes re-scan while the user may be adjusting the selection).
+    const previousChecks = new Map();
+    for (const cb of this.listEl.querySelectorAll?.('input[type="checkbox"]') || []) {
+      previousChecks.set(String(cb.dataset.tabId), cb.checked);
+    }
     this.listEl.innerHTML = '';
 
     if (!this.duplicates || this.duplicates.length === 0) {
@@ -122,7 +221,9 @@ export class DuplicateFinder {
         checkbox.type = 'checkbox';
         checkbox.dataset.tabId = tab.id;
         // First tab is the one to keep (unchecked), the rest are checked for closing
-        checkbox.checked = index > 0;
+        checkbox.checked = previousChecks.has(String(tab.id))
+          ? previousChecks.get(String(tab.id))
+          : index > 0;
 
         const label = document.createElement('label');
         const titleSpan = document.createElement('span');
@@ -147,7 +248,13 @@ export class DuplicateFinder {
         closeBtn.style.fontSize = '11px';
         closeBtn.addEventListener('click', async () => {
           try {
-            await this.send({ action: 'closeTabs', tabIds: [tab.id] });
+            const live = selectLiveDuplicateCloses([group], [tab.id], await queryLiveTabs());
+            if (live.tabIds.length === 0) {
+              showToast('Tab is no longer a duplicate — nothing closed', 'info');
+              await this.scan().catch(() => {});
+              return;
+            }
+            await this.send({ action: 'closeTabs', tabIds: live.tabIds });
           } catch (err) {
             showToast('Failed to close tab: ' + err.message, 'error');
             return;
@@ -172,29 +279,47 @@ export class DuplicateFinder {
   async closeAllDuplicates() {
     // Close all checked tabs
     const checkboxes = this.listEl.querySelectorAll('input[type="checkbox"]:checked');
-    const tabIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.tabId, 10));
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.tabId, 10));
 
-    if (tabIds.length === 0) {
+    if (selectedIds.length === 0) {
       showToast('No duplicates selected', 'error');
       return;
     }
 
+    // Re-validate against live tabs: ids captured at render time may now be
+    // closed, navigated elsewhere, or the last remaining copy of the page.
+    let live;
+    try {
+      live = selectLiveDuplicateCloses(this.duplicates, selectedIds, await queryLiveTabs());
+    } catch (err) {
+      showToast('Failed to check duplicates: ' + err.message, 'error');
+      return;
+    }
+    const tabIds = live.tabIds;
+    if (tabIds.length === 0) {
+      showToast('Selected tabs are no longer duplicates — nothing closed', 'info');
+      await this.scan().catch(() => {});
+      return;
+    }
+
     // Capture URLs before closing so undo can reopen them
-    const closedUrls = Object.freeze(collectUndoUrls(this.duplicates, tabIds));
+    const closedUrls = Object.freeze([...live.urls]);
     const undoAction = {
       label: 'Undo',
       callback: async () => {
         try {
           const result = await this.send({ action: 'reopenTabs', urls: closedUrls });
-          showToast(`Reopened ${result.created} tab(s)`, 'success');
+          showToast(`Reopened ${result?.created ?? 0} tab(s)`, 'success');
         } catch (err) {
           showToast('Undo failed: ' + err.message, 'error');
         }
       },
     };
 
+    let count;
     try {
-      await this.send({ action: 'closeTabs', tabIds });
+      const result = await this.send({ action: 'closeTabs', tabIds });
+      count = closedCount(result, tabIds.length);
     } catch (err) {
       showToast('Failed to close duplicates: ' + err.message, 'error');
       return;
@@ -211,7 +336,7 @@ export class DuplicateFinder {
       return;
     }
     try {
-      showToast(`Closed ${tabIds.length} duplicate tab(s)`, 'success', 8000, undoAction);
+      showToast(`Closed ${count} duplicate tab(s)`, 'success', 8000, undoAction);
     } catch (err) {
       showToast('Failed to show duplicate close result: ' + err.message, 'error');
     }

@@ -17,7 +17,10 @@ export class SessionManager {
     this.navigate = navigate;
     this.savedListEl = rootEl.querySelector('#session-list-saved');
     this.autoListEl = rootEl.querySelector('#session-list-auto');
-    this.activeRestoreId = null;
+    // Restore ids currently in flight (id → count, since "Restore" and
+    // "Restore here" may run concurrently for the same item). A single id
+    // would let one restore's completion silence another's progress.
+    this.activeRestores = new Map();
 
     rootEl.querySelector('#btn-save-session').addEventListener('click', () => this.saveSession());
     rootEl.querySelector('#btn-export').addEventListener('click', () => this.export());
@@ -46,21 +49,47 @@ export class SessionManager {
     });
 
     // Listen for restore progress broadcasts from the service worker
-    this._progressPending = null;
+    // Latest pending progress per restore id, flushed once per frame.
+    this._progressPending = new Map();
     this._progressRafId = null;
     this._onRestoreProgress = (message) => {
-      if (message.action === 'restoreProgress' && message.restoreId === this.activeRestoreId) {
-        this._progressPending = message;
+      if (message?.action === 'restoreProgress' && this.isRestoreActive(message.restoreId)) {
+        this._progressPending.set(message.restoreId, message);
         if (!this._progressRafId) {
           this._progressRafId = requestAnimationFrame(() => {
             this._progressRafId = null;
-            const m = this._progressPending;
-            if (m) this.updateProgress(m.restoreId, m.created, m.loaded, m.total);
+            const pending = [...this._progressPending.values()];
+            this._progressPending.clear();
+            for (const m of pending) {
+              if (this.isRestoreActive(m.restoreId)) {
+                this.updateProgress(m.restoreId, m.created, m.loaded, m.total);
+              }
+            }
           });
         }
       }
     };
     chrome.runtime.onMessage.addListener(this._onRestoreProgress);
+  }
+
+  isRestoreActive(restoreId) {
+    return this.activeRestores.has(restoreId);
+  }
+
+  beginRestore(restoreId) {
+    this.activeRestores.set(restoreId, (this.activeRestores.get(restoreId) || 0) + 1);
+  }
+
+  /** Returns true when no other restore of the same id is still running. */
+  endRestore(restoreId) {
+    const remaining = (this.activeRestores.get(restoreId) || 1) - 1;
+    if (remaining > 0) {
+      this.activeRestores.set(restoreId, remaining);
+      return false;
+    }
+    this.activeRestores.delete(restoreId);
+    this._progressPending?.delete?.(restoreId);
+    return true;
   }
 
   updateProgress(restoreId, created, loaded, total) {
@@ -213,7 +242,7 @@ export class SessionManager {
     const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
       restoreBtn.disabled = true;
       restoreBtn.textContent = 'Restoring...';
-      this.activeRestoreId = session.id;
+      this.beginRestore(session.id);
       try {
         const result = await this.send({
           action: 'restoreSession',
@@ -224,8 +253,7 @@ export class SessionManager {
       } catch (err) {
         showToast(`Restore failed: ${err.message}`, 'error');
       } finally {
-        this.activeRestoreId = null;
-        this.hideProgress(session.id);
+        if (this.endRestore(session.id)) this.hideProgress(session.id);
         restoreBtn.disabled = false;
         restoreBtn.textContent = 'Restore';
       }
@@ -234,7 +262,7 @@ export class SessionManager {
     const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
       restoreHereBtn.disabled = true;
       restoreHereBtn.textContent = 'Restoring...';
-      this.activeRestoreId = session.id;
+      this.beginRestore(session.id);
       try {
         const result = await this.send({
           action: 'restoreSession',
@@ -245,8 +273,7 @@ export class SessionManager {
       } catch (err) {
         showToast(`Restore failed: ${err.message}`, 'error');
       } finally {
-        this.activeRestoreId = null;
-        this.hideProgress(session.id);
+        if (this.endRestore(session.id)) this.hideProgress(session.id);
         restoreHereBtn.disabled = false;
         restoreHereBtn.textContent = 'Restore here';
       }
