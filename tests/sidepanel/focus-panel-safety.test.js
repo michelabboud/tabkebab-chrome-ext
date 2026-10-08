@@ -103,6 +103,20 @@ describe('1.3 open-ended HUD', () => {
     expect(renderHUD(0)).not.toContain('btn-extend-focus');
     expect(renderHUD(25)).toContain('btn-extend-focus');
   });
+
+  test('open-ended sessions show elapsed time and a single End Session button, no progress bar', () => {
+    const openEnded = renderHUD(0);
+    expect(openEnded).not.toContain('focus-progress');
+    expect(openEnded).not.toContain('btn-end-early');
+    expect(openEnded).toContain('btn-end-focus');
+    expect(openEnded).toContain('elapsed');
+
+    const timed = renderHUD(25);
+    expect(timed).toContain('focus-progress');
+    expect(timed).toContain('btn-end-early');
+    expect(timed).toContain('btn-end-focus');
+    expect(timed).toContain('remaining');
+  });
 });
 
 describe('1.8 render generation guard', () => {

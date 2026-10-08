@@ -4,6 +4,7 @@ import { Storage } from './storage.js';
 import { getAllTabs, closeTabs, extractDomain, createNativeGroup, ungroupTabs, excludeIncognitoTabs } from './tabs-api.js';
 import { saveStash, restoreStashTabs, getStash, deleteStash } from './stash-db.js';
 import { sanitizeStashableTab } from './tab-restore.js';
+import { isSettledExceptInvalid } from './restore-outcome.js';
 import { getProfileById, getAllProfiles } from './focus-profiles.js';
 import {
   evaluateFocusPolicy,
@@ -959,19 +960,6 @@ async function performEndFocus(expectedRunId, {
     console.warn('[TabKebab] Focus teardown completed with failures:', teardownFailures);
   }
   return record;
-}
-
-/**
- * True when a restore settled every tab and its only shortfall is entries
- * restore can never reopen. Retrying cannot improve that outcome, so it must
- * not hold a Focus run in ENDING (and re-open tabs on every worker wake).
- */
-function isSettledExceptInvalid(outcome) {
-  if (!outcome || !Array.isArray(outcome.errors) || outcome.errors.length > 0) return false;
-  const restored = Number(outcome.restoredCount) || 0;
-  const duplicate = Number(outcome.skippedDuplicate) || 0;
-  const invalid = Number(outcome.skippedInvalid) || 0;
-  return invalid > 0 && restored + duplicate + invalid === outcome.requestedCount;
 }
 
 // ── Pause / Resume ──

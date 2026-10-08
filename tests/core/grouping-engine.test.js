@@ -312,3 +312,30 @@ describe('consolidateWindows closed-window count', () => {
     expect((await chrome.windows.getAll()).map((w) => w.id).sort()).toEqual([1, 2]);
   });
 });
+
+describe('domain grouping skips internal pages', () => {
+  test('about:blank and chrome://newtab tabs are never grouped or moved', async () => {
+    const mock = installChromeMock({
+      windows: [{ id: 1, focused: true }],
+      tabs: [
+        { id: 1, windowId: 1, url: 'about:blank' },
+        { id: 2, windowId: 1, url: 'about:blank' },
+        { id: 3, windowId: 1, url: 'chrome://newtab/' },
+        { id: 4, windowId: 1, url: 'chrome://newtab/' },
+        { id: 5, windowId: 1, url: 'https://a.test/one' },
+        { id: 6, windowId: 1, url: 'https://a.test/two' },
+      ],
+    });
+
+    const snapshot = await takeSnapshot();
+    expect([...snapshot.tabsByDomain.keys()]).toEqual(['a.test']);
+
+    await applyDomainGroupsToChrome();
+
+    const grouped = mock.calls.tabs.group.flatMap(([opts]) => opts.tabIds);
+    expect(grouped.sort()).toEqual([5, 6]);
+    for (const id of [1, 2, 3, 4]) {
+      expect(mock.snapshot().tabs.find(t => t.id === id)).toMatchObject({ groupId: -1, windowId: 1 });
+    }
+  });
+});

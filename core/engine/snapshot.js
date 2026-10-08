@@ -44,10 +44,17 @@ export async function takeSnapshot({ includePinned = false, includeAllProfiles =
     g.windowId === undefined || windowIds.has(g.windowId)
   );
 
-  // Pre-classify each tab with its domain
+  // Pre-classify each tab with its domain. Only web pages have one: internal
+  // pages (about:blank, chrome://newtab, extension pages…) get '' and are
+  // left out of domain grouping, staying where they are.
   for (const tab of tabs) {
-    tab._domain = extractDomain(tab.url || tab.pendingUrl || '');
+    tab._domain = domainForGrouping(tab.url || tab.pendingUrl || '');
   }
 
   return createSnapshot({ windows, tabs, tabGroups });
+}
+
+function domainForGrouping(url) {
+  if (!/^https?:\/\//i.test(url)) return '';
+  return extractDomain(url) || '';
 }

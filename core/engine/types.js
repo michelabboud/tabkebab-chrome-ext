@@ -54,6 +54,7 @@ export function createSnapshot({ windows, tabs, tabGroups }) {
     tabsByWindow.get(tab.windowId).push(tab);
 
     const domain = tab._domain; // pre-classified by snapshot phase
+    if (!domain) continue; // internal pages have no domain to group by
     if (!tabsByDomain.has(domain)) tabsByDomain.set(domain, []);
     tabsByDomain.get(domain).push(tab);
   }

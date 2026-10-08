@@ -19,7 +19,7 @@ describe('restore feedback', () => {
     });
   });
 
-  test('an incomplete session restore warns that the saved session remains recoverable', () => {
+  test('a session restore whose only shortfall is unrestorable tabs succeeds', () => {
     expect(formatRestoreFeedback({
       requestedCount: 3,
       restoredCount: 1,
@@ -30,8 +30,46 @@ describe('restore feedback', () => {
       windowsCreated: 0,
       groupsRestored: 0,
     }, { source: 'session' })).toEqual({
+      type: 'success',
+      message: 'Restored 1 tab — 2 unrestorable tabs skipped',
+    });
+    expect(formatRestoreFeedback({
+      requestedCount: 1,
+      restoredCount: 0,
+      skippedDuplicate: 0,
+      skippedInvalid: 1,
+      errors: [],
+      complete: false,
+    }, { source: 'session' })).toEqual({
+      type: 'info',
+      message: 'Nothing to restore — 1 unrestorable tab skipped',
+    });
+  });
+
+  test('a stash restore with unrestorable entries still reports the stash as kept', () => {
+    expect(formatRestoreFeedback({
+      requestedCount: 2,
+      restoredCount: 1,
+      skippedDuplicate: 0,
+      skippedInvalid: 1,
+      errors: [],
+      complete: false,
+    }, { source: 'stash' }).type).toBe('warning');
+  });
+
+  test('an incomplete session restore warns that the saved session remains recoverable', () => {
+    expect(formatRestoreFeedback({
+      requestedCount: 3,
+      restoredCount: 1,
+      skippedDuplicate: 0,
+      skippedInvalid: 1,
+      errors: [{ scope: 'create', url: 'https://failed.test/', message: 'failed' }],
+      complete: false,
+      windowsCreated: 0,
+      groupsRestored: 0,
+    }, { source: 'session' })).toEqual({
       type: 'warning',
-      message: 'Restored 1 of 3 tabs — 0 duplicates skipped — 2 invalid — 0 failed. Saved session remains available to retry.',
+      message: 'Restored 1 of 3 tabs — 0 duplicates skipped — 1 invalid — 1 failed. Saved session remains available to retry.',
     });
   });
 

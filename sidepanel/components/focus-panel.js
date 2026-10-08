@@ -574,20 +574,20 @@ export class FocusPanel {
       <div class="focus-hud" style="--focus-profile-color: ${profileColor}">
         <div class="focus-hud-header">
           <span class="focus-hud-label">FOCUS MODE - ${this._esc(state.profileName)}</span>
-          <button class="action-btn secondary focus-end-early-btn" id="btn-end-early">End Early</button>
+          ${openEnded ? '' : '<button class="action-btn secondary focus-end-early-btn" id="btn-end-early">End Early</button>'}
         </div>
 
         <div class="focus-timer-display">
           <div class="focus-timer-value" id="focus-timer">${this._calcTimeDisplay()}</div>
-          <div class="focus-timer-sub">${state.duration > 0 ? 'remaining' : 'elapsed'}</div>
+          <div class="focus-timer-sub">${openEnded ? 'elapsed' : 'remaining'}</div>
         </div>
 
-        <div class="focus-progress-wrap">
+        ${openEnded ? '' : `<div class="focus-progress-wrap">
           <div class="progress-bar">
             <div class="progress-bar-fill focus-progress-fill" id="focus-progress" style="width: ${this._calcProgress()}%"></div>
           </div>
           <span class="focus-progress-pct" id="focus-pct">${Math.round(this._calcProgress())}%</span>
-        </div>
+        </div>`}
 
         <div class="focus-stats-row">
           <div class="focus-stat">
