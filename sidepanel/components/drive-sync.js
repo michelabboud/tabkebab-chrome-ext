@@ -6,6 +6,24 @@ import { authenticate, disconnect, findSettingsFile, readSettingsFile, listDrive
 import { Storage } from '../../core/storage.js';
 import { sendOrThrow } from '../message-client.js';
 
+export const DRIVE_DISCONNECTED_MESSAGE =
+  'Not connected. Drive backup is optional — connect to back up to your own Google Drive.';
+
+/** Turn known chrome.identity failures into an actionable sentence. */
+export function friendlyDriveConnectError(err) {
+  const raw = String(err?.message || err || '');
+  if (/turned off browser sign-?in|not signed in|sign-?in.*(disabled|required)/i.test(raw)) {
+    return 'Sign in to Chrome first (Chrome menu → Sign in / Turn on sync), then try Connect again.';
+  }
+  if (/did not approve|user (?:canceled|cancelled)|access_denied|was closed/i.test(raw)) {
+    return 'Google Drive access was not granted. Try Connect again when you are ready.';
+  }
+  if (/network|failed to fetch|offline/i.test(raw)) {
+    return 'Could not reach Google. Check your connection, then try Connect again.';
+  }
+  return raw ? `Failed to connect: ${raw}` : 'Failed to connect to Google Drive.';
+}
+
 export class DriveSync {
   constructor(rootEl, { notify = showToast, confirm = showConfirm } = {}) {
     this.root = rootEl;
@@ -45,12 +63,15 @@ export class DriveSync {
         : 'Connected. Not yet synced.';
       this.statusEl.classList.add('connected');
       this.connectBtn.hidden = true;
+      this.syncBtn.hidden = false;
       this.syncBtn.disabled = false;
       this.disconnectBtn.hidden = false;
     } else {
-      this.statusEl.textContent = 'Not connected';
+      // Opt-in feature: a calm, explanatory state instead of a disabled button.
+      this.statusEl.textContent = DRIVE_DISCONNECTED_MESSAGE;
       this.statusEl.classList.remove('connected');
       this.connectBtn.hidden = false;
+      this.syncBtn.hidden = true;
       this.syncBtn.disabled = true;
       this.disconnectBtn.hidden = true;
     }
@@ -90,7 +111,7 @@ export class DriveSync {
       this.notify(`Connected to Google Drive (profile: ${profileName})`, 'success');
       await this.promptLoadSettings();
     } catch (err) {
-      this.notify('Failed to connect: ' + err.message, 'error');
+      this.notify(friendlyDriveConnectError(err), 'error');
     }
   }
 

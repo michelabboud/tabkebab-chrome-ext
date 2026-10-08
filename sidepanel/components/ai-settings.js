@@ -16,6 +16,39 @@ const PROVIDER_DEFAULTS = Object.freeze({
 const SAVE_FIRST_MESSAGE = 'Save AI settings before testing or loading models.';
 const UNLOCK_FIRST_MESSAGE = 'Unlock this provider before testing or loading models.';
 const REENTER_ALL_KEYS_MESSAGE = 'Re-enter every saved API key before changing key protection.';
+const PROVIDER_LABELS = Object.freeze({
+  openai: 'OpenAI',
+  claude: 'Claude',
+  gemini: 'Gemini',
+  custom: 'custom',
+});
+// Rows shown before "Show all" when the keep-awake list is not filtered.
+export const KEEP_AWAKE_PREVIEW_COUNT = 8;
+
+/**
+ * Map the provider select (where "" means Off) onto the stored AI settings
+ * contract: `enabled` + `providerId`. Turning AI off keeps the last provider
+ * so switching back on restores its configuration.
+ */
+export function aiSelectionToSettings(selectedProviderId, previousProviderId = null) {
+  const providerId = typeof selectedProviderId === 'string' ? selectedProviderId : '';
+  if (providerId) return { enabled: true, providerId };
+  return { enabled: false, providerId: previousProviderId || null };
+}
+
+/** The provider select value for stored settings: Off unless enabled with a provider. */
+export function aiSettingsToSelection(settings) {
+  return settings?.enabled === true && typeof settings.providerId === 'string'
+    ? settings.providerId
+    : '';
+}
+
+/** Case-insensitive substring filter for the keep-awake list. */
+export function filterKeepAwakeDomains(domains, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  const sorted = [...(domains || [])].sort();
+  return needle ? sorted.filter((domain) => domain.toLowerCase().includes(needle)) : sorted;
+}
 
 function hasExactResponseShape(value, fields) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -37,9 +70,9 @@ export class AISettings {
     this.providerSelectionGeneration = 0;
     this.providerActionGeneration = 0;
 
-    // Toggle
-    this.enabledCheckbox = rootEl.querySelector('#ai-enabled');
+    // Provider select doubles as the on/off control ("" = Off).
     this.configSection = rootEl.querySelector('#ai-config');
+    this.offHintEl = rootEl.querySelector('#ai-off-hint');
 
     // Provider
     this.providerSelect = rootEl.querySelector('#ai-provider');
@@ -66,7 +99,6 @@ export class AISettings {
     this.testResultEl = rootEl.querySelector('#ai-test-result');
 
     // Wire events
-    this.enabledCheckbox.addEventListener('change', () => this.toggleEnabled());
     this.providerSelect.addEventListener('change', () => {
       this.handleProviderChange().catch(() => {
         this.hideUnlockSection();
@@ -100,6 +132,16 @@ export class AISettings {
     // Keep Awake exception list
     this.keepAwakeListEl = rootEl.querySelector('#keep-awake-domain-list');
     this.keepAwakeSuggestionsEl = rootEl.querySelector('#keep-awake-suggestions');
+    this.keepAwakeCountEl = rootEl.querySelector('#keep-awake-count');
+    this.keepAwakeFilterEl = rootEl.querySelector('#keep-awake-filter');
+    this.keepAwakeShowAllBtn = rootEl.querySelector('#btn-keep-awake-show-all');
+    this.keepAwakeDomains = [];
+    this.keepAwakeShowAll = false;
+    this.keepAwakeFilterEl?.addEventListener('input', () => this.renderKeepAwakeRows());
+    this.keepAwakeShowAllBtn?.addEventListener('click', () => {
+      this.keepAwakeShowAll = !this.keepAwakeShowAll;
+      this.renderKeepAwakeRows();
+    });
 
     const addKeepAwakeBtn = rootEl.querySelector('#btn-add-keep-awake');
     const keepAwakeInput = rootEl.querySelector('#keep-awake-domain-input');
@@ -127,10 +169,14 @@ export class AISettings {
     const btn = this.root.querySelector(`#btn-toggle-${providerId}-key`);
     const input = this.root.querySelector(`#${providerId}-api-key`);
     if (btn && input) {
+      const name = PROVIDER_LABELS[providerId] || providerId;
+      btn.setAttribute?.('aria-pressed', 'false');
       btn.addEventListener('click', () => {
         const isPassword = input.type === 'password';
         input.type = isPassword ? 'text' : 'password';
         btn.textContent = isPassword ? 'Hide' : 'Show';
+        btn.setAttribute?.('aria-pressed', String(isPassword));
+        btn.setAttribute?.('aria-label', `${isPassword ? 'Hide' : 'Show'} ${name} API key`);
       });
     }
   }
@@ -141,7 +187,6 @@ export class AISettings {
     let releaseRefresh = null;
     if (operation === null) {
       releaseRefresh = this.beginExclusiveOperation('refresh', [
-        this.enabledCheckbox,
         this.providerSelect,
         this.passphraseToggle,
         this.passphraseInput,
@@ -166,14 +211,10 @@ export class AISettings {
     this.settings = settings;
     this.providerSettings = settings.providerConfigs || {};
 
-    this.enabledCheckbox.checked = settings.enabled || false;
-    this.configSection.hidden = !settings.enabled;
-
-    if (settings.providerId) {
-      this.providerSelect.value = settings.providerId;
-    } else {
-      this.providerSelect.value = '';
-    }
+    // "Off" is the first provider option; a stored provider with AI disabled
+    // shows as Off and is preserved on the next save.
+    this.providerSelect.value = aiSettingsToSelection(settings);
+    if (this.configSection) this.configSection.hidden = !this.providerSelect.value;
 
     this.showProviderConfig();
 
@@ -248,14 +289,19 @@ export class AISettings {
 
   // ── Toggle handlers ──
 
-  toggleEnabled() {
-    this.configSection.hidden = !this.enabledCheckbox.checked;
-  }
-
+  /** Picking a provider expands its config; "Off" collapses it. */
   showProviderConfig() {
     const selected = this.providerSelect.value;
-    for (const [id, panel] of Object.entries(this.providerPanels)) {
+    for (const [id, panel] of Object.entries(this.providerPanels || {})) {
       if (panel) panel.hidden = id !== selected;
+    }
+    if (this.configSection) this.configSection.hidden = !selected;
+    if (this.testButton) this.testButton.hidden = !selected;
+    if (this.offHintEl) {
+      this.offHintEl.hidden = !!selected;
+      this.offHintEl.textContent = this.currentSettings?.enabled === true
+        ? 'Save to turn AI off.'
+        : 'AI is off. Pick a provider to set it up.';
     }
   }
 
@@ -671,7 +717,6 @@ export class AISettings {
 
   beginSaveOwnership() {
     return this.beginExclusiveOperation('save', [
-      this.enabledCheckbox,
       this.providerSelect,
       this.passphraseToggle,
       this.passphraseInput,
@@ -685,13 +730,6 @@ export class AISettings {
   async saveSettings() {
     if (this.activeOperation || this.saveInFlight || this.unlockInFlight) return false;
     const providerId = this.providerSelect.value;
-    const enabled = this.enabledCheckbox.checked;
-
-    if (enabled && !providerId) {
-      showToast('Select a provider to enable AI', 'error');
-      return false;
-    }
-
     const currentSettings = this.currentSettings;
     if (!currentSettings) {
       showToast('Refresh AI settings before saving', 'error');
@@ -748,8 +786,7 @@ export class AISettings {
       currentSettings.providerConfigs?.custom?.baseUrl || PROVIDER_DEFAULTS.custom.baseUrl;
 
     const settings = {
-      enabled,
-      providerId: providerId || null,
+      ...aiSelectionToSettings(providerId, currentSettings.providerId),
       providerConfigs,
       protectionMode,
     };
@@ -844,15 +881,38 @@ export class AISettings {
   }
 
   renderKeepAwakeList(domains) {
-    this.keepAwakeListEl.innerHTML = '';
+    this.keepAwakeDomains = [...(domains || [])].sort();
+    this.renderKeepAwakeRows();
+  }
 
-    if (domains.length === 0) {
-      this.keepAwakeListEl.innerHTML = '<div class="keep-awake-domain-list-empty">No domains in keep-awake list</div>';
-      return;
+  /** Render the count, the filtered rows, and the "Show all" toggle. */
+  renderKeepAwakeRows() {
+    const listEl = this.keepAwakeListEl;
+    if (!listEl) return;
+    const domains = this.keepAwakeDomains || [];
+    const query = this.keepAwakeFilterEl?.value || '';
+    const matches = filterKeepAwakeDomains(domains, query);
+    const filtering = query.trim().length > 0;
+    const total = domains.length;
+
+    if (this.keepAwakeCountEl) {
+      const noun = total === 1 ? 'domain' : 'domains';
+      this.keepAwakeCountEl.textContent = filtering
+        ? `${matches.length} of ${total} ${noun}`
+        : `${total} ${noun}`;
     }
 
-    const sorted = [...domains].sort();
-    for (const domain of sorted) {
+    listEl.innerHTML = '';
+    if (total === 0) {
+      listEl.innerHTML = '<div class="keep-awake-domain-list-empty">No domains in keep-awake list</div>';
+    } else if (matches.length === 0) {
+      listEl.innerHTML = '<div class="keep-awake-domain-list-empty">No domains match this filter</div>';
+    }
+
+    const collapsed = !filtering && !this.keepAwakeShowAll &&
+      matches.length > KEEP_AWAKE_PREVIEW_COUNT;
+    const visible = collapsed ? matches.slice(0, KEEP_AWAKE_PREVIEW_COUNT) : matches;
+    for (const domain of visible) {
       const row = document.createElement('div');
       row.className = 'keep-awake-domain-row';
 
@@ -861,14 +921,25 @@ export class AISettings {
       label.textContent = domain;
 
       const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
       removeBtn.className = 'remove-btn';
       removeBtn.textContent = '\u00D7';
-      removeBtn.title = 'Remove';
+      removeBtn.title = `Remove ${domain}`;
+      removeBtn.setAttribute('aria-label', `Remove ${domain} from keep-awake list`);
       removeBtn.addEventListener('click', () => this.removeKeepAwakeDomain(domain));
 
       row.appendChild(label);
       row.appendChild(removeBtn);
-      this.keepAwakeListEl.appendChild(row);
+      listEl.appendChild(row);
+    }
+
+    if (this.keepAwakeShowAllBtn) {
+      const expandable = !filtering && matches.length > KEEP_AWAKE_PREVIEW_COUNT;
+      this.keepAwakeShowAllBtn.hidden = !expandable;
+      this.keepAwakeShowAllBtn.textContent = this.keepAwakeShowAll
+        ? 'Show fewer'
+        : `Show all ${matches.length}`;
+      this.keepAwakeShowAllBtn.setAttribute?.('aria-expanded', String(!!this.keepAwakeShowAll));
     }
   }
 
@@ -987,8 +1058,7 @@ export class AISettings {
     }
 
     const toolbar = document.createElement('div');
-    toolbar.className = 'toolbar';
-    toolbar.style.marginTop = '8px';
+    toolbar.className = 'toolbar settings-gap-top';
 
     const applyBtn = document.createElement('button');
     applyBtn.className = 'action-btn secondary';

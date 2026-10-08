@@ -1,1 +1,531 @@
 /* TabKebab side panel — settings-focus styles. Loaded after panel.css; use its tokens. */
+
+/* ══════════════════════════ Settings ══════════════════════════ */
+
+/* Spacing helpers that replace the old inline style attributes. */
+.settings-field-row { margin-bottom: 8px; }
+.settings-field-row-lg { margin-bottom: 12px; }
+.settings-gap-top { margin-top: 8px; }
+.btn-inline,
+.btn-load-models { flex: 0 0 auto; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Sticky in-page index. It sticks inside .view-container (the panel's
+   scroller), never the document root, so the header is never clipped. */
+.settings-index {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: -12px -14px 12px;
+  padding: 8px 14px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-index::-webkit-scrollbar { display: none; }
+
+.settings-index-chip {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.settings-index-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-index-chip[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Sections land below the sticky index when scrolled to by id. */
+#view-settings .settings-section {
+  scroll-margin-top: 52px;
+}
+
+/* Collapsible (advanced) cards use <details>/<summary> as the card header. */
+.settings-card-collapsible > summary {
+  cursor: pointer;
+  list-style: none;
+  border-bottom: none;
+}
+
+.settings-card-collapsible > summary::-webkit-details-marker { display: none; }
+
+.settings-card-collapsible[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-card-collapsible > summary::after {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+
+.settings-card-collapsible[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+.settings-card-summary-hint {
+  margin-left: auto;
+  font-size: var(--fs-xs, 11px);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Collapsible advanced group inside a card. */
+.settings-subdetails {
+  margin: 8px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.settings-subdetails > summary {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: var(--fs-sm, 12px);
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-subdetails > summary::-webkit-details-marker { display: none; }
+
+.settings-subdetails > summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--transition);
+}
+
+.settings-subdetails[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.settings-subdetails > summary:hover { color: var(--text-primary); }
+
+.settings-subdetails[open] {
+  padding: 0 10px 8px;
+}
+
+.settings-subdetails[open] > summary {
+  margin: 0 -10px;
+}
+
+.settings-subdetails .setting-section-desc {
+  margin-bottom: 4px;
+}
+
+/* Visible labels are <label for>, so clicking them focuses/toggles the input. */
+label.setting-label { cursor: pointer; }
+
+/* Plain text button for "Show all", "Set up AI" and similar links. */
+.settings-link-btn {
+  min-height: 24px;
+  padding: 2px 4px;
+  margin-top: 4px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.settings-link-btn:hover { text-decoration: underline; }
+
+/* AI: provider select doubles as the on/off control. */
+.ai-off-hint {
+  display: block;
+  margin: -4px 0 4px;
+}
+
+.ai-config { margin-top: 4px; }
+
+/* Keep-awake list: count, filter, larger remove targets. */
+.keep-awake-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.keep-awake-count {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm, 12px);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.keep-awake-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.keep-awake-domain-list {
+  max-height: 260px;
+}
+
+.keep-awake-domain-row {
+  padding: 2px 4px 2px 10px;
+  min-height: 30px;
+}
+
+.keep-awake-domain-row .domain-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keep-awake-domain-row .remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-lg, 15px);
+  color: var(--text-secondary);
+}
+
+.keep-awake-domain-row .remove-btn:hover,
+.keep-awake-domain-row .remove-btn:focus-visible {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* Drive: friendly disconnected copy. */
+#settings-drive-section .drive-status:not(.connected) {
+  color: var(--text-secondary);
+}
+
+.drive-cleanup-days {
+  width: 64px;
+  flex: 0 0 auto;
+}
+
+#settings-drive-section .settings-subdetails .toolbar {
+  margin-bottom: 4px;
+}
+
+.about-body {
+  text-align: center;
+  padding: 20px 16px;
+}
+
+/* ══════════════════════════ Focus ══════════════════════════ */
+
+/* Profile icons are inline SVGs now (not monospace text glyphs). */
+.focus-profile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-family: inherit;
+}
+
+.focus-profile-icon svg { display: block; }
+
+.focus-profile-chip { min-height: 32px; }
+
+/* Start sits directly under profile + duration, above the fold. */
+.focus-setup .focus-start-btn {
+  width: 100%;
+  margin: 4px 0 12px;
+}
+
+/* "Customize" disclosure holds the advanced options. */
+.focus-customize {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card, var(--bg-primary));
+}
+
+.focus-customize-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: var(--fs-md, 13px);
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.focus-customize-summary::-webkit-details-marker { display: none; }
+
+.focus-customize-summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  transition: transform var(--transition);
+}
+
+.focus-customize[open] > .focus-customize-summary::before {
+  transform: rotate(45deg);
+}
+
+.focus-customize-body {
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.focus-customize-body > * { margin-top: 12px; }
+
+fieldset.focus-action-section {
+  border: none;
+  padding: 0;
+  margin-inline: 0;
+  min-width: 0;
+}
+
+fieldset.focus-action-section legend { padding: 0; }
+
+/* Bigger native controls and full-label targets. */
+.focus-setup input[type="checkbox"],
+.focus-setup input[type="radio"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+.focus-radio-group label,
+.focus-open-ended-label {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* AI Detection: disabled with a setup path when no AI is configured. */
+.focus-ai-row {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.focus-ai-row.disabled .focus-toggle-label {
+  color: var(--text-secondary);
+}
+
+.focus-ai-row.disabled input[type="checkbox"] { cursor: not-allowed; }
+
+.focus-ai-row .focus-toggle-hint { color: var(--text-secondary); }
+
+.focus-ai-row .focus-ai-setup { margin: 0 0 0 auto; }
+
+.focus-ai-row:not(.disabled) .focus-toggle-hint { margin-left: auto; }
+
+/* Block categories: active = accent-soft with a check, not solid red. */
+.focus-category-chip {
+  min-height: 28px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.focus-category-chip .focus-category-check { display: none; }
+
+.focus-category-chip:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.focus-category-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.focus-category-chip.active .focus-category-check { display: inline; }
+
+/* Remove × in tags: 24px targets without shifting layout. */
+.focus-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  margin: -4px -6px -4px 0;
+  padding: 0;
+}
+
+.focus-add-btn { min-width: 32px; }
+
+/* History toggle is a real button now. */
+.focus-history-toggle {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  text-align: left;
+  font-family: inherit;
+}
+
+/* ── HUD: theme tokens instead of hard-coded cyan ── */
+.focus-hud {
+  --focus-text: color-mix(in srgb, var(--focus-profile-color, var(--focus-accent, #0e7490)) 60%, var(--text-primary));
+}
+
+.focus-hud-label {
+  color: var(--focus-text);
+  text-shadow: none;
+}
+
+.focus-hud-status {
+  font-size: var(--fs-xs, 11px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--focus-accent-soft, var(--accent-soft));
+  color: var(--focus-text);
+}
+
+.focus-timer-value {
+  color: var(--focus-text);
+}
+
+.focus-timer-sub {
+  color: var(--text-secondary);
+}
+
+/* Percentage sits inline with "remaining" instead of on its own line. */
+.focus-timer-sub .focus-progress-pct {
+  display: inline;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* An empty track is still visible at 0%. */
+.focus-progress-track {
+  background: var(--bg-tertiary);
+}
+
+.focus-stat-label {
+  color: var(--text-secondary);
+}
+
+/* ── Cross-view Focus banner (mounted by the shell) ── */
+.focus-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 8px 2px 14px;
+  background: var(--focus-accent-soft, var(--accent-soft));
+  border-bottom: 1px solid color-mix(in srgb, var(--focus-accent, #0e7490) 30%, transparent);
+  font-size: var(--fs-sm, 12px);
+}
+
+.focus-banner[hidden] { display: none; }
+
+/* Redundant while the Focus view (with its HUD) is open. */
+body:has(#view-focus:not(.hidden)) .focus-banner { display: none; }
+
+.focus-banner-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--focus-accent, #0e7490);
+  text-align: left;
+  cursor: pointer;
+}
+
+.focus-banner-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-banner-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--focus-accent, #0e7490);
+}
+
+.focus-banner.paused .focus-banner-dot { background: var(--text-secondary); }
+
+.focus-banner-end {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.focus-banner-end:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}

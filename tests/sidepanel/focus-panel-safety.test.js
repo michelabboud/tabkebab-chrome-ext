@@ -113,7 +113,8 @@ describe('1.3 open-ended HUD', () => {
 
     const timed = renderHUD(25);
     expect(timed).toContain('focus-progress');
-    expect(timed).toContain('btn-end-early');
+    // One end button only: the duplicate header "End Early" was removed.
+    expect(timed).not.toContain('btn-end-early');
     expect(timed).toContain('btn-end-focus');
     expect(timed).toContain('remaining');
   });

@@ -523,8 +523,10 @@ describe('checked component messaging boundary', () => {
       expect(snapshot()).toEqual(expected);
       expect(expected).toEqual({
         message: 'Close 3 old tabs?',
-        buttons: ['Confirm', 'Cancel'],
+        buttons: ['Close tabs', 'Cancel'],
       });
+      // A close confirmation is styled as the destructive action it is.
+      expect(confirmButton.className).toBe('action-btn danger');
       expect(manager.inputEl.value).toBe('close old tabs');
       expect(manager.pending).toBeFalse();
       expect(manager.inputEl.disabled).toBeFalse();
@@ -579,11 +581,9 @@ describe('checked component messaging boundary', () => {
         else gate.reject(new Error('old command rejected'));
         await oldExecution;
 
-        expect(busyState).toEqual({
-          pending: true,
-          inputDisabled: true,
-          markup: '<p class="loading-text">Executing...</p>',
-        });
+        expect(busyState).toMatchObject({ pending: true, inputDisabled: true });
+        expect(busyState.markup).toContain('pipeline-progress active');
+        expect(busyState.markup).toContain('progress-bar-fill indeterminate');
         expect(newerSnapshot).toEqual({
           message: 'Run newer command?',
           buttons: ['Confirm', 'Cancel'],

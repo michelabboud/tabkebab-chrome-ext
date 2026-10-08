@@ -11,6 +11,32 @@ import {
   portableImportToastType,
 } from '../portable-import-summary.js';
 
+/** Gap kept between the sticky index and a section scrolled into view. */
+const SECTION_SCROLL_GAP = 8;
+
+/**
+ * Scroll offset that puts a section just below the sticky settings index,
+ * inside the panel's own scroller (never the document root, which would clip
+ * the header).
+ */
+export function computeSectionScrollTop({
+  containerScrollTop = 0,
+  containerTop = 0,
+  sectionTop = 0,
+  stickyHeight = 0,
+  gap = SECTION_SCROLL_GAP,
+} = {}) {
+  return Math.max(0, Math.round(containerScrollTop + (sectionTop - containerTop) - stickyHeight - gap));
+}
+
+function prefersReducedMotion() {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+  } catch {
+    return false;
+  }
+}
+
 export class SettingsManager {
   constructor(rootEl, {
     confirm = showConfirm,
@@ -22,6 +48,14 @@ export class SettingsManager {
 
     // Collect all setting inputs by data-setting attribute
     this.inputs = rootEl.querySelectorAll('[data-setting]');
+
+    // Sticky in-page index: chips scroll to their section.
+    this.indexEl = rootEl.querySelector('#settings-index');
+    this.indexEl?.addEventListener('click', (event) => {
+      const chip = event.target?.closest?.('[data-settings-target]');
+      if (!chip) return;
+      this.scrollToSection(chip.dataset.settingsTarget);
+    });
 
     // Auto-save on change for every setting input
     this.inputs.forEach(input => {
@@ -57,6 +91,37 @@ export class SettingsManager {
     if (importSettingsInput) {
       importSettingsInput.addEventListener('change', (e) => this.importSettings(e));
     }
+  }
+
+  /**
+   * Bring a settings section into view below the sticky index. Collapsed
+   * <details> sections open first. Returns the section element, or null.
+   */
+  scrollToSection(sectionId) {
+    if (typeof sectionId !== 'string' || !/^[\w-]+$/.test(sectionId)) return null;
+    const section = this.root.querySelector(`#${sectionId}`);
+    if (!section) return null;
+    if (section.tagName === 'DETAILS') section.open = true;
+
+    this.indexEl?.querySelectorAll?.('[data-settings-target]').forEach((chip) => {
+      if (chip.dataset.settingsTarget === sectionId) chip.setAttribute('aria-current', 'true');
+      else chip.removeAttribute('aria-current');
+    });
+
+    const behavior = prefersReducedMotion() ? 'auto' : 'smooth';
+    const container = section.closest?.('.view-container');
+    if (container && typeof container.scrollTo === 'function') {
+      const top = computeSectionScrollTop({
+        containerScrollTop: container.scrollTop,
+        containerTop: container.getBoundingClientRect().top,
+        sectionTop: section.getBoundingClientRect().top,
+        stickyHeight: this.indexEl?.offsetHeight || 0,
+      });
+      container.scrollTo({ top, behavior });
+    } else {
+      section.scrollIntoView?.({ behavior, block: 'nearest' });
+    }
+    return section;
   }
 
   async refresh({ notifyFailure = true } = {}) {

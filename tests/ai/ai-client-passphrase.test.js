@@ -2441,7 +2441,6 @@ describe('Task 12 side-panel plaintext boundary without a DOM emulator', () => {
       },
       querySelectorAll() { return [keyInput, modelInput]; },
     };
-    manager.enabledCheckbox = { checked: false };
     manager.configSection = { hidden: true };
     manager.providerSelect = { value: '' };
     manager.providerPanels = {};
@@ -2711,7 +2710,6 @@ describe('Task 12 side-panel plaintext boundary without a DOM emulator', () => {
       querySelector(selector) { return elements[selector] || null; },
       querySelectorAll() { return controls; },
     };
-    manager.enabledCheckbox = { checked: true, disabled: false };
     manager.configSection = { hidden: false };
     manager.providerSelect = { value: 'openai', disabled: false };
     manager.providerPanels = {};
@@ -2857,12 +2855,10 @@ describe('Task 12 side-panel plaintext boundary without a DOM emulator', () => {
       querySelector(selector) { return elements[selector] || null; },
       querySelectorAll() { return controls; },
     };
-    manager.enabledCheckbox = { checked: true, disabled: false };
     manager.providerSelect = { value: 'openai', disabled: false };
     manager.passphraseToggle = { checked: false, indeterminate: false, disabled: false };
     manager.passphraseInput = { value: '', disabled: false };
     controls.push(
-      manager.enabledCheckbox,
       manager.providerSelect,
       manager.passphraseToggle,
       manager.passphraseInput,
