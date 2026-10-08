@@ -213,7 +213,7 @@ matrix still governs publication.
 ## Approved technical direction
 
 - Deliver narrow, independently testable hardening slices instead of a large rewrite.
-- Use Bun `1.3.11` and `bun:test` for zero-package unit and integration tests.
+- Use Bun `1.4.2` and `bun:test` for zero-package unit and integration tests.
 - Use explicit Chrome API test doubles for non-browser tests.
 - Keep IndexedDB, DOM, extension-context messaging, and Prompt API verification in the real-Chrome smoke matrix.
 - Preserve backward compatibility for existing local data, Drive sync version 1, and export version 1.

@@ -201,7 +201,7 @@ See [Google Drive Setup Guide](store/google-drive-setup.md) for OAuth configurat
 
 ## Development and verification
 
-The extension remains dependency-free and Chrome loads this repository directly; there is no package install, bundler, or generated runtime output. Automated tests use Bun `1.3.11`, pinned in [`.bun-version`](.bun-version). Install that exact Bun version and verify it with `bun --version` before running the gate.
+The extension remains dependency-free and Chrome loads this repository directly; there is no package install, bundler, or generated runtime output. Automated tests use Bun `1.4.2`, pinned in [`.bun-version`](.bun-version). Install that exact Bun version and verify it with `bun --version` before running the gate.
 
 Run the same commands required by CI from the repository root:
 
