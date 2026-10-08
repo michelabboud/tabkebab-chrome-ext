@@ -2292,7 +2292,7 @@ export async function handleMessage(msg, options = {}) {
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `Window ${msg.windowNumber || '?'} (${stashTabs.length} tabs)`,
+        name: `Window ${msg.windowNumber || '?'}`,
         source: 'window',
         sourceDetail: String(msg.windowId),
         createdAt: Date.now(),
@@ -2336,7 +2336,7 @@ export async function handleMessage(msg, options = {}) {
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `${groupInfo.title} [group] (${stashTabs.length} tabs)`,
+        name: `${groupInfo.title} [group]`,
         source: 'group',
         sourceDetail: groupInfo.title,
         createdAt: Date.now(),
@@ -2382,7 +2382,7 @@ export async function handleMessage(msg, options = {}) {
       const stashId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const stash = {
         id: stashId,
-        name: `${msg.domain} (${capturedTabs.length} tabs)`,
+        name: msg.domain || 'Blank & browser pages',
         source: 'domain',
         sourceDetail: msg.domain,
         createdAt: Date.now(),
@@ -2405,6 +2405,12 @@ export async function handleMessage(msg, options = {}) {
     case 'restoreStash': {
       return withStateMutationLock(async () => {
       const stash = await getStash(msg.stashId);
+      // "Undo stash" passes ifUnrestored: a stash that was already restored
+      // (and removed, or marked restored) must not reopen its tabs again.
+      if (msg.ifUnrestored === true) {
+        if (!stash) return { alreadyRestored: true, reason: 'missing' };
+        if (stash.restoredAt) return { alreadyRestored: true, reason: 'restored' };
+      }
       if (!stash) throw new Error('Stash not found');
 
       const onProgress = ({ created, loaded, total }) => {

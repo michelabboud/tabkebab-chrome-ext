@@ -64,3 +64,41 @@ export function formatRestoreFeedback(result, { source = 'session' } = {}) {
 
   return { type: 'success', message: parts.join(' \u2014 ') };
 }
+
+// Known platform / runtime failures mapped to wording a user can act on.
+// Order matters: the first matching pattern wins.
+const FRIENDLY_ERRORS = Object.freeze([
+  [/could not establish connection|receiving end does not exist|message port closed|extension context invalidated/i,
+    "TabKebab's background service was restarting. Try again."],
+  [/user turned off browser sign-?in|not signed in|the user is not signed in/i,
+    'Sign in to Chrome first (Chrome menu → Sign in), then try again.'],
+  [/stash not found/i,
+    'That stash no longer exists. It may already have been restored or deleted.'],
+  [/session not found/i,
+    'That session no longer exists. It may already have been deleted.'],
+  [/no tab with id|tab not found/i,
+    'That tab is already closed.'],
+  [/no window with id|window not found/i,
+    'That window is already closed.'],
+  [/quota|QuotaExceededError/i,
+    'Browser storage is full. Delete some stashes or sessions, then try again.'],
+  [/failed to fetch|networkerror|network request failed/i,
+    'Network unavailable. Check your connection, then try again.'],
+  [/unexpected token|is not valid json|json\.parse|unexpected end of json/i,
+    "That file isn't a valid TabKebab JSON export."],
+]);
+
+/**
+ * Turn an Error (or message) into user-facing text. Raw Chrome / IndexedDB
+ * errors that a user cannot act on are mapped to plain-language guidance;
+ * messages TabKebab already authored pass through unchanged.
+ */
+export function friendlyErrorMessage(error, fallback = 'Something went wrong. Try again.') {
+  const raw = typeof error === 'string' ? error : error?.message;
+  const message = typeof raw === 'string' ? raw.trim() : '';
+  if (!message) return fallback;
+  for (const [pattern, friendly] of FRIENDLY_ERRORS) {
+    if (pattern.test(message)) return friendly;
+  }
+  return message;
+}

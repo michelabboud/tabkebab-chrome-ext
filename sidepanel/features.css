@@ -1,1 +1,317 @@
 /* TabKebab side panel — features styles. Loaded after panel.css; use its tokens. */
+/* U3: Stash, Sessions, Smart Group, Command bar, Onboarding, Search. */
+
+/* ── Shared: "⋯" more menu (rare actions such as Export / Import) ── */
+.view-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.view-heading {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.more-menu {
+  position: relative;
+  flex: none;
+}
+
+.more-menu > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.more-menu > summary::-webkit-details-marker { display: none; }
+.more-menu > summary::marker { content: ''; }
+
+.more-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  min-width: 190px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.more-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.more-menu-item:hover,
+.more-menu-item:focus-visible {
+  background: var(--bg-hover);
+}
+
+/* ── Stash and session cards ── */
+.record-toolbar {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.record-toolbar .input {
+  min-width: 0;
+}
+
+.record-card .stash-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.record-card .stash-name,
+.record-card .session-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.record-card .stash-source-badge,
+.record-card .stash-restored-badge {
+  flex: none;
+}
+
+.record-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.record-meta-row .stash-preview {
+  margin-top: 0;
+  flex: none;
+}
+
+.record-meta-row .stash-meta,
+.record-card .session-meta {
+  margin-top: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.record-card .session-meta {
+  margin-top: 3px;
+}
+
+.record-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.record-actions-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.record-actions .action-btn {
+  min-height: 28px;
+}
+
+.record-icon-btn {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px 6px;
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+
+.record-icon-btn[hidden] {
+  display: none;
+}
+
+/* Delete: present but quiet, so Restore reads as the main action. */
+.action-btn.ghost-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+
+.action-btn.ghost-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  box-shadow: none;
+}
+
+/* ── Smart group: on-device AI hint (only after a successful probe) ── */
+.smart-group-ai-hint {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+.smart-group-ai-hint[hidden] {
+  display: none;
+}
+
+.smart-group-fallback-actions .action-btn {
+  flex: none;
+  min-height: 28px;
+}
+
+/* ── First-run walkthrough ── */
+.first-run-walkthrough .walkthrough-header {
+  gap: 8px;
+}
+
+.first-run-walkthrough .walkthrough-header .walkthrough-spacer {
+  flex: 1;
+}
+
+.walkthrough-skip {
+  flex: none;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.walkthrough-skip:hover {
+  color: var(--text-primary);
+}
+
+/* Step action on the left, Back/Next on the right; one row at 360px. */
+.walkthrough-actions {
+  flex-wrap: nowrap;
+}
+
+.first-run-walkthrough .walkthrough-actions .action-btn {
+  flex: none;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.walkthrough-description strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Control the current step talks about. */
+.walkthrough-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── AI command bar ── */
+.command-bar-row {
+  align-items: center;
+}
+
+.command-bar-row textarea.input {
+  height: 32px;
+  min-height: 32px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  overflow: hidden;
+  transition: height var(--transition);
+}
+
+.command-bar-row textarea.input:focus,
+.command-bar-row textarea.input:not(:placeholder-shown) {
+  height: 56px;
+  overflow: auto;
+}
+
+.ai-provider-label:not(:empty)::before {
+  content: 'via ';
+}
+
+.command-progress {
+  margin-bottom: 0;
+  padding: 8px 10px;
+}
+
+.command-progress .phase-label {
+  margin-bottom: 6px;
+}
+
+.find-result-item {
+  min-height: 28px;
+}
+
+.find-result-item:focus-visible {
+  background: var(--bg-tertiary);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ── Global search ── */
+.search-item {
+  min-height: 32px;
+}
+
+.search-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+button.search-show-all {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-bar-row textarea.input {
+    transition: none;
+  }
+}

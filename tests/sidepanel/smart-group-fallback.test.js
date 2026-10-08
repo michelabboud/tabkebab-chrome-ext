@@ -96,14 +96,88 @@ afterEach(() => {
 });
 
 describe('Smart Group graceful degradation', () => {
-  test('states the local zero-config privacy promise at the point of use', async () => {
+  test('has no always-on zero-config note; the on-device hint starts hidden', async () => {
     const html = await Bun.file(
       new URL('../../sidepanel/panel.html', import.meta.url),
     ).text();
 
-    expect(html).toContain('id="smart-group-zero-config-note"');
-    expect(html).toContain('No key or account is needed');
-    expect(html).toContain('no data leaves this machine');
+    expect(html).not.toContain('id="smart-group-zero-config-note"');
+    expect(html).not.toContain('No key or account is needed');
+    expect(html).toMatch(/<p id="smart-group-ai-hint"[^>]*\shidden>/);
+    // The settings path is a button that navigates, not a fragment link.
+    expect(html).not.toContain('href="#settings-ai-section"');
+    expect(html).toMatch(/<button id="link-smart-group-settings" type="button"/);
+  });
+
+  test('shows the ready hint and button title only after a successful probe', async () => {
+    const { SmartGroupFallback, SMART_GROUP_READY_TITLE } =
+      await import('../../sidepanel/components/smart-group-fallback.js');
+    const hintEl = createElement();
+    hintEl.hidden = true;
+    const smartGroupButton = createElement();
+    const sends = [];
+    const ready = new SmartGroupFallback(createFallbackRoot(), {
+      probe: async () => 'available',
+      hintEl,
+      smartGroupButton,
+      send: async (message) => { sends.push(message); return { enabled: false }; },
+    });
+    await expect(ready.ready).resolves.toBe('available');
+    expect(hintEl.hidden).toBe(false);
+    expect(smartGroupButton.title).toBe(SMART_GROUP_READY_TITLE);
+    expect(sends).toEqual([{ action: 'getAISettings' }]);
+
+    // Showing the fallback hides the hint so the two never contradict.
+    ready.show({ reason: 'unavailable', source: 'zero-config' });
+    expect(hintEl.hidden).toBe(true);
+
+    for (const status of ['unavailable', 'downloadable']) {
+      const quietHint = createElement();
+      quietHint.hidden = true;
+      const quietButton = createElement();
+      const quiet = new SmartGroupFallback(createFallbackRoot(), {
+        probe: async () => status,
+        hintEl: quietHint,
+        smartGroupButton: quietButton,
+        send: async () => { throw new Error('should not ask for settings'); },
+      });
+      await quiet.ready;
+      expect(quietHint.hidden).toBe(true);
+      expect(quietButton.title).toBeUndefined();
+    }
+  });
+
+  test('stays quiet when a configured cloud provider would run Smart group', async () => {
+    const { SmartGroupFallback } =
+      await import('../../sidepanel/components/smart-group-fallback.js');
+    const hintEl = createElement();
+    hintEl.hidden = true;
+    const fallback = new SmartGroupFallback(createFallbackRoot(), {
+      probe: async () => 'available',
+      hintEl,
+      smartGroupButton: createElement(),
+      send: async () => ({
+        enabled: true,
+        providerId: 'openai',
+        providerConfigs: { openai: { hasApiKey: true } },
+      }),
+    });
+    await expect(fallback.ready).resolves.toBe('configured');
+    expect(hintEl.hidden).toBe(true);
+  });
+
+  test('probeOnDeviceAI maps Prompt API states and never throws', async () => {
+    const { probeOnDeviceAI } =
+      await import('../../sidepanel/components/smart-group-fallback.js');
+    expect(await probeOnDeviceAI({})).toBe('unavailable');
+    expect(await probeOnDeviceAI({ LanguageModel: { availability: async () => 'available' } }))
+      .toBe('available');
+    expect(await probeOnDeviceAI({ LanguageModel: { availability: async () => 'downloadable' } }))
+      .toBe('downloadable');
+    expect(await probeOnDeviceAI({ LanguageModel: { availability: async () => { throw new Error('x'); } } }))
+      .toBe('unavailable');
+    expect(await probeOnDeviceAI({ self: { ai: { languageModel: { capabilities: async () => ({ available: 'readily' }) } } } }))
+      .toBe('available');
   });
 
   test('offers working domain and API-key settings paths inline', async () => {
@@ -115,17 +189,18 @@ describe('Smart Group graceful degradation', () => {
     const fallback = new SmartGroupFallback(root, {
       onDomainFallback: () => { domainFallbacks += 1; },
       navigate: (destination) => destinations.push(destination),
+      probe: async () => 'unavailable',
     });
 
     fallback.show({ reason: 'unavailable', source: 'zero-config' });
 
     expect(root.hidden).toBe(false);
     expect(root.elements['#smart-group-fallback-message'].textContent)
-      .toContain("Chrome's built-in AI isn't available");
+      .toBe("On-device AI isn't ready in this Chrome. Group by domain now, or add an API key for topic grouping.");
     expect(root.elements['#btn-smart-group-domain-fallback'].textContent)
-      .toBe('Use domain grouping instead');
+      .toBe('Group by domain');
     expect(root.elements['#link-smart-group-settings'].textContent)
-      .toBe('Set up an API key');
+      .toBe('Add an API key');
 
     root.elements['#btn-smart-group-domain-fallback'].click();
     root.elements['#link-smart-group-settings'].click();

@@ -6,12 +6,14 @@ import { MAX_DRIVE_STRING_LENGTH } from '../../core/drive-sync.js';
 import { Storage } from '../../core/storage.js';
 import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
-import { formatRestoreFeedback } from '../restore-feedback.js';
+import { formatRestoreFeedback, friendlyErrorMessage } from '../restore-feedback.js';
+import { displayStashName, formatRecordDate, pluralize } from '../record-format.js';
 import {
   formatPortableImportSummary,
   portableImportToastType,
 } from '../portable-import-summary.js';
 import { renderActionableEmptyState } from './actionable-empty-state.js';
+import { closeMoreMenu, wireMoreMenu } from '../more-menu.js';
 
 const SAFE_FAVICON_SCHEMES = new Set(['http', 'https', 'chrome', 'data']);
 
@@ -34,6 +36,83 @@ export function safeFaviconUrl(value) {
   return SAFE_FAVICON_SCHEMES.has(scheme) ? value : null;
 }
 
+// Undo of a fresh stash puts the tabs back the way they were taken: a window
+// stash reopens as its own window, a domain or group stash in this window.
+function undoRestoreMode(stash) {
+  return stash?.source === 'window' ? 'windows' : 'here';
+}
+
+/**
+ * Undo a stash that was just created: reopen its tabs and delete it. Safe to
+ * call after the stash was already restored elsewhere (the worker refuses to
+ * reopen a stash that is gone or marked restored) and safe to call twice.
+ *
+ * @returns {Promise<'restored'|'already-restored'|'failed'>}
+ */
+export async function undoStash(stash, {
+  send = sendOrThrow,
+  notify = showToast,
+} = {}) {
+  let result;
+  try {
+    result = await send({
+      action: 'restoreStash',
+      stashId: stash.id,
+      options: { mode: undoRestoreMode(stash) },
+      ifUnrestored: true,
+      deleteAfterRestore: true,
+    });
+  } catch (err) {
+    notify(`Undo failed: ${friendlyErrorMessage(err)}`, 'error');
+    return 'failed';
+  }
+  if (result?.alreadyRestored) {
+    notify('Nothing to undo \u2014 these tabs were already restored.', 'info');
+    return 'already-restored';
+  }
+  const feedback = formatRestoreFeedback(result, { source: 'stash' });
+  notify(feedback.message, feedback.type);
+  return 'restored';
+}
+
+/**
+ * Success toast for a stash action ("Stashed 3 tabs from github.com") with an
+ * Undo button that reopens the tabs and removes the stash.
+ *
+ * @param {object} stash - the stash record returned by stashDomain/Group/Window
+ * @param {object} [opts]
+ * @param {string} [opts.from] - human label of what was stashed
+ * @param {Function} [opts.onUndone] - called after an undo attempt (refresh views)
+ */
+export function showStashedToast(stash, {
+  from = '',
+  onUndone = () => {},
+  send = sendOrThrow,
+  notify = showToast,
+} = {}) {
+  const count = Number.isInteger(stash?.tabCount) ? stash.tabCount : 0;
+  const message = `Stashed ${pluralize(count, 'tab')}${from ? ` from ${from}` : ''}`;
+  if (!stash?.id) {
+    notify(message, 'success');
+    return;
+  }
+  let undone = false;
+  notify(message, 'success', 8000, {
+    label: 'Undo',
+    callback: async () => {
+      if (undone) return;
+      undone = true;
+      const outcome = await undoStash(stash, { send, notify });
+      try {
+        await onUndone(outcome);
+      } catch {
+        // The undo itself already reported its outcome; a failed view
+        // refresh is picked up by the next tabs-changed refresh.
+      }
+    },
+  });
+}
+
 export class StashList {
   constructor(rootEl, { navigate = () => {} } = {}) {
     this.root = rootEl;
@@ -45,8 +124,15 @@ export class StashList {
     // would let one restore's completion silence another's progress.
     this.activeRestores = new Map();
 
-    rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => this.exportStashes());
-    rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => this.importStashes(e));
+    rootEl.querySelector('#btn-export-stashes').addEventListener('click', () => {
+      closeMoreMenu(rootEl);
+      void this.exportStashes();
+    });
+    rootEl.querySelector('#btn-import-stashes').addEventListener('change', (e) => {
+      closeMoreMenu(rootEl);
+      void this.importStashes(e);
+    });
+    wireMoreMenu(rootEl);
 
     // Listen for restore progress broadcasts from the service worker
     // Latest pending progress per restore id, flushed once per frame.
@@ -128,7 +214,7 @@ export class StashList {
       return true;
     } catch (err) {
       this._lastRefreshError = err;
-      if (notifyFailure) showToast('Failed to load stashes: ' + err.message, 'error');
+      if (notifyFailure) showToast('Could not load stashes: ' + friendlyErrorMessage(err), 'error');
       return false;
     }
   }
@@ -152,17 +238,18 @@ export class StashList {
 
   createStashCard(stash) {
     const card = document.createElement('div');
-    card.className = 'stash-card';
+    card.className = 'stash-card record-card';
     card.dataset.restoreId = stash.id;
+    const label = displayStashName(stash.name);
 
-    // Header: name + source badge + restored badge
+    // Header: name (truncates) + source badge + restored badge
     const header = document.createElement('div');
     header.className = 'stash-card-header';
 
     const name = document.createElement('span');
     name.className = 'stash-name';
-    name.textContent = stash.name;
-    name.title = stash.name;
+    name.textContent = label;
+    name.title = label;
 
     const badge = document.createElement('span');
     badge.className = `stash-source-badge source-${stash.source || 'window'}`;
@@ -178,10 +265,14 @@ export class StashList {
       header.appendChild(restoredBadge);
     }
 
-    // Favicon preview
+    // Metadata line: favicons, then "N tabs · W windows · date"
     const allTabs = (stash.windows || []).flatMap(w => w.tabs || []);
+    const metaRow = document.createElement('div');
+    metaRow.className = 'record-meta-row';
+
     const preview = document.createElement('div');
     preview.className = 'stash-preview';
+    preview.setAttribute('aria-hidden', 'true');
 
     const maxFavicons = 5;
     const shown = allTabs.slice(0, maxFavicons);
@@ -203,27 +294,19 @@ export class StashList {
       preview.appendChild(more);
     }
 
-    // Meta line
     const meta = document.createElement('div');
     meta.className = 'stash-meta';
+    meta.textContent = this.buildMetaText(stash, allTabs.length);
 
-    const date = new Date(stash.createdAt);
-    const dateStr = date.toLocaleDateString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
+    metaRow.appendChild(preview);
+    metaRow.appendChild(meta);
 
-    const winCount = (stash.windows || []).length;
-    const parts = [`${stash.tabCount || allTabs.length} tabs`];
-    if (winCount > 1) parts.push(`${winCount} windows`);
-    parts.push(dateStr);
-    meta.textContent = parts.join(' \u00b7 ');
-
-    // Actions
+    // Actions: Restore (primary) + Restore here on the left; export, Drive
+    // and a low-emphasis Delete on the right.
     const actions = document.createElement('div');
-    actions.className = 'stash-actions';
+    actions.className = 'stash-actions record-actions';
 
-    const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
+    const runRestore = (btn, idleText, mode) => async () => {
       if (stash.restoredAt) {
         const ok = await showConfirm({
           title: 'Restore again?',
@@ -232,65 +315,59 @@ export class StashList {
         });
         if (!ok) return;
       }
-      restoreBtn.disabled = true;
-      restoreBtn.textContent = 'Restoring...';
+      btn.disabled = true;
+      btn.textContent = 'Restoring...';
       this.beginRestore(stash.id);
       try {
-        await this.restoreStash(stash.id, { mode: 'windows' });
+        await this.restoreStash(stash.id, { mode });
       } finally {
         if (this.endRestore(stash.id)) this.hideProgress(stash.id);
-        restoreBtn.disabled = false;
-        restoreBtn.textContent = 'Restore';
+        btn.disabled = false;
+        btn.textContent = idleText;
       }
-    });
+    };
 
-    const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
-      if (stash.restoredAt) {
-        const ok = await showConfirm({
-          title: 'Restore again?',
-          message: 'This stash was already restored. Restore again?',
-          confirmLabel: 'Restore',
-        });
-        if (!ok) return;
-      }
-      restoreHereBtn.disabled = true;
-      restoreHereBtn.textContent = 'Restoring...';
-      this.beginRestore(stash.id);
-      try {
-        await this.restoreStash(stash.id, { mode: 'here' });
-      } finally {
-        if (this.endRestore(stash.id)) this.hideProgress(stash.id);
-        restoreHereBtn.disabled = false;
-        restoreHereBtn.textContent = 'Restore here';
-      }
-    });
+    const restoreBtn = this.createBtn('Restore', 'action-btn', null);
+    restoreBtn.title = 'Reopen these tabs in their own windows';
+    restoreBtn.addEventListener('click', runRestore(restoreBtn, 'Restore', 'windows'));
+
+    const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', null);
+    restoreHereBtn.title = 'Reopen these tabs in this window';
+    restoreHereBtn.addEventListener('click', runRestore(restoreHereBtn, 'Restore here', 'here'));
+
+    const spacer = document.createElement('span');
+    spacer.className = 'record-actions-spacer';
 
     // Per-stash Export button (download arrow)
-    const exportBtn = this.createBtn('\u2913', 'stash-btn icon-btn', async () => {
+    const exportBtn = this.createBtn('\u2913', 'action-btn secondary icon-btn record-icon-btn', async () => {
       await this.exportSingleStash(stash);
     });
     exportBtn.title = 'Export this stash as JSON';
+    exportBtn.setAttribute('aria-label', `Export ${label}`);
 
     // Per-stash Drive upload button (cloud icon, shown when Drive connected)
-    const driveBtn = this.createBtn('\u2601', 'stash-btn icon-btn', async () => {
+    const driveBtn = this.createBtn('\u2601', 'action-btn secondary icon-btn record-icon-btn', async () => {
       driveBtn.disabled = true;
       try {
         await this.send({ action: 'exportStashToDrive', stashId: stash.id });
-        showToast(`"${stash.name}" saved to Drive`, 'success');
+        showToast(`"${label}" saved to Drive`, 'success');
       } catch (err) {
-        showToast('Drive upload failed: ' + err.message, 'error');
+        showToast('Drive upload failed: ' + friendlyErrorMessage(err), 'error');
       }
       driveBtn.disabled = false;
     });
     driveBtn.title = 'Save to Google Drive';
+    driveBtn.setAttribute('aria-label', `Save ${label} to Google Drive`);
     if (!this.driveConnected) driveBtn.hidden = true;
 
-    const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
+    const deleteBtn = this.createBtn('Delete', 'action-btn ghost-danger', async () => {
       await this.deleteStash(stash);
     });
+    deleteBtn.setAttribute('aria-label', `Delete stash ${label}`);
 
     actions.appendChild(restoreBtn);
     actions.appendChild(restoreHereBtn);
+    actions.appendChild(spacer);
     actions.appendChild(exportBtn);
     actions.appendChild(driveBtn);
     actions.appendChild(deleteBtn);
@@ -304,11 +381,20 @@ export class StashList {
     `;
 
     card.appendChild(header);
-    card.appendChild(preview);
-    card.appendChild(meta);
+    card.appendChild(metaRow);
     card.appendChild(progressContainer);
     card.appendChild(actions);
     return card;
+  }
+
+  buildMetaText(stash, storedTabCount = 0, now = new Date()) {
+    const tabCount = Number.isInteger(stash?.tabCount) ? stash.tabCount : storedTabCount;
+    const winCount = (stash?.windows || []).length;
+    const parts = [pluralize(tabCount, 'tab')];
+    if (winCount > 1) parts.push(`${winCount} windows`);
+    const date = formatRecordDate(stash?.createdAt, { now });
+    if (date) parts.push(date);
+    return parts.join(' \u00b7 ');
   }
 
   hideProgress(restoreId) {
@@ -336,14 +422,14 @@ export class StashList {
       const refreshed = await this.refresh({ notifyFailure: false });
       if (!refreshed) {
         showToast(
-          `${feedback.message} View could not refresh: ${this._lastRefreshError?.message || 'unknown error'}.`,
+          `${feedback.message} View could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}.`,
           'error',
         );
         return;
       }
       showToast(feedback.message, feedback.type);
     } catch (err) {
-      showToast(`Restore failed: ${err.message}`, 'error');
+      showToast(`Restore failed: ${friendlyErrorMessage(err)}`, 'error');
     }
   }
 
@@ -354,36 +440,36 @@ export class StashList {
         try {
           await this.send({ action: 'undoDeleteStash', stash });
         } catch (err) {
-          showToast('Undo failed: ' + err.message, 'error');
+          showToast('Undo failed: ' + friendlyErrorMessage(err), 'error');
           return;
         }
         const refreshed = await this.refresh({ notifyFailure: false });
         if (!refreshed) {
-          showToast(`Restored "${stash.name}", but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`, 'error');
+          showToast(`Restored "${displayStashName(stash.name)}", but the view could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}`, 'error');
           return;
         }
-        showToast(`Restored "${stash.name}"`, 'success');
+        showToast(`Restored "${displayStashName(stash.name)}"`, 'success');
       },
     };
 
     try {
       await this.send({ action: 'deleteStash', stashId: stash.id });
     } catch (err) {
-      showToast('Delete failed: ' + err.message, 'error');
+      showToast('Delete failed: ' + friendlyErrorMessage(err), 'error');
       return;
     }
 
     const refreshed = await this.refresh({ notifyFailure: false });
     if (!refreshed) {
       showToast(
-        `Deleted "${stash.name}", but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+        `Deleted "${displayStashName(stash.name)}", but the view could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}`,
         'error',
         8000,
         undoOptions,
       );
       return;
     }
-    showToast(`Deleted "${stash.name}"`, 'success', 8000, undoOptions);
+    showToast(`Deleted "${displayStashName(stash.name)}"`, 'success', 8000, undoOptions);
   }
 
   async exportSingleStash(stash) {
@@ -392,12 +478,12 @@ export class StashList {
         action: 'buildPortableStashExport',
         stashId: stash.id,
       });
-      const safeName = (stash.name || 'stash').replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
+      const safeName = (displayStashName(stash.name) || 'stash').replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
       downloadJson(payload, `tabkebab-stash-${safeName}-${Date.now()}.json`);
 
       showToast('Stash exported', 'success');
     } catch (err) {
-      showToast('Export failed: ' + err.message, 'error');
+      showToast('Export failed: ' + friendlyErrorMessage(err), 'error');
     }
   }
 
@@ -412,7 +498,7 @@ export class StashList {
 
       showToast('Stashes exported', 'success');
     } catch (err) {
-      showToast('Export failed: ' + err.message, 'error');
+      showToast('Export failed: ' + friendlyErrorMessage(err), 'error');
     }
   }
 
@@ -426,7 +512,7 @@ export class StashList {
       const refreshed = await this.refresh({ notifyFailure: false });
       if (!refreshed) {
         showToast(
-          `Stashes were imported, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+          `Stashes were imported, but the view could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}`,
           'error',
         );
         return;
@@ -436,7 +522,7 @@ export class StashList {
         portableImportToastType(result),
       );
     } catch (err) {
-      showToast('Import failed: ' + err.message, 'error');
+      showToast('Import failed: ' + friendlyErrorMessage(err), 'error');
     } finally {
       e.target.value = '';
     }
@@ -445,8 +531,9 @@ export class StashList {
   createBtn(text, className, onClick) {
     const btn = document.createElement('button');
     btn.className = className;
+    btn.type = 'button';
     btn.textContent = text;
-    btn.addEventListener('click', onClick);
+    if (onClick) btn.addEventListener('click', onClick);
     return btn;
   }
 

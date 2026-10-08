@@ -3,12 +3,14 @@
 import { showToast } from './toast.js';
 import { downloadJson, readPortableImportFile } from '../../core/export-import.js';
 import { sendOrThrow } from '../message-client.js';
-import { formatRestoreFeedback } from '../restore-feedback.js';
+import { formatRestoreFeedback, friendlyErrorMessage } from '../restore-feedback.js';
+import { defaultSessionName, formatRecordDate, pluralize } from '../record-format.js';
 import {
   formatPortableImportSummary,
   portableImportToastType,
 } from '../portable-import-summary.js';
 import { renderActionableEmptyState } from './actionable-empty-state.js';
+import { closeMoreMenu, wireMoreMenu } from '../more-menu.js';
 
 export class SessionManager {
   constructor(rootEl, { navigate = () => {} } = {}) {
@@ -23,8 +25,15 @@ export class SessionManager {
     this.activeRestores = new Map();
 
     rootEl.querySelector('#btn-save-session').addEventListener('click', () => this.saveSession());
-    rootEl.querySelector('#btn-export').addEventListener('click', () => this.export());
-    rootEl.querySelector('#btn-import').addEventListener('change', (e) => this.import(e));
+    rootEl.querySelector('#btn-export').addEventListener('click', () => {
+      closeMoreMenu(rootEl);
+      void this.export();
+    });
+    rootEl.querySelector('#btn-import').addEventListener('change', (e) => {
+      closeMoreMenu(rootEl);
+      void this.import(e);
+    });
+    wireMoreMenu(rootEl);
 
     // Allow pressing Enter in the input to save
     rootEl.querySelector('#session-name').addEventListener('keydown', (e) => {
@@ -141,7 +150,7 @@ export class SessionManager {
       return true;
     } catch (err) {
       this._lastRefreshError = err;
-      if (notifyFailure) this.notify('Failed to load sessions: ' + err.message, 'error');
+      if (notifyFailure) this.notify('Could not load sessions: ' + friendlyErrorMessage(err), 'error');
       return false;
     }
   }
@@ -210,16 +219,7 @@ export class SessionManager {
 
   createSessionCard(session, isAutoSave) {
     const card = document.createElement('div');
-    card.className = `session-card${isAutoSave ? ' session-auto' : ''}`;
-
-    const date = new Date(session.createdAt);
-    const dateStr = date.toLocaleDateString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-
-    const meta = this.buildMetaText(session, dateStr);
-
+    card.className = `session-card record-card${isAutoSave ? ' session-auto' : ''}`;
     card.dataset.restoreId = session.id;
 
     // For auto-saves, strip the "[Auto] " prefix since the tab already indicates it
@@ -227,63 +227,57 @@ export class SessionManager {
       ? session.name.replace(/^\[Auto] /, '')
       : session.name;
 
-    card.innerHTML = `
-      <div class="session-name">${this.escapeHtml(displayName)}</div>
-      <div class="session-meta">${meta}</div>
-      <div class="restore-progress">
-        <div class="restore-progress-bar"><div class="restore-progress-fill"></div></div>
-        <div class="restore-progress-label"></div>
-      </div>
-      <div class="session-actions"></div>
+    const nameEl = document.createElement('div');
+    nameEl.className = 'session-name';
+    nameEl.textContent = displayName;
+    nameEl.title = displayName;
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'session-meta';
+    metaEl.textContent = this.buildMetaText(session);
+
+    const progress = document.createElement('div');
+    progress.className = 'restore-progress';
+    progress.innerHTML = `
+      <div class="restore-progress-bar"><div class="restore-progress-fill"></div></div>
+      <div class="restore-progress-label"></div>
     `;
 
-    const actions = card.querySelector('.session-actions');
+    const actions = document.createElement('div');
+    actions.className = 'session-actions record-actions';
 
-    const restoreBtn = this.createBtn('Restore', 'action-btn secondary', async () => {
-      restoreBtn.disabled = true;
-      restoreBtn.textContent = 'Restoring...';
+    const runRestore = (btn, idleText, mode) => async () => {
+      btn.disabled = true;
+      btn.textContent = 'Restoring...';
       this.beginRestore(session.id);
       try {
         const result = await this.send({
           action: 'restoreSession',
           sessionId: session.id,
-          options: { mode: 'windows' },
+          options: { mode },
         });
         this.showRestoreResult(result);
       } catch (err) {
-        showToast(`Restore failed: ${err.message}`, 'error');
+        showToast(`Restore failed: ${friendlyErrorMessage(err)}`, 'error');
       } finally {
         if (this.endRestore(session.id)) this.hideProgress(session.id);
-        restoreBtn.disabled = false;
-        restoreBtn.textContent = 'Restore';
+        btn.disabled = false;
+        btn.textContent = idleText;
       }
-    });
+    };
 
-    const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', async () => {
-      restoreHereBtn.disabled = true;
-      restoreHereBtn.textContent = 'Restoring...';
-      this.beginRestore(session.id);
-      try {
-        const result = await this.send({
-          action: 'restoreSession',
-          sessionId: session.id,
-          options: { mode: 'here' },
-        });
-        this.showRestoreResult(result);
-      } catch (err) {
-        showToast(`Restore failed: ${err.message}`, 'error');
-      } finally {
-        if (this.endRestore(session.id)) this.hideProgress(session.id);
-        restoreHereBtn.disabled = false;
-        restoreHereBtn.textContent = 'Restore here';
-      }
-    });
+    const restoreBtn = this.createBtn('Restore', 'action-btn', null);
+    restoreBtn.title = 'Reopen this session in new windows';
+    restoreBtn.addEventListener('click', runRestore(restoreBtn, 'Restore', 'windows'));
 
-    const exportBtn = document.createElement('button');
-    exportBtn.className = 'action-btn secondary icon-btn';
-    exportBtn.title = 'Export this session';
-    exportBtn.innerHTML = '\u2913'; // downwards arrow to bar
-    exportBtn.addEventListener('click', async () => {
+    const restoreHereBtn = this.createBtn('Restore here', 'action-btn secondary', null);
+    restoreHereBtn.title = 'Reopen this session in this window';
+    restoreHereBtn.addEventListener('click', runRestore(restoreHereBtn, 'Restore here', 'here'));
+
+    const spacer = document.createElement('span');
+    spacer.className = 'record-actions-spacer';
+
+    const exportBtn = this.createBtn('\u2913', 'action-btn secondary icon-btn record-icon-btn', async () => {
       try {
         const payload = await this.send({
           action: 'buildPortableSessionExport',
@@ -291,21 +285,29 @@ export class SessionManager {
         });
         const safeName = (session.name || 'session').replace(/[^a-z0-9_-]/gi, '_').slice(0, 40);
         downloadJson(payload, `tabkebab-session-${safeName}-${Date.now()}.json`);
-        showToast(`Exported "${session.name}"`, 'success');
+        showToast(`Exported "${displayName}"`, 'success');
       } catch (err) {
-        showToast('Export failed: ' + err.message, 'error');
+        showToast('Export failed: ' + friendlyErrorMessage(err), 'error');
       }
     });
+    exportBtn.title = 'Export this session as JSON';
+    exportBtn.setAttribute('aria-label', `Export ${displayName}`);
 
-    const deleteBtn = this.createBtn('Delete', 'action-btn danger', async () => {
+    const deleteBtn = this.createBtn('Delete', 'action-btn ghost-danger', async () => {
       await this.deleteSessionRecord(session);
     });
+    deleteBtn.setAttribute('aria-label', `Delete session ${displayName}`);
 
     actions.appendChild(restoreBtn);
     actions.appendChild(restoreHereBtn);
+    actions.appendChild(spacer);
     actions.appendChild(exportBtn);
     actions.appendChild(deleteBtn);
 
+    card.appendChild(nameEl);
+    card.appendChild(metaEl);
+    card.appendChild(progress);
+    card.appendChild(actions);
     return card;
   }
 
@@ -314,7 +316,7 @@ export class SessionManager {
     try {
       deletion = await this.send({ action: 'deleteSession', sessionId: session.id });
     } catch (error) {
-      this.notify(`Delete failed: ${error.message}`, 'error');
+      this.notify(`Delete failed: ${friendlyErrorMessage(error)}`, 'error');
       return false;
     }
     if (deletion?.deleted !== true) {
@@ -331,7 +333,7 @@ export class SessionManager {
           result = await this.send({ action: 'undoDeleteSession', session });
           if (result?.restored !== true) throw new Error('Worker did not confirm the restore');
         } catch (error) {
-          this.notify(`Undo failed: ${error.message}`, 'error');
+          this.notify(`Undo failed: ${friendlyErrorMessage(error)}`, 'error');
           return;
         }
         try {
@@ -353,21 +355,21 @@ export class SessionManager {
     return true;
   }
 
-  buildMetaText(session, dateStr) {
-    if (session.windows) {
-      const tabCount = session.windows.reduce((sum, w) => sum + w.tabCount, 0);
+  buildMetaText(session, now = new Date()) {
+    const dateStr = formatRecordDate(session?.createdAt, { now });
+    const parts = [];
+    if (Array.isArray(session?.windows)) {
+      const tabCount = session.windows.reduce((sum, w) => sum + (w.tabCount ?? w.tabs?.length ?? 0), 0);
       const winCount = session.windows.length;
       const groupCount = session.windows.reduce((sum, w) => sum + (w.groups?.length || 0), 0);
-      const winLabel = winCount === 1 ? '1 window' : `${winCount} windows`;
-      let meta = `${tabCount} tabs \u00b7 ${winLabel}`;
-      if (groupCount > 0) {
-        meta += ` \u00b7 ${groupCount} group${groupCount !== 1 ? 's' : ''}`;
-      }
-      return `${meta} \u00b7 ${dateStr}`;
+      parts.push(pluralize(tabCount, 'tab'), pluralize(winCount, 'window'));
+      if (groupCount > 0) parts.push(pluralize(groupCount, 'group'));
+    } else {
+      // v1 fallback
+      parts.push(pluralize(session?.tabs ? session.tabs.length : 0, 'tab'));
     }
-    // v1 fallback
-    const tabCount = session.tabs ? session.tabs.length : 0;
-    return `${tabCount} tabs \u00b7 ${dateStr}`;
+    if (dateStr) parts.push(dateStr);
+    return parts.join(' \u00b7 ');
   }
 
   showRestoreResult(result) {
@@ -375,26 +377,22 @@ export class SessionManager {
     showToast(feedback.message, feedback.type);
   }
 
-  async saveSession() {
+  async saveSession({ now = new Date() } = {}) {
     const input = this.root.querySelector('#session-name');
-    const name = input.value.trim();
-    if (!name) {
-      showToast('Enter a session name', 'error');
-      input.focus();
-      return;
-    }
+    // An empty name is not an error: fall back to a timestamped default.
+    const name = input.value.trim() || defaultSessionName(now);
 
     try {
       await this.send({ action: 'saveSession', name });
       input.value = '';
       const refreshed = await this.refresh({ notifyFailure: false });
       if (!refreshed) {
-        showToast(`Session "${name}" was saved, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`, 'error');
+        showToast(`Session "${name}" was saved, but the view could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}`, 'error');
         return;
       }
       showToast(`Session "${name}" saved`, 'success');
     } catch (err) {
-      showToast('Failed to save session: ' + err.message, 'error');
+      showToast('Could not save session: ' + friendlyErrorMessage(err), 'error');
     }
   }
 
@@ -404,7 +402,7 @@ export class SessionManager {
       downloadJson(payload, `tabkebab-export-${Date.now()}.json`);
       showToast('Data exported', 'success');
     } catch (err) {
-      showToast('Export failed: ' + err.message, 'error');
+      showToast('Export failed: ' + friendlyErrorMessage(err), 'error');
     }
   }
 
@@ -418,7 +416,7 @@ export class SessionManager {
       const refreshed = await this.refresh({ notifyFailure: false });
       if (!refreshed) {
         showToast(
-          `Data was imported, but the view could not refresh: ${this._lastRefreshError?.message || 'unknown error'}`,
+          `Data was imported, but the view could not refresh: ${friendlyErrorMessage(this._lastRefreshError)}`,
           'error',
         );
         return;
@@ -428,7 +426,7 @@ export class SessionManager {
         portableImportToastType(result),
       );
     } catch (err) {
-      showToast('Import failed: ' + err.message, 'error');
+      showToast('Import failed: ' + friendlyErrorMessage(err), 'error');
     } finally {
       // Reset file input so the same file can be imported again.
       e.target.value = '';
@@ -438,8 +436,9 @@ export class SessionManager {
   createBtn(text, className, onClick) {
     const btn = document.createElement('button');
     btn.className = className;
+    btn.type = 'button';
     btn.textContent = text;
-    btn.addEventListener('click', onClick);
+    if (onClick) btn.addEventListener('click', onClick);
     return btn;
   }
 

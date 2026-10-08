@@ -575,7 +575,7 @@ describe('side panel open requires a user gesture (4.10)', () => {
   });
 });
 
-describe('stash names count only the tabs actually stored', () => {
+describe('stash names omit the count; tabCount reflects only stored tabs', () => {
   test('stashWindow and stashGroup names exclude non-restorable tabs', async () => {
     installChromeMock({
       windows: [{ id: 1 }, { id: 2, focused: true }],
@@ -592,11 +592,73 @@ describe('stash names count only the tabs actually stored', () => {
     const worker = await freshWorker('stash-names');
 
     const windowResult = await worker.handleMessage({ action: 'stashWindow', windowId: 1, windowNumber: 1 });
-    expect(windowResult.stash.name).toBe('Window 1 (2 tabs)');
+    expect(windowResult.stash.name).toBe('Window 1');
     expect(windowResult.stash.tabCount).toBe(2);
 
     const groupResult = await worker.handleMessage({ action: 'stashGroup', groupId: 10 });
-    expect(groupResult.stash.name).toBe('Research [group] (1 tabs)');
+    expect(groupResult.stash.name).toBe('Research [group]');
     expect(groupResult.stash.tabCount).toBe(1);
+  });
+});
+
+describe('stash undo (restoreStash ifUnrestored) is safe after a restore', () => {
+  function seedStash(overrides = {}) {
+    const stash = {
+      id: 'undo-stash',
+      name: 'a.test',
+      source: 'domain',
+      createdAt: 1,
+      tabCount: 1,
+      windows: [{ tabCount: 1, tabs: [{ url: 'https://a.test/', title: 'A' }] }],
+      ...overrides,
+    };
+    stashRecords.set(stash.id, structuredClone(stash));
+    return stash;
+  }
+
+  test('a stash already restored and removed reports alreadyRestored without reopening tabs', async () => {
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [] });
+    const worker = await freshWorker('undo-missing');
+    const before = harness.snapshot().tabs.length;
+
+    const result = await worker.handleMessage({
+      action: 'restoreStash', stashId: 'gone', ifUnrestored: true, deleteAfterRestore: true,
+    });
+
+    expect(result).toEqual({ alreadyRestored: true, reason: 'missing' });
+    expect(harness.snapshot().tabs.length).toBe(before);
+  });
+
+  test('a stash marked restored is not restored again by undo', async () => {
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [] });
+    seedStash({ restoredAt: 5 });
+    const worker = await freshWorker('undo-restored');
+    const before = harness.snapshot().tabs.length;
+
+    const result = await worker.handleMessage({
+      action: 'restoreStash', stashId: 'undo-stash', ifUnrestored: true, deleteAfterRestore: true,
+    });
+
+    expect(result).toEqual({ alreadyRestored: true, reason: 'restored' });
+    expect(harness.snapshot().tabs.length).toBe(before);
+    expect(stashRecords.has('undo-stash')).toBeTrue();
+  });
+
+  test('an unrestored stash is reopened and deleted by undo', async () => {
+    installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [] });
+    seedStash();
+    const worker = await freshWorker('undo-fresh');
+
+    const result = await worker.handleMessage({
+      action: 'restoreStash',
+      stashId: 'undo-stash',
+      options: { mode: 'here' },
+      ifUnrestored: true,
+      deleteAfterRestore: true,
+    });
+
+    expect(result.restoredCount).toBe(1);
+    expect(result.complete).toBeTrue();
+    expect(stashRecords.has('undo-stash')).toBeFalse();
   });
 });
