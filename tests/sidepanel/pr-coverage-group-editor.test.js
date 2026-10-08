@@ -447,17 +447,17 @@ describe('manual groups', () => {
     expect(root.querySelectorAll('#ungrouped-tabs .tab-item').map((el) => String(el.dataset.tabId))).toEqual(['2', '3']);
   });
 
-  // BUG: drive-sync accepts a manual group without `tabUrls` (core/drive-sync.js:237
-  // only validates it when present) and the core was hardened for that shape
-  // (fix-plan 5.6), but GroupEditor.renderGroups / renderUngrouped still read
-  // `group.tabUrls.length` / iterate it unguarded
-  // (sidepanel/components/group-editor.js:360, :440; applyToChrome :888), so one such group
-  // throws a TypeError and the whole Groups view fails to render.
-  test.skip('a legacy manual group without tabUrls renders as empty instead of throwing', () => {
+  // Drive sync accepts a manual group without `tabUrls` (core/drive-sync.js
+  // only validates it when present); getManualGroups normalizes it to [] so
+  // the Groups view still renders.
+  test('a legacy manual group without tabUrls renders as empty instead of throwing', async () => {
     installChromeMock();
     const { editor } = buildEditor();
-    expect(() => editor.renderGroups({ legacy: { name: 'Old', color: 'blue' } }, tabs)).not.toThrow();
-    expect(() => editor.renderUngrouped({ legacy: { name: 'Old', color: 'blue' } }, tabs)).not.toThrow();
+    editor.send = async () => ({ legacy: { name: 'Old', color: 'blue' } });
+    const loaded = await editor.getManualGroups();
+    expect(loaded.legacy.tabUrls).toEqual([]);
+    expect(() => editor.renderGroups(loaded, tabs)).not.toThrow();
+    expect(() => editor.renderUngrouped(loaded, tabs)).not.toThrow();
   });
 
   test('delete group asks first; cancel keeps it, confirm deletes and reports a vanished group', async () => {

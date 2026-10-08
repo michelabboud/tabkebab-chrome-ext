@@ -320,7 +320,12 @@ export class GroupEditor {
   // ── Manual Groups ──
 
   async getManualGroups() {
-    return (await this.send({ action: 'getManualGroups' })) || {};
+    const groups = (await this.send({ action: 'getManualGroups' })) || {};
+    // Older or synced groups may lack tabUrls; treat them as empty.
+    for (const group of Object.values(groups)) {
+      if (group && !Array.isArray(group.tabUrls)) group.tabUrls = [];
+    }
+    return groups;
   }
 
   renderGroups(groups, tabs) {
