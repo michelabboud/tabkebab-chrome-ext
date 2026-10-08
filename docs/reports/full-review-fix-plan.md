@@ -135,6 +135,6 @@ All workstreams WS1–WS7 implemented and merged into `claude/sleepy-galileo-6w8
 Integration fixes added during merge: auto-bookmark-on-stash only covers restorable (actually stashed) tabs; Drive settings import keeps
 `neverDeleteFromDrive` on and never shortens `driveRetentionDays`.
 Open / needs live verification:
-- Gemini 3.x `thinkingConfig.thinkingLevel` is sent as `"low"`; REST enum is `LOW` — confirm with a live call.
+- ~~Gemini 3.x `thinkingLevel: "low"` casing~~ — verified 2026-10-08 with a live `gemini-3.8-flash` call (finishReason STOP); no change needed.
 - `core/focus.js` `handleDistraction` still calls `chrome.sidePanel.open` without a user gesture (already caught; no-op).
 - Not exercised in a real browser: all changes are covered by mocked-Chrome tests only.
