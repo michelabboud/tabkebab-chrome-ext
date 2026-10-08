@@ -100,7 +100,8 @@ export async function saveSession(name, allWindows = true) {
   const sessionName = typeof name === 'string'
     ? name.slice(0, MAX_CAPTURED_TEXT_LENGTH)
     : name;
-  const tabs = await getAllTabs({ allWindows });
+  // Incognito tabs are never persisted.
+  const tabs = await getAllTabs({ allWindows, excludeIncognito: true });
 
   // Query all Chrome tab groups for group metadata
   let chromeGroups = [];

@@ -12,7 +12,8 @@
     "sidePanel",
     "identity",
     "alarms",
-    "bookmarks"
+    "bookmarks",
+    "unlimitedStorage"
   ],
 
   "host_permissions": [

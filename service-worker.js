@@ -3,7 +3,7 @@
 import { getAllTabsGroupedByDomain, applyDomainGroupsToChrome, applySmartGroupsToChrome, getWindowStats, consolidateWindows, getManualGroups, createManualGroup, moveTabToManualGroup, deleteManualGroup } from './core/grouping.js';
 import { findDuplicates, findEmptyPages } from './core/duplicates.js';
 import { saveSession, restoreSession, listSessions, deleteSession, deleteSessions, restoreDeletedSession } from './core/sessions.js';
-import { getAllTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
+import { getAllTabs, excludeIncognitoTabs, focusTab, closeTabs, createNativeGroup, ungroupTabs, extractDomain } from './core/tabs-api.js';
 import { AIClient } from './core/ai/ai-client.js';
 import { chromeAIBrokerClient } from './core/ai/chrome-ai-broker-client.js';
 import { CHROME_AI_PORT_NAME } from './core/ai/chrome-ai-protocol.js';
@@ -45,7 +45,7 @@ async function getKeepAwakeList() {
 const AUTO_SAVE_PREFIX = '[Auto] ';
 
 async function autoSaveSessionUnlocked({
-  getTabs = () => getAllTabs({ allWindows: true }),
+  getTabs = () => getAllTabs({ allWindows: true, excludeIncognito: true }),
   loadSettings = getSettings,
   saveSnapshot = (name) => saveSession(name, true),
   getStorage = () => Storage.get('sessions'),
@@ -109,6 +109,31 @@ const ALARM_FOCUS_TICK = 'focusTick';
 
 // ── Alarm system ──
 
+/**
+ * Desired period (minutes) for every managed alarm; `null` means disabled.
+ * Exported for tests.
+ */
+export function desiredManagedAlarmPeriods(settings) {
+  const bookmarkFormat = settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains;
+  return {
+    [ALARM_AUTO_SAVE]: (settings.autoSaveIntervalHours || 24) * 60,
+    [ALARM_AUTO_KEBAB]: settings.autoKebabAfterHours > 0 ? 60 : null,
+    [ALARM_AUTO_STASH]: settings.autoStashAfterDays > 0 ? 360 : null,
+    [ALARM_AUTO_SYNC_DRIVE]: settings.autoSyncToDriveIntervalHours > 0
+      ? settings.autoSyncToDriveIntervalHours * 60
+      : null,
+    [ALARM_RETENTION_CLEANUP]: 720,
+    [ALARM_AUTO_BOOKMARK]: settings.autoBookmarkOnStash && bookmarkFormat ? 720 : null,
+  };
+}
+
+/**
+ * Reconcile managed alarms with settings. An alarm whose period is already
+ * correct is left untouched: re-creating it on every browser startup or
+ * settings save would reset its countdown, so long intervals (e.g. 24h
+ * auto-save on a browser restarted daily) would never fire. Only missing or
+ * changed alarms are (re)created, and disabled ones are cleared.
+ */
 async function reconfigureAlarms(settings) {
   if (!settings) settings = await getSettings();
   const failures = [];
@@ -122,54 +147,30 @@ async function reconfigureAlarms(settings) {
     }
   };
 
-  // Clear all managed alarms
-  const alarmNames = [ALARM_AUTO_SAVE, ALARM_AUTO_KEBAB, ALARM_AUTO_STASH, ALARM_AUTO_SYNC_DRIVE, ALARM_RETENTION_CLEANUP, ALARM_AUTO_BOOKMARK];
-  for (const name of alarmNames) {
-    await runAlarmOperation('clear', name, () => chrome.alarms.clear(name));
-  }
+  const desired = desiredManagedAlarmPeriods(settings);
+  for (const [name, period] of Object.entries(desired)) {
+    let existing = null;
+    try {
+      existing = (await chrome.alarms.get(name)) || null;
+    } catch (error) {
+      // Unknown state: fall through to the clear/create path below.
+      console.warn('[TabKebab] alarm get failed:', name, error);
+      existing = undefined;
+    }
 
-  // Auto-save session
-  const saveInterval = (settings.autoSaveIntervalHours || 24) * 60;
-  await runAlarmOperation('create', ALARM_AUTO_SAVE, () => chrome.alarms.create(
-    ALARM_AUTO_SAVE,
-    { periodInMinutes: saveInterval },
-  ));
+    if (period === null) {
+      if (existing !== null) {
+        await runAlarmOperation('clear', name, () => chrome.alarms.clear(name));
+      }
+      continue;
+    }
 
-  // Auto-kebab (hourly check)
-  if (settings.autoKebabAfterHours > 0) {
-    await runAlarmOperation('create', ALARM_AUTO_KEBAB, () => chrome.alarms.create(
-      ALARM_AUTO_KEBAB,
-      { periodInMinutes: 60 },
-    ));
-  }
+    if (existing && existing.periodInMinutes === period) continue;
 
-  // Auto-stash (6h check)
-  if (settings.autoStashAfterDays > 0) {
-    await runAlarmOperation('create', ALARM_AUTO_STASH, () => chrome.alarms.create(
-      ALARM_AUTO_STASH,
-      { periodInMinutes: 360 },
-    ));
-  }
-
-  // Auto-sync Drive
-  if (settings.autoSyncToDriveIntervalHours > 0) {
-    await runAlarmOperation('create', ALARM_AUTO_SYNC_DRIVE, () => chrome.alarms.create(
-      ALARM_AUTO_SYNC_DRIVE,
-      { periodInMinutes: settings.autoSyncToDriveIntervalHours * 60 },
-    ));
-  }
-
-  // Retention cleanup (12h)
-  await runAlarmOperation('create', ALARM_RETENTION_CLEANUP, () => chrome.alarms.create(
-    ALARM_RETENTION_CLEANUP,
-    { periodInMinutes: 720 },
-  ));
-
-  // Auto-bookmark (daily check if any bookmark format enabled + auto on stash)
-  if (settings.autoBookmarkOnStash && (settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains)) {
-    await runAlarmOperation('create', ALARM_AUTO_BOOKMARK, () => chrome.alarms.create(
-      ALARM_AUTO_BOOKMARK,
-      { periodInMinutes: 720 },
+    // chrome.alarms.create replaces an alarm with the same name.
+    await runAlarmOperation('create', name, () => chrome.alarms.create(
+      name,
+      { delayInMinutes: period, periodInMinutes: period },
     ));
   }
 
@@ -196,6 +197,8 @@ async function autoKebabOldTabs() {
 
     for (const tab of tabs) {
       if (tab.active || tab.discarded) continue;
+      // Never discard a tab that is playing audio (music, calls, video).
+      if (tab.audible) continue;
       if (tab.autoDiscardable === false) continue;
       if (keepAwake.has(extractDomain(tab.url))) continue;
       if ((tab.lastAccessed || Date.now()) > cutoff) continue;
@@ -211,7 +214,7 @@ async function autoStashOldTabsUnlocked() {
     if (settings.autoStashAfterDays <= 0) return;
 
     const keepAwake = new Set(await getKeepAwakeList());
-    const tabs = await getAllTabs({ allWindows: true });
+    const tabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
     const thresholdMs = settings.autoStashAfterDays * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - thresholdMs;
 
@@ -219,6 +222,8 @@ async function autoStashOldTabsUnlocked() {
     const windowBuckets = new Map();
     for (const tab of tabs) {
       if (tab.active) continue;
+      // Pinned and audio-playing tabs are in use even when not focused.
+      if (tab.pinned || tab.audible) continue;
       if (keepAwake.has(extractDomain(tab.url))) continue;
       if ((tab.lastAccessed || Date.now()) > cutoff) continue;
       if (tab.url.startsWith('chrome://')) continue;
@@ -258,6 +263,7 @@ async function autoStashOldTabsUnlocked() {
         stash,
         capturedTabs,
         emptyError: 'No stashable old tabs',
+        save: (record) => saveStashThenAutoBookmark(record, capturedTabs),
       });
     }
   } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
@@ -482,7 +488,7 @@ export async function runRetentionCleanup(options = {}) {
 
 // ── Bookmark system ──
 
-function generateBookmarkHtml(bookmarkData) {
+export function generateBookmarkHtml(bookmarkData) {
   const { date, time, formats } = bookmarkData;
 
   // Security-critical: escapes user-controlled data for safe HTML insertion
@@ -662,20 +668,33 @@ ${panelsHtml}
     });
   });
 
+  // Highlighting uses text nodes only: page titles/URLs are untrusted and
+  // must never be re-parsed as HTML.
+  function setPlainText(el,text){
+    while(el.firstChild)el.removeChild(el.firstChild);
+    el.appendChild(document.createTextNode(text));
+  }
+
   function clearHighlights(){
     allTabs.forEach(function(t){
       var ti=t.querySelector('.tab-title');
       var ur=t.querySelector('.tab-url');
-      ti.innerHTML=ti.textContent;
-      ur.innerHTML=ur.textContent;
+      if(ti)setPlainText(ti,ti.textContent);
+      if(ur)setPlainText(ur,ur.textContent);
     });
   }
 
   function highlightText(el,q){
+    if(!el)return;
     var text=el.textContent;
     var idx=text.toLowerCase().indexOf(q);
     if(idx===-1)return;
-    el.innerHTML=text.slice(0,idx)+'<mark>'+text.slice(idx,idx+q.length)+'</mark>'+text.slice(idx+q.length);
+    var mark=document.createElement('mark');
+    mark.appendChild(document.createTextNode(text.slice(idx,idx+q.length)));
+    while(el.firstChild)el.removeChild(el.firstChild);
+    el.appendChild(document.createTextNode(text.slice(0,idx)));
+    el.appendChild(mark);
+    el.appendChild(document.createTextNode(text.slice(idx+q.length)));
   }
 
   input.addEventListener('input',function(){
@@ -747,7 +766,11 @@ async function createBookmarksUnlocked(options = {}) {
 
   if (!byWindows && !byGroups && !byDomains) return { error: 'No bookmark format selected' };
 
-  const tabs = await getAllTabs({ allWindows: true });
+  // Callers that already captured tabs (stash paths) pass them in so exactly
+  // those tabs are bookmarked. Incognito tabs are never persisted.
+  const tabs = Array.isArray(options.tabs)
+    ? excludeIncognitoTabs(options.tabs)
+    : await getAllTabs({ allWindows: true, excludeIncognito: true });
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10);
   const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -759,40 +782,58 @@ async function createBookmarksUnlocked(options = {}) {
     createdAt: Date.now(),
     formats: {},
   };
+  if (typeof options.stashName === 'string') bookmarkData.stashName = options.stashName;
 
-  // Format 1: By windows (normalized numbering 1..N)
+  // Format 1: By windows (normalized numbering 1..N, windows without
+  // persistable tabs are skipped)
   if (byWindows) {
-    const windowStats = await getWindowStats();
+    const order = [];
+    try {
+      const windowStats = await getWindowStats();
+      for (const win of windowStats.windows) order.push(win.windowId);
+    } catch (e) { console.warn('[TabKebab] window stats failed:', e); }
+    for (const t of tabs) if (!order.includes(t.windowId)) order.push(t.windowId);
+
     const windowBookmarks = [];
-    let windowNum = 1;
-    for (const win of windowStats.windows) {
-      const winTabs = tabs.filter(t => t.windowId === win.windowId);
+    for (const windowId of order) {
+      const winTabs = tabs.filter(t => t.windowId === windowId);
+      if (winTabs.length === 0) continue;
       windowBookmarks.push({
-        name: `Window ${windowNum}`,
+        name: `Window ${windowBookmarks.length + 1}`,
         tabs: winTabs.map(t => ({ title: t.title, url: t.url })),
       });
-      windowNum++;
     }
     bookmarkData.formats.byWindows = windowBookmarks;
   }
 
-  // Format 2: By groups
+  // Format 2: By groups (derived from the bookmarked tabs themselves)
   if (byGroups) {
-    const groups = [];
+    let chromeGroups = [];
     try {
-      const chromeGroups = await chrome.tabGroups.query({});
-      for (const g of chromeGroups) {
-        const groupTabs = await chrome.tabs.query({ groupId: g.id });
-        groups.push({
-          name: g.title || 'Untitled',
-          color: g.color,
-          tabs: groupTabs.map(t => ({ title: t.title, url: t.url })),
-        });
-      }
+      chromeGroups = await chrome.tabGroups.query({});
     } catch (e) { console.warn('[TabKebab] tabGroups query failed:', e); }
 
-    // Ungrouped tabs
-    const ungrouped = tabs.filter(t => !t.groupId || t.groupId === -1);
+    const buckets = new Map();
+    for (const g of chromeGroups) buckets.set(g.id, { meta: g, tabs: [] });
+    const ungrouped = [];
+    for (const t of tabs) {
+      if (t.groupId === undefined || t.groupId === null || t.groupId === -1) {
+        ungrouped.push(t);
+        continue;
+      }
+      if (!buckets.has(t.groupId)) buckets.set(t.groupId, { meta: null, tabs: [] });
+      buckets.get(t.groupId).tabs.push(t);
+    }
+
+    const groups = [];
+    for (const { meta, tabs: groupTabs } of buckets.values()) {
+      if (groupTabs.length === 0) continue;
+      groups.push({
+        name: meta?.title || 'Untitled',
+        color: meta?.color || 'grey',
+        tabs: groupTabs.map(t => ({ title: t.title, url: t.url })),
+      });
+    }
     if (ungrouped.length > 0) {
       groups.push({
         name: 'Ungrouped',
@@ -824,9 +865,16 @@ async function createBookmarksUnlocked(options = {}) {
   // Save to Chrome bookmarks
   if (destination === 'chrome' || destination === 'all') {
     try {
-      await saveToChromeBoomarks(bookmarkData, dateStr);
+      const chromeResult = await saveToChromeBookmarks(bookmarkData, dateStr, {
+        stashLabel: typeof options.stashName === 'string' ? `Stash ${timeStr}` : null,
+      });
       results.created++;
       results.destinations.push('Chrome Bookmarks');
+      results.chromeBookmarksCreated = chromeResult.created;
+      if (chromeResult.truncated) {
+        results.truncated = true;
+        results.warning = `Chrome bookmark export stopped at ${MAX_BOOKMARKS_PER_EXPORT} bookmarks`;
+      }
     } catch (err) {
       results.chromeError = err.message;
     }
@@ -878,54 +926,225 @@ export async function createBookmarks(options = {}) {
   return withStateMutationLock(() => createBookmarksUnlocked(options));
 }
 
-async function saveToChromeBoomarks(bookmarkData, dateStr) {
-  // Find or create TabKebab root folder
+/**
+ * Stash save step that also auto-bookmarks exactly the captured tabs. It is
+ * passed as `persistCapturedStash({ save })`, so bookmarks are written after
+ * the stash commits but before any source tab is closed. A bookmark failure
+ * never blocks or fails the stash.
+ */
+async function saveStashThenAutoBookmark(stash, capturedTabs, {
+  save = saveStash,
+  loadSettings = getSettings,
+  bookmark = createBookmarksUnlocked,
+} = {}) {
+  await save(stash);
+  try {
+    const settings = await loadSettings();
+    const anyFormat = settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains;
+    if (!settings.autoBookmarkOnStash || !anyFormat) return;
+    await bookmark({
+      tabs: capturedTabs,
+      stashName: typeof stash?.name === 'string' ? stash.name : 'Stash',
+    });
+  } catch (e) {
+    console.warn('[TabKebab] auto-bookmark on stash failed:', e);
+  }
+}
+
+// ── Chrome bookmark export ──
+
+/** Folder levels below the bookmark bar the export may create (bar = 0). */
+export const MAX_BOOKMARK_DEPTH = 4;
+/** Newest YYYY-MM-DD folders kept under the TabKebab root. */
+export const BOOKMARK_RETENTION_COUNT = 30;
+/** Hard cap on bookmark nodes (folders + links) created by one export. */
+export const MAX_BOOKMARKS_PER_EXPORT = 5000;
+
+const BOOKMARK_ROOT_TITLE = 'TabKebab';
+const BOOKMARK_ROOT_ID_KEY = 'bookmarkRootFolderId';
+const BOOKMARK_TITLE_SEPARATOR = ' · ';
+const BOOKMARK_DATE_FOLDER = /^\d{4}-\d{2}-\d{2}$/;
+const BOOKMARK_SECTIONS = [
+  ['byWindows', 'Windows'],
+  ['byGroups', 'Groups'],
+  ['byDomains', 'Domains'],
+];
+// Folder levels are dropped (merged into child titles) in this order when
+// the depth budget is too small.
+const BOOKMARK_FLATTEN_ORDER = ['section', 'item', 'stash', 'date'];
+
+/** Folder levels that may still be created below a root at `rootDepth`. */
+export function bookmarkDepthBudget(rootDepth, maxDepth = MAX_BOOKMARK_DEPTH) {
+  const depth = Number.isInteger(rootDepth) && rootDepth >= 0 ? rootDepth : 0;
+  return Math.max(0, maxDepth - depth);
+}
+
+/** Which of `kinds` (outermost first) stay folders within `budget` levels. */
+export function planBookmarkFolderLevels(kinds, budget) {
+  const kept = kinds.slice();
+  for (const kind of BOOKMARK_FLATTEN_ORDER) {
+    if (kept.length <= budget) break;
+    const index = kept.indexOf(kind);
+    if (index !== -1) kept.splice(index, 1);
+  }
+  while (kept.length > Math.max(0, budget)) kept.pop();
+  return new Set(kept);
+}
+
+function joinBookmarkTitle(parts) {
+  return parts.filter((part) => typeof part === 'string' && part.length > 0).join(BOOKMARK_TITLE_SEPARATOR);
+}
+
+/** Folder depth below the top-level folder (bookmark bar / other) it lives in. */
+async function bookmarkNodeDepth(node) {
+  let depth = 0;
+  let current = node;
+  for (let i = 0; i < 64 && current?.parentId; i++) {
+    let parent;
+    try {
+      [parent] = await chrome.bookmarks.get(current.parentId);
+    } catch {
+      break;
+    }
+    if (!parent?.parentId) break; // parent is the tree root → current is top-level
+    depth++;
+    current = parent;
+  }
+  return depth;
+}
+
+/**
+ * Find the TabKebab root folder: the stored id first (so a renamed or moved
+ * folder is reused), then a title match, and only then create a new one.
+ */
+async function resolveBookmarkRoot(bar) {
+  const storedId = await Storage.get(BOOKMARK_ROOT_ID_KEY);
+  if (typeof storedId === 'string' && storedId.length > 0) {
+    try {
+      const [node] = await chrome.bookmarks.get(storedId);
+      if (node && !node.url) return node;
+    } catch {
+      // Stored folder was deleted; fall through.
+    }
+  }
+
+  let root = bar.children?.find((n) => !n.url && n.title === BOOKMARK_ROOT_TITLE) || null;
+  if (!root) {
+    try {
+      const matches = await chrome.bookmarks.search({ title: BOOKMARK_ROOT_TITLE });
+      root = matches.find((n) => !n.url && n.title === BOOKMARK_ROOT_TITLE) || null;
+    } catch {
+      root = null;
+    }
+  }
+  if (!root) root = await chrome.bookmarks.create({ parentId: bar.id, title: BOOKMARK_ROOT_TITLE });
+  await Storage.set(BOOKMARK_ROOT_ID_KEY, root.id);
+  return root;
+}
+
+/** Keep only the newest `keep` YYYY-MM-DD folders directly under the root. */
+async function pruneBookmarkDateFolders(rootId, keep = BOOKMARK_RETENTION_COUNT) {
+  const children = await chrome.bookmarks.getChildren(rootId);
+  const dated = children
+    .filter((n) => !n.url && BOOKMARK_DATE_FOLDER.test(n.title))
+    .sort((a, b) => (a.title < b.title ? 1 : a.title > b.title ? -1 : 0));
+  let removed = 0;
+  for (const folder of dated.slice(Math.max(0, keep))) {
+    await chrome.bookmarks.removeTree(folder.id);
+    removed++;
+  }
+  return removed;
+}
+
+export async function saveToChromeBookmarks(bookmarkData, dateStr, {
+  stashLabel = null,
+  maxDepth = MAX_BOOKMARK_DEPTH,
+  maxBookmarks = MAX_BOOKMARKS_PER_EXPORT,
+  retentionCount = BOOKMARK_RETENTION_COUNT,
+} = {}) {
   const tree = await chrome.bookmarks.getTree();
   const bar = tree[0].children.find(n => n.id === '1') || tree[0].children[0]; // Bookmarks bar
+  const root = await resolveBookmarkRoot(bar);
+  const budget = bookmarkDepthBudget(await bookmarkNodeDepth(root), maxDepth);
+  const kinds = stashLabel ? ['date', 'stash', 'section', 'item'] : ['date', 'section', 'item'];
+  const kept = planBookmarkFolderLevels(kinds, budget);
 
-  let tkRoot = bar.children?.find(n => n.title === 'TabKebab');
-  if (!tkRoot) {
-    tkRoot = await chrome.bookmarks.create({ parentId: bar.id, title: 'TabKebab' });
+  const state = { created: 0, truncated: false };
+  const create = async (props) => {
+    if (state.created >= maxBookmarks) {
+      state.truncated = true;
+      return null;
+    }
+    const node = await chrome.bookmarks.create(props);
+    state.created++;
+    return node;
+  };
+
+  // A cursor is where the next level goes: a parent folder plus the titles of
+  // flattened levels above it, which prefix the next created title.
+  const descend = async (cursor, kind, title, reuse) => {
+    if (!kept.has(kind)) return { parentId: cursor.parentId, prefix: [...cursor.prefix, title] };
+    const fullTitle = joinBookmarkTitle([...cursor.prefix, title]);
+    if (reuse) {
+      const existing = (await chrome.bookmarks.getChildren(cursor.parentId))
+        .find((n) => !n.url && n.title === fullTitle);
+      if (existing) return { parentId: existing.id, prefix: [] };
+    }
+    const node = await create({ parentId: cursor.parentId, title: fullTitle });
+    return node ? { parentId: node.id, prefix: [] } : null;
+  };
+
+  let container = await descend({ parentId: root.id, prefix: [] }, 'date', dateStr, true);
+  if (container && stashLabel) container = await descend(container, 'stash', stashLabel, true);
+
+  if (container && !stashLabel) {
+    // A snapshot replaces today's previous snapshot instead of appending a
+    // second copy (the 12h alarm would otherwise duplicate the tree).
+    const base = container.prefix.length > 0
+      ? joinBookmarkTitle(container.prefix) + BOOKMARK_TITLE_SEPARATOR
+      : '';
+    const children = await chrome.bookmarks.getChildren(container.parentId);
+    for (const child of children) {
+      if (!child.title.startsWith(base)) continue;
+      const rest = child.title.slice(base.length);
+      const isSnapshotNode = BOOKMARK_SECTIONS.some(([, section]) => (
+        rest === section || rest.startsWith(section + BOOKMARK_TITLE_SEPARATOR)
+      ));
+      if (!isSnapshotNode) continue;
+      if (child.url) await chrome.bookmarks.remove(child.id);
+      else await chrome.bookmarks.removeTree(child.id);
+    }
   }
 
-  // Date folder
-  let dateFolder = (await chrome.bookmarks.getChildren(tkRoot.id)).find(n => n.title === dateStr);
-  if (!dateFolder) {
-    dateFolder = await chrome.bookmarks.create({ parentId: tkRoot.id, title: dateStr });
-  }
-
-  // By Windows: TabKebab -> date -> Windows -> Window N -> tabs
-  if (bookmarkData.formats.byWindows) {
-    const windowsFolder = await chrome.bookmarks.create({ parentId: dateFolder.id, title: 'Windows' });
-    for (const win of bookmarkData.formats.byWindows) {
-      const winFolder = await chrome.bookmarks.create({ parentId: windowsFolder.id, title: win.name });
-      for (const tab of win.tabs) {
-        await chrome.bookmarks.create({ parentId: winFolder.id, title: tab.title, url: tab.url });
+  if (container) {
+    sections:
+    for (const [key, sectionTitle] of BOOKMARK_SECTIONS) {
+      const items = bookmarkData.formats[key];
+      if (!items) continue;
+      const sectionCursor = await descend(container, 'section', sectionTitle, false);
+      if (!sectionCursor) break;
+      for (const item of items) {
+        const itemCursor = await descend(sectionCursor, 'item', item.name, false);
+        if (!itemCursor) break sections;
+        for (const tab of item.tabs) {
+          const node = await create({
+            parentId: itemCursor.parentId,
+            title: joinBookmarkTitle([...itemCursor.prefix, tab.title || tab.url]),
+            url: tab.url,
+          });
+          if (!node) break sections;
+        }
       }
     }
   }
 
-  // By Groups: TabKebab -> date -> Groups -> group name -> tabs
-  if (bookmarkData.formats.byGroups) {
-    const groupsFolder = await chrome.bookmarks.create({ parentId: dateFolder.id, title: 'Groups' });
-    for (const group of bookmarkData.formats.byGroups) {
-      const gFolder = await chrome.bookmarks.create({ parentId: groupsFolder.id, title: group.name });
-      for (const tab of group.tabs) {
-        await chrome.bookmarks.create({ parentId: gFolder.id, title: tab.title, url: tab.url });
-      }
-    }
+  try {
+    await pruneBookmarkDateFolders(root.id, retentionCount);
+  } catch (e) {
+    console.warn('[TabKebab] bookmark retention failed:', e);
   }
 
-  // By Domains: TabKebab -> date -> Domains -> domain -> tabs
-  if (bookmarkData.formats.byDomains) {
-    const domainsFolder = await chrome.bookmarks.create({ parentId: dateFolder.id, title: 'Domains' });
-    for (const domain of bookmarkData.formats.byDomains) {
-      const dFolder = await chrome.bookmarks.create({ parentId: domainsFolder.id, title: domain.name });
-      for (const tab of domain.tabs) {
-        await chrome.bookmarks.create({ parentId: dFolder.id, title: tab.title, url: tab.url });
-      }
-    }
-  }
+  return { created: state.created, truncated: state.truncated, depthBudget: budget };
 }
 
 // ── Lifecycle Events ──
@@ -962,17 +1181,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.warn('[TabKebab] AI cache migration failed');
   }
 
-  // On first install, open the side panel to welcome the user
-  if (details.reason === 'install') {
-    try {
-      const [currentWindow] = await chrome.windows.getAll({ windowTypes: ['normal'] });
-      if (currentWindow) {
-        await chrome.sidePanel.open({ windowId: currentWindow.id });
-      }
-    } catch {
-      // Side panel may not be available in all contexts
-    }
-  }
+  // Note: sidePanel.open() requires a user gesture, which onInstalled
+  // never has, so the panel is not auto-opened here. The toolbar action opens
+  // it (setPanelBehavior below) and the first-run walkthrough shows on first
+  // open.
 
   setTimeout(async () => {
     try {
@@ -992,7 +1204,7 @@ export async function handleAlarm(alarm, {
   runAutoStash = autoStashOldTabs,
   runAutoSync = autoSyncDrive,
   runRetention = runRetentionCleanup,
-  runAutoBookmark = createBookmarks,
+  runAutoBookmark = () => createBookmarks(),
 } = {}) {
   switch (alarm.name) {
     case ALARM_AUTO_SAVE:      return runAutoSave();
@@ -1420,9 +1632,10 @@ export async function handleMessage(msg, options = {}) {
     case 'findEmptyPages':
       return findEmptyPages();
 
-    case 'closeTabs':
-      await closeTabs(msg.tabIds);
-      return { success: true };
+    case 'closeTabs': {
+      const closed = await closeTabs(msg.tabIds);
+      return { success: true, closed };
+    }
 
     case 'reopenTabs': {
       const created = [];
@@ -1981,7 +2194,7 @@ export async function handleMessage(msg, options = {}) {
 
     case 'stashWindow': {
       return withStateMutationLock(async () => {
-      const tabs = await getAllTabs({ allWindows: true });
+      const tabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
       const windowTabs = tabs.filter(t => t.windowId === msg.windowId);
       if (windowTabs.length === 0) return { error: 'No tabs in window' };
 
@@ -2027,22 +2240,16 @@ export async function handleMessage(msg, options = {}) {
         stash,
         capturedTabs,
         emptyError: 'No stashable tabs in window',
+        // Auto-bookmark exactly the captured tabs, before they are closed.
+        save: (record) => saveStashThenAutoBookmark(record, capturedTabs),
       });
-      if (committed.error) return committed;
-
-      // Auto-bookmark on stash if enabled
-      const settings = await getSettings();
-      if (settings.autoBookmarkOnStash && (settings.bookmarkByWindows || settings.bookmarkByGroups || settings.bookmarkByDomains)) {
-        try { await createBookmarksUnlocked(); } catch (e) { console.warn('[TabKebab] auto-bookmark on stash failed:', e); }
-      }
-
       return committed;
       });
     }
 
     case 'stashGroup': {
       return withStateMutationLock(async () => {
-      const groupTabs = await chrome.tabs.query({ groupId: msg.groupId });
+      const groupTabs = excludeIncognitoTabs(await chrome.tabs.query({ groupId: msg.groupId }));
       if (groupTabs.length === 0) return { error: 'No tabs in group' };
 
       let groupInfo = { title: 'Untitled', color: 'grey', collapsed: false };
@@ -2081,13 +2288,14 @@ export async function handleMessage(msg, options = {}) {
         stash,
         capturedTabs,
         emptyError: 'No stashable tabs in group',
+        save: (record) => saveStashThenAutoBookmark(record, capturedTabs),
       });
       });
     }
 
     case 'stashDomain': {
       return withStateMutationLock(async () => {
-      const allTabs = await getAllTabs({ allWindows: true });
+      const allTabs = await getAllTabs({ allWindows: true, excludeIncognito: true });
       const domainTabs = allTabs.filter(t => extractDomain(t.url) === msg.domain);
       if (domainTabs.length === 0) return { error: 'No tabs for domain' };
 
@@ -2122,6 +2330,7 @@ export async function handleMessage(msg, options = {}) {
         stash,
         capturedTabs,
         emptyError: 'No stashable tabs for domain',
+        save: (record) => saveStashThenAutoBookmark(record, capturedTabs),
       });
       });
     }
