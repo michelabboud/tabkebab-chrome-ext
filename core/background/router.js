@@ -6,6 +6,9 @@
 // refuses to register the same action twice, so one feature cannot silently
 // shadow another feature's handler.
 
+import { createLogger } from '../log.js';
+const log = createLogger('router');
+
 const UNKNOWN_ACTION_RESPONSE = Object.freeze({ error: 'Unknown action' });
 
 // ── Feature gating ──
@@ -192,11 +195,11 @@ export function createRuntimeMessageListener(handle) {
   return (message, _sender, sendResponse) => {
     handle(message).then(sendResponse).catch(err => {
       if (message?.action === 'cleanDriveFiles') {
-        console.warn('[TabKebab] Drive cleanup handler failed');
+        log.warn('Drive cleanup handler failed');
         sendResponse({ error: 'Drive cleanup failed' });
         return;
       }
-      console.warn(`[TabKebab] handler error (${message?.action}):`, err);
+      log.warn(`handler error (${message?.action}):`, err);
       sendResponse({ error: err?.message || String(err) });
     });
     return true; // keep channel open for async response

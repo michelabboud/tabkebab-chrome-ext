@@ -11,6 +11,8 @@ import { Storage } from '../storage.js';
 import { createPortableExportDocument } from '../export-schema.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { requireExactRuntimeFields, requireRuntimeString } from './router.js';
+import { createLogger } from '../log.js';
+const log = createLogger('focus');
 
 /**
  * Rebind persisted group titles before any Focus listener can trust runtime
@@ -26,7 +28,7 @@ export function startFocusReadiness() {
     }
     return state;
   })().catch((error) => {
-    console.warn('[TabKebab] Focus group rebinding failed or ending recovery was incomplete during worker startup:', error);
+    log.warn('Focus group rebinding failed or ending recovery was incomplete during worker startup:', error);
     return getCachedFocusState();
   });
 }
@@ -37,7 +39,7 @@ export function scheduleFocusTick(focusReadiness) {
   void focusReadiness
     .then((startupState) => withStateMutationLock(() =>
       handleFocusTick(expectedRunId ?? startupState?.runId ?? null)))
-    .catch((error) => console.warn('[TabKebab] Focus tick failed:', error));
+    .catch((error) => log.warn('Focus tick failed:', error));
 }
 
 /**
@@ -152,7 +154,7 @@ Respond with JSON only: {"distraction": true/false, "category": "category name",
       },
     });
   } catch (err) {
-    console.warn('[TabKebab] AI check failed:', err.message);
+    log.warn('AI check failed:', err.message);
   }
 }
 

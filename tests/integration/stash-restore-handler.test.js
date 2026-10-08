@@ -14,7 +14,7 @@ function makeStash(id, tabs) {
 }
 
 async function getDispositionHandler() {
-  const worker = await import('../../service-worker.js');
+  const worker = await import('../../tabkebab-service-worker.js');
   return worker.applyStashRestoreDisposition;
 }
 

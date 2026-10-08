@@ -87,7 +87,7 @@ jobs:
               throw "Package contains unsafe or non-canonical entry names."
             }
 
-            $expectedEntries = @('core', 'icons', 'manifest.json', 'service-worker.js', 'sidepanel') | Sort-Object -CaseSensitive
+            $expectedEntries = @('core', 'icons', 'manifest.json', 'tabkebab-service-worker.js', 'sidepanel') | Sort-Object -CaseSensitive
             $rawTopLevel = @($entryNames | ForEach-Object { ($_ -split '/', 2)[0] } | Sort-Object -CaseSensitive -Unique)
             $rawDifference = @(Compare-Object -ReferenceObject $expectedEntries -DifferenceObject $rawTopLevel -CaseSensitive)
             if ($rawDifference.Count -ne 0) {

@@ -1,5 +1,5 @@
 // Source-text helpers for invariants on the service worker, which is split
-// into the service-worker.js entry point plus feature modules under
+// into the tabkebab-service-worker.js entry point plus feature modules under
 // core/background/. Every lookup throws when its marker is missing, so a
 // renamed function or handler can never make an assertion pass vacuously.
 
@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 const ROOT = new URL('../../', import.meta.url);
 
-export const WORKER_ENTRY = 'service-worker.js';
+export const WORKER_ENTRY = 'tabkebab-service-worker.js';
 export const BACKGROUND_DIR = 'core/background/';
 
 export function backgroundModulePaths() {

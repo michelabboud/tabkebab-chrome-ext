@@ -9,7 +9,7 @@ import { findHandler, handlerBody, readWorkerModule, readWorkerSource, sliceBetw
 let workerNonce = 0;
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task10=${label}-${++workerNonce}`);
+  return import(`../../tabkebab-service-worker.js?task10=${label}-${++workerNonce}`);
 }
 
 function deferred() {

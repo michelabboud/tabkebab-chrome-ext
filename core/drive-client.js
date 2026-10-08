@@ -3,6 +3,8 @@
 import { isValidDriveFileId } from './drive-retention.js';
 import { MAX_DRIVE_JSON_BYTES } from './drive-sync.js';
 import { parseDriveSettingsDocument } from './settings.js';
+import { createLogger } from './log.js';
+const log = createLogger('drive');
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -188,7 +190,7 @@ async function driveRequest(url, options = {}, interactive = false) {
         throw error;
       }
       if (attempt < MAX_RETRIES) {
-        console.warn(`[TabKebab] Drive API ${resp.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
+        log.warn(`Drive API ${resp.status}, retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
         await sleep(delayMs);
         continue;
       }
@@ -212,7 +214,7 @@ async function createOrRecover(lookup, create) {
       const existing = await lookup();
       if (existing) return { file: existing, recovered: true };
       if (error.retryDelayMs === null) throw error;
-      console.warn(`[TabKebab] Drive create failed (${error.status}), retry ${attempt + 1}/${MAX_RETRIES}`);
+      log.warn(`Drive create failed (${error.status}), retry ${attempt + 1}/${MAX_RETRIES}`);
       await sleep(error.retryDelayMs ?? 0);
     }
   }
@@ -278,7 +280,7 @@ async function findUniqueDriveFile(query, fields, context) {
   const files = await listAllMatches(query, `${fields},createdTime`, `${context} lookup`);
   if (files.length === 0) return null;
   if (files.length > 1) {
-    console.warn(`[TabKebab] ${context} has ${files.length} duplicates; using the oldest`);
+    log.warn(`${context} has ${files.length} duplicates; using the oldest`);
   }
   return pickCanonicalDuplicate(files);
 }
@@ -292,7 +294,7 @@ export async function disconnect() {
     const token = await getToken(false);
     await chrome.identity.removeCachedAuthToken({ token });
   } catch (e) {
-    console.warn('[TabKebab] disconnect cleanup:', e);
+    log.warn('disconnect cleanup:', e);
   }
 }
 

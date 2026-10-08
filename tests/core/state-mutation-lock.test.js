@@ -11,7 +11,7 @@ async function lockModule() {
 }
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task7=${label}-${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?task7=${label}-${++importNonce}`);
 }
 
 function deferred() {

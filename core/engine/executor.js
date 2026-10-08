@@ -1,6 +1,8 @@
 // core/engine/executor.js — Phase 4: Rate-limited execution of the move plan
 
 import { OpType, MOVE_BATCH_SIZE, BATCH_DELAY_MS, DOMAIN_DELAY_MS } from './types.js';
+import { createLogger } from '../log.js';
+const log = createLogger('grouping');
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -189,7 +191,7 @@ export async function moveTabsInBatches(tabIds, windowId) {
         success = true;
         break;
       } catch (e) {
-        console.warn('[TabKebab] batch tab move failed, retrying:', e);
+        log.warn('batch tab move failed, retrying:', e);
         await delay(BATCH_DELAY_MS * (attempt + 1));
       }
     }

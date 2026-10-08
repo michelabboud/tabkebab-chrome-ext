@@ -30,7 +30,8 @@ Before publishing to Chrome Web Store:
 
 ## Architecture
 - Manifest V3 with ES modules, no bundler
-- Service worker (`service-worker.js`) is the message hub
+- Service worker (`tabkebab-service-worker.js`) is the message hub; feature handlers live in `core/background/*.js`
+- Background logging goes through `core/log.js` `createLogger(scope)` → `[TabKebab:<scope>] …` (never raw `console.*('[TabKebab] …')`)
 - Side panel UI in `sidepanel/` — vanilla HTML/CSS/JS, no framework
 - Core logic in `core/` — tabs API, sessions, stash (IndexedDB), grouping engine, AI providers, Drive client
 - 4-phase grouping engine: snapshot → solver → planner → executor
@@ -46,7 +47,7 @@ Before publishing to Chrome Web Store:
 
 ## Key Files
 - `manifest.json` — extension manifest
-- `service-worker.js` — background script
+- `tabkebab-service-worker.js` — background script
 - `sidepanel/panel.html` — main UI
 - `sidepanel/panel.css` — design system / tokens
 - `core/` — all business logic

@@ -6,6 +6,9 @@ be implemented in parallel and merged cleanly. Every fix ships with a regression
 
 Severity: H = High, M = Medium, L = Low.
 
+> Note: the worker entry has since been renamed `service-worker.js` → `tabkebab-service-worker.js`
+> (feature code lives in `core/background/`). References below use the original filename.
+
 ---
 
 ## WS1 — Stash / Focus data safety

@@ -12,7 +12,7 @@ async function loadFocus(overrides = {}) {
 }
 
 async function loadWorker() {
-  return import('../../service-worker.js?stash-focus-safety');
+  return import('../../tabkebab-service-worker.js?stash-focus-safety');
 }
 
 function startOptions(overrides = {}) {

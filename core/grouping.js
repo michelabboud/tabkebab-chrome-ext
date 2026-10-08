@@ -22,6 +22,8 @@ import {
   migrateDriveSyncDocument,
   recordDeletionTombstones,
 } from './drive-sync.js';
+import { createLogger } from './log.js';
+const log = createLogger('grouping');
 
 const MAX_VERIFY_PASSES = 3;
 const MIN_WINDOW_TABS = 3;
@@ -448,7 +450,7 @@ export async function consolidateWindows(onProgress) {
             }
             tabsRedistributed += remaining.length;
           } catch (e) {
-            console.warn('[TabKebab] Failed to create overflow window:', e);
+            log.warn('Failed to create overflow window:', e);
           }
         }
       }
@@ -574,7 +576,7 @@ export async function consolidateWindows(onProgress) {
               groupCount: 1,
             });
           } catch (e) {
-            console.warn('[TabKebab] Failed to create window for group:', e);
+            log.warn('Failed to create window for group:', e);
           }
         }
       }

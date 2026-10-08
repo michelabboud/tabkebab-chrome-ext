@@ -6,6 +6,8 @@ import { Storage } from '../storage.js';
 import { getSettings } from '../settings.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { requireRuntimeString } from './router.js';
+import { createLogger } from '../log.js';
+const log = createLogger('sessions');
 
 // ── Auto-save Sessions ──
 
@@ -55,7 +57,7 @@ async function autoSaveSessionUnlocked({
     if (idsToDelete.size > 0) {
       await deleteSessionsOperation([...idsToDelete], nowMs);
     }
-  } catch (e) { console.warn('[TabKebab] auto-save failed:', e);
+  } catch (e) { log.warn('auto-save failed:', e);
     // Auto-save should never crash the service worker
   }
 }

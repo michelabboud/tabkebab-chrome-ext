@@ -48,7 +48,7 @@ const allOff = () => Object.fromEntries(FEATURE_KEYS.map((key) => [key, false]))
 
 let importNonce = 0;
 function freshWorker(label) {
-  return import(`../../service-worker.js?features=${label}-${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?features=${label}-${++importNonce}`);
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

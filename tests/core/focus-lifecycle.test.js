@@ -597,7 +597,7 @@ describe('ending and recovery', () => {
     });
     expect(warnings).toHaveLength(1);
 
-    await import(`../../service-worker.js?focus-recovery=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?focus-recovery=${++importNonce}`);
     await waitFor(
       () => readStorageArea('local').focusState === undefined,
       'worker restart did not recover the ending run',
@@ -1216,7 +1216,7 @@ describe('stale lifecycle continuations', () => {
         'delayed badge reset rejection was not reported',
       );
 
-      expect(warnings).toEqual([['[TabKebab] Focus badge reset failed.']]);
+      expect(warnings).toEqual([['[TabKebab:focus] Focus badge reset failed.']]);
     } finally {
       if (installedChrome) globalThis.chrome = installedChrome;
       globalThis.setTimeout = originalSetTimeout;

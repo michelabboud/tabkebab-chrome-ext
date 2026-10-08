@@ -9,6 +9,8 @@ import { getSettings, isFeatureOn } from '../settings.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { getKeepAwakeList } from './tabs.js';
 import { createBookmarksUnlocked } from './bookmarks.js';
+import { createLogger } from '../log.js';
+const log = createLogger('stash');
 
 // ── Auto-stash ──
 
@@ -71,7 +73,7 @@ async function autoStashOldTabsUnlocked() {
         save: (record) => saveStashThenAutoBookmark(record, capturedTabs),
       });
     }
-  } catch (e) { console.warn('[TabKebab] auto-stash failed:', e); }
+  } catch (e) { log.warn('auto-stash failed:', e); }
 }
 
 export async function autoStashOldTabs() {
@@ -144,7 +146,7 @@ async function saveStashThenAutoBookmark(stash, capturedTabs, {
       stashName: typeof stash?.name === 'string' ? stash.name : 'Stash',
     });
   } catch (e) {
-    console.warn('[TabKebab] auto-bookmark on stash failed:', e);
+    log.warn('auto-bookmark on stash failed:', e);
   }
 }
 
@@ -184,7 +186,7 @@ export const stashHandlers = {
     if (windowTabs.length === 0) return { error: 'No tabs in window' };
 
     let chromeGroups = [];
-    try { chromeGroups = await chrome.tabGroups.query({ windowId: msg.windowId }); } catch (e) { console.warn('[TabKebab] tabGroups query failed:', e); }
+    try { chromeGroups = await chrome.tabGroups.query({ windowId: msg.windowId }); } catch (e) { log.warn('tabGroups query failed:', e); }
 
     const groupMeta = new Map();
     for (const g of chromeGroups) {
@@ -241,7 +243,7 @@ export const stashHandlers = {
     try {
       const g = await chrome.tabGroups.get(msg.groupId);
       groupInfo = { title: sanitizeCapturedGroupTitle(g.title) || 'Untitled', color: g.color || 'grey', collapsed: g.collapsed || false };
-    } catch (e) { console.warn('[TabKebab] stash failed:', e); }
+    } catch (e) { log.warn('stash failed:', e); }
 
     const stashTabs = [];
     const capturedTabs = [];

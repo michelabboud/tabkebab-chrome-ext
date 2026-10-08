@@ -15,6 +15,8 @@ import {
 } from '../export-schema.js';
 import { requireExactRuntimeFields, requirePortableRecordId } from './router.js';
 import { reconfigureAlarms } from './alarms.js';
+import { createLogger } from '../log.js';
+const log = createLogger('settings');
 
 function requirePortableKind(kind) {
   if (typeof kind !== 'string' || !Object.hasOwn(PORTABLE_KIND_SECTIONS, kind)) {
@@ -90,8 +92,8 @@ export const settingsHandlers = {
         await reconfigureAlarmsOperation(persistedSettings);
         return result;
       } catch (error) {
-        console.error(
-          '[TabKebab] Portable import committed, but alarm reconfiguration failed:',
+        log.error(
+          'Portable import committed, but alarm reconfiguration failed:',
           error,
         );
         return {

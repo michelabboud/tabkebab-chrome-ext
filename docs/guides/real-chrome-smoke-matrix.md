@@ -82,7 +82,7 @@ BUN
 )"
 test "$derived_extension_id" = "$expected_extension_id"
 
-mapfile -t expected_top < <(printf '%s\n' core icons manifest.json service-worker.js sidepanel)
+mapfile -t expected_top < <(printf '%s\n' core icons manifest.json tabkebab-service-worker.js sidepanel)
 mapfile -t actual_top < <(
   find "$unpacked_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
 )

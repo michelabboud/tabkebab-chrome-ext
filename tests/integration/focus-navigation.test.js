@@ -79,7 +79,7 @@ async function importWorkerWithDeferredAi(overrides = {}) {
   const originalWarn = console.warn;
   console.warn = (...args) => warnings.push(args);
   try {
-    await import(`../../service-worker.js?focus-navigation=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?focus-navigation=${++importNonce}`);
     await waitFor(
       () => harness.calls.tabGroups.query.length === 1,
       'worker startup did not complete Focus group lookup',
@@ -253,7 +253,7 @@ describe('point-of-side-effect fallback validation', () => {
       tabs: [{ id: 11, windowId: 1, url: 'https://origin.test/', active: true }],
       failures: { 'tabs.goBack': new Error('no history') },
     });
-    await import(`../../service-worker.js?focus-fallback=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?focus-fallback=${++importNonce}`);
     await waitFor(
       () => harness.calls.tabGroups.query.length === 1,
       'worker startup did not complete Focus group lookup',

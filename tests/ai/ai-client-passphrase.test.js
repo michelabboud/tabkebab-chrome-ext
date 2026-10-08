@@ -194,7 +194,7 @@ function deferred() {
 }
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task12=${label}-${++workerNonce}`);
+  return import(`../../tabkebab-service-worker.js?task12=${label}-${++workerNonce}`);
 }
 
 async function settleWorkerStartup() {

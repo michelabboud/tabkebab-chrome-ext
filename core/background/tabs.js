@@ -7,6 +7,8 @@ import { Storage } from '../storage.js';
 import { getSettings } from '../settings.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { createDefaultKeepAwakeDomains } from '../keep-awake-defaults.js';
+import { createLogger } from '../log.js';
+const log = createLogger('tabs');
 
 // ── Keep Awake Defaults ──
 
@@ -37,7 +39,7 @@ export async function autoKebabOldTabs() {
 
       try { await chrome.tabs.discard(tab.id); } catch (e) { /* tab may be active or protected */ }
     }
-  } catch (e) { console.warn('[TabKebab] auto-kebab failed:', e); }
+  } catch (e) { log.warn('auto-kebab failed:', e); }
 }
 
 // Notify side panel when tabs change
@@ -74,7 +76,7 @@ export const tabHandlers = {
         const tab = await chrome.tabs.create({ url, active: false });
         created.push(tab.id);
       } catch (e) {
-        console.warn('[TabKebab] Failed to reopen tab:', url, e);
+        log.warn('Failed to reopen tab:', url, e);
       }
     }
     return { created: created.length };

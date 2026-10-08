@@ -5,7 +5,7 @@ import { installChromeMock, readStorageArea } from '../helpers/chrome-mock.js';
 let workerNonce = 0;
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task9-bookmarks=${label}-${++workerNonce}`);
+  return import(`../../tabkebab-service-worker.js?task9-bookmarks=${label}-${++workerNonce}`);
 }
 
 function jsonResponse(body, status = 200) {

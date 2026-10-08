@@ -8,7 +8,9 @@ TabKebab is a dependency-free Manifest V3 Chrome extension. Chrome loads the rep
 
 ### Service worker
 
-`service-worker.js` is the background event and command hub. It owns Chrome event listeners, alarm scheduling, tab/window mutations, Focus Mode interception, Drive orchestration, and access to cloud AI providers.
+`tabkebab-service-worker.js` is the background event and command hub. It owns Chrome event listeners, alarm scheduling, tab/window mutations, Focus Mode interception, Drive orchestration, and access to cloud AI providers.
+
+Feature logic lives in `core/background/*.js`; the entry file only registers listeners and wires the router. Worker-side console output goes through `core/log.js` (`createLogger(scope)`), so every line is prefixed `[TabKebab:<scope>]` (e.g. `worker`, `router`, `focus`, `drive`, `stash`) and is easy to find in `chrome://extensions` → service worker DevTools.
 
 The service worker must not assume browser-document APIs are present. In particular, Chrome's Prompt API is unavailable in workers.
 
@@ -44,7 +46,7 @@ Downloaded sync, canonical/cross-profile settings, and portable-export JSON pass
 
 The service worker owns Task 7's ordinary session/manual-group mutations and canonical Drive reconciliation. Manual and scheduled sync enter one coordinator protected by `core/state-mutation-lock.js`, a worker-local FIFO promise tail. The outer coordinator acquires the lock once and holds it across read/migrate/merge, remote write, the one local commit, subfolder exports, settings upload, and `lastSyncedAt`; internal helpers must not reacquire it. Remote absence is an empty version-1 document, remote failure changes no local portable state, and remote-success/local-failure is safe to retry with the same canonical bytes. This lock is not distributed across Chrome profiles and `Storage.setMany()` is not a Drive/local transaction. Task 10 expanded the same lock around portable import validation, merge, storage transactions, and rollback.
 
-`core/focus-policy.js` is the pure source of truth for Focus allowlist construction, runtime Chrome-group rebinding, and deterministic blocking. Startup classification in `core/focus.js` and navigation interception in `service-worker.js` both delegate to its `isAllowed()` predicate. Domain entries match exact hosts or true subdomains, URL entries compare canonical exact URLs, and group preferences contain exact titles only.
+`core/focus-policy.js` is the pure source of truth for Focus allowlist construction, runtime Chrome-group rebinding, and deterministic blocking. Startup classification in `core/focus.js` and navigation interception in `tabkebab-service-worker.js` both delegate to its `isAllowed()` predicate. Domain entries match exact hosts or true subdomains, URL entries compare canonical exact URLs, and group preferences contain exact titles only.
 
 `core/focus-ai.js` owns the provider-agnostic delayed-classification boundary. It captures immutable run, tab, classified-URL, cache-key, category, and request context; fresh and cached decisions share one predicate requiring `distraction === true` and finite numeric confidence strictly greater than `0.7`. Cache expiry uses a per-key generation token plus entry identity so an old timer cannot delete a replacement entry.
 
@@ -161,7 +163,7 @@ bun test --coverage
 bun test tests/syntax.test.js
 ```
 
-The final command parses every tracked or unignored JavaScript file and verifies that `manifest.json` remains Manifest V3 and mirrors `VERSION`. GitHub Actions runs this sequence for pull requests, manual dispatches, and pushes to `main`, excluding tag pushes. A dependent Windows job invokes the native batch packager only after the Bun gate passes. The packager verifies version parity, stages the positive allowlist (`manifest.json`, `service-worker.js`, `core/`, `sidepanel/`, and `icons/`) outside the repository, and uploads exactly one versioned zip. The final browser matrix expands that exact CI artifact and rejects any other top-level entry; it never substitutes the repository checkout for package evidence. Chrome still loads source files directly, so testing and packaging add no production dependency, package manifest, bundler, or generated runtime code.
+The final command parses every tracked or unignored JavaScript file and verifies that `manifest.json` remains Manifest V3 and mirrors `VERSION`. GitHub Actions runs this sequence for pull requests, manual dispatches, and pushes to `main`, excluding tag pushes. A dependent Windows job invokes the native batch packager only after the Bun gate passes. The packager verifies version parity, stages the positive allowlist (`manifest.json`, `tabkebab-service-worker.js`, `core/`, `sidepanel/`, and `icons/`) outside the repository, and uploads exactly one versioned zip. The final browser matrix expands that exact CI artifact and rejects any other top-level entry; it never substitutes the repository checkout for package evidence. Chrome still loads source files directly, so testing and packaging add no production dependency, package manifest, bundler, or generated runtime code.
 
 See:
 

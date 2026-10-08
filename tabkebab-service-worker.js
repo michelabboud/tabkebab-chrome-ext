@@ -1,4 +1,4 @@
-// service-worker.js — Background service worker (Manifest V3) entry point.
+// tabkebab-service-worker.js — Background service worker (Manifest V3) entry point.
 //
 // Feature logic lives in core/background/*.js. This file only:
 //   1. registers every chrome.* event listener synchronously at top level
@@ -34,6 +34,9 @@ import {
   onExtensionInstalled,
   reconcileWorkerStartup,
 } from './core/background/lifecycle.js';
+import { createLogger } from './core/log.js';
+
+const log = createLogger('worker');
 
 // ── Public surface (tests and tooling import these from the entry point) ──
 
@@ -135,7 +138,12 @@ const focusReadiness = startFocusReadiness();
 void reconcileWorkerStartup(focusReadiness);
 
 // Open side panel when extension icon is clicked
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+try {
+  Promise.resolve(chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }))
+    .catch((error) => log.warn('Side panel behavior setup failed:', error));
+} catch (error) {
+  log.warn('Side panel behavior setup failed:', error);
+}
 
 // Notify the side panel when tabs change; Focus mode intercepts blocked URLs.
 const focusTabGuard = createFocusTabGuard({ focusReadiness });

@@ -13,7 +13,7 @@ function createDeferred() {
 }
 
 async function importWorker() {
-  return import(`../../service-worker.js?focus-worker=${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?focus-worker=${++importNonce}`);
 }
 
 async function waitFor(assertion, message) {

@@ -8,6 +8,8 @@ import { Storage } from '../storage.js';
 import { getSettings, isFeatureOn } from '../settings.js';
 import { exportToSubfolder, exportRawToSubfolder } from '../drive-client.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
+import { createLogger } from '../log.js';
+const log = createLogger('bookmarks');
 
 // ── Bookmark system ──
 
@@ -314,7 +316,7 @@ export async function createBookmarksUnlocked(options = {}) {
     try {
       const windowStats = await getWindowStats();
       for (const win of windowStats.windows) order.push(win.windowId);
-    } catch (e) { console.warn('[TabKebab] window stats failed:', e); }
+    } catch (e) { log.warn('window stats failed:', e); }
     for (const t of tabs) if (!order.includes(t.windowId)) order.push(t.windowId);
 
     const windowBookmarks = [];
@@ -334,7 +336,7 @@ export async function createBookmarksUnlocked(options = {}) {
     let chromeGroups = [];
     try {
       chromeGroups = await chrome.tabGroups.query({});
-    } catch (e) { console.warn('[TabKebab] tabGroups query failed:', e); }
+    } catch (e) { log.warn('tabGroups query failed:', e); }
 
     const buckets = new Map();
     for (const g of chromeGroups) buckets.set(g.id, { meta: g, tabs: [] });
@@ -418,7 +420,7 @@ export async function createBookmarksUnlocked(options = {}) {
       await Storage.set('tabkebabBookmarks', existing);
       results.created++;
       results.destinations.push('Local Storage');
-    } catch (e) { console.warn('[TabKebab] bookmark local save failed:', e); }
+    } catch (e) { log.warn('bookmark local save failed:', e); }
   }
 
   // Save to Google Drive
@@ -441,10 +443,10 @@ export async function createBookmarksUnlocked(options = {}) {
             const html = generateBookmarkHtml(bookmarkData);
             const htmlFilename = `bookmarks-${dateStr}.html`;
             await exportRawToSubfolder('bookmarks', htmlFilename, html, 'text/html');
-          } catch (e) { console.warn('[TabKebab] HTML bookmark export failed:', e); }
+          } catch (e) { log.warn('HTML bookmark export failed:', e); }
         }
       }
-    } catch (e) { console.warn('[TabKebab] bookmark Drive save failed:', e); }
+    } catch (e) { log.warn('bookmark Drive save failed:', e); }
   }
 
   return results;
@@ -644,7 +646,7 @@ export async function saveToChromeBookmarks(bookmarkData, dateStr, {
   try {
     await pruneBookmarkDateFolders(root.id, retentionCount);
   } catch (e) {
-    console.warn('[TabKebab] bookmark retention failed:', e);
+    log.warn('bookmark retention failed:', e);
   }
 
   return { created: state.created, truncated: state.truncated, depthBudget: budget };

@@ -21,6 +21,8 @@ import {
 import { VIEW_SHORTCUTS, setupRovingTablist } from '../../sidepanel/panel-helpers.js';
 import { FirstRunWalkthrough } from '../../sidepanel/components/first-run-walkthrough.js';
 import { SettingsManager } from '../../sidepanel/components/settings-manager.js';
+import { FocusPanel } from '../../sidepanel/components/focus-panel.js';
+import { disabledFeatureForAction } from '../../core/background/router.js';
 
 const ALL_ON = Object.fromEntries(FEATURE_KEYS.map((key) => [key, true]));
 const htmlPromise = Bun.file(new URL('../../sidepanel/panel.html', import.meta.url)).text();
@@ -284,5 +286,59 @@ describe('Features settings card', () => {
     await manager.saveFeaturesFromUI();
     expect(applied).toEqual([]);
     expect(notes[0]).toEqual(['Failed to save settings: nope', 'error']);
+  });
+});
+
+describe('Focus banner while the Focus feature is off', () => {
+  function mountedFocusPanel() {
+    const root = dom.el('section', { id: 'view-focus' });
+    dom.el('div', { id: 'focus-container', parent: root });
+    const panel = new FocusPanel(root, { listenForRuntimeEvents: false });
+    const anchor = dom.el('div', { className: 'view-container' });
+    anchor.before = (el) => document.body.appendChild(el);
+    panel.mountBanner(anchor);
+    return panel;
+  }
+
+  test('a running or paused session keeps its banner (and End) visible; no session hides it', async () => {
+    const panel = mountedFocusPanel();
+    const banner = panel.banner.el;
+    const sent = [];
+    panel.send = async (msg) => {
+      sent.push(msg);
+      return msg.action === 'endFocus' ? { id: 'record-1' } : null;
+    };
+    panel._showReport = () => {};
+
+    panel.state = {
+      status: 'active', runId: 'run-1', profileName: 'Coding', duration: 0, startedAt: Date.now(), pausedElapsed: 0,
+    };
+    applyFeatureFlags({ focus: false });
+    expect(document.body.dataset.featuresOff).toBe('focus');
+    expect(banner.dataset.feature).toBeUndefined();
+    expect(banner.classList.contains(FEATURE_OFF_CLASS)).toBe(false);
+    expect(banner.hidden).toBe(false);
+
+    panel.state = { ...panel.state, status: 'paused', pausedAt: Date.now() };
+    applyFeatureFlags({ focus: false }, { force: true });
+    expect(banner.hidden).toBe(false);
+    expect(banner.classList.contains(FEATURE_OFF_CLASS)).toBe(false);
+
+    // End stays reachable: the router never gates endFocus behind the switch.
+    expect(disabledFeatureForAction('endFocus', getFeatureFlags())).toBeNull();
+    panel.banner.onEnd();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual([{ action: 'endFocus', expectedRunId: 'run-1' }]);
+    expect(panel.state).toBeNull();
+    expect(banner.hidden).toBe(true);
+    panel.banner.update(null);
+  });
+
+  test('panel.js and panel.css never tie the banner to the Focus switch', async () => {
+    const panel = await panelPromise;
+    const css = await cssPromise;
+    expect(panel).toContain("focusPanel.mountBanner(document.querySelector('.view-container'));");
+    expect(panel).not.toMatch(/dataset\.feature\s*=\s*'focus'/);
+    expect(css).not.toMatch(/data-features-off~="focus"\][^{]*focus-banner/);
   });
 });

@@ -648,7 +648,7 @@ describe('Chrome AI Focus foreground boundary', () => {
   test('the worker ignores unrelated ports and attaches the named panel port to the singleton', async () => {
     installChromeMock({ local: { aiSettings: chromeAISettings() } });
     chromeAIBrokerClient.disconnect();
-    await import(`../../service-worker.js?chrome-ai-port=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?chrome-ai-port=${++importNonce}`);
 
     const request = {
       userPrompt: 'Classify the attached panel connection.',
@@ -700,7 +700,7 @@ describe('Chrome AI Focus foreground boundary', () => {
     const originalWarn = console.warn;
     console.warn = (...args) => warnings.push(args);
     try {
-      await import(`../../service-worker.js?chrome-ai-focus=${++importNonce}`);
+      await import(`../../tabkebab-service-worker.js?chrome-ai-focus=${++importNonce}`);
       await waitFor(
         () => harness.calls.tabGroups.query.length === 1,
         'worker startup did not complete Focus group lookup',
@@ -721,7 +721,7 @@ describe('Chrome AI Focus foreground boundary', () => {
         distractionsBlocked: 0,
       });
       expect(warnings.some(([prefix, message]) =>
-        prefix === '[TabKebab] AI check failed:' &&
+        prefix === '[TabKebab:focus] AI check failed:' &&
         message === 'AI requires an open side panel')).toBeTrue();
     } finally {
       console.warn = originalWarn;
@@ -741,7 +741,7 @@ describe('Chrome AI Focus foreground boundary', () => {
     });
     chromeAIBrokerClient.disconnect();
 
-    await import(`../../service-worker.js?chrome-ai-cache=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?chrome-ai-cache=${++importNonce}`);
     await waitFor(
       () => harness.calls.tabGroups.query.length === 1,
       'worker startup did not complete Focus group lookup',

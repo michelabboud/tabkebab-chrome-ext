@@ -8,6 +8,8 @@ import { autoKebabOldTabs } from './tabs.js';
 import { autoStashOldTabs } from './stash.js';
 import { autoSyncDrive, runRetentionCleanup } from './drive.js';
 import { createBookmarks } from './bookmarks.js';
+import { createLogger } from '../log.js';
+const log = createLogger('alarms');
 
 // ── Alarm names ──
 
@@ -78,7 +80,7 @@ export async function reconfigureAlarms(settings) {
     try {
       await callback();
     } catch (error) {
-      console.warn(`[TabKebab] alarm ${operation} failed:`, name, error);
+      log.warn(`alarm ${operation} failed:`, name, error);
       failures.push(error instanceof Error ? error : new Error(`Alarm ${operation} failed: ${name}`));
     }
   };
@@ -90,7 +92,7 @@ export async function reconfigureAlarms(settings) {
       existing = (await chrome.alarms.get(name)) || null;
     } catch (error) {
       // Unknown state: fall through to the clear/create path below.
-      console.warn('[TabKebab] alarm get failed:', name, error);
+      log.warn('alarm get failed:', name, error);
       existing = undefined;
     }
 

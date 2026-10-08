@@ -6,7 +6,7 @@ import { readWorkerSource } from '../helpers/worker-source.js';
 
 let workerNonce = 0;
 async function freshWorker(label) {
-  return import(`../../service-worker.js?ws4=${label}-${++workerNonce}`);
+  return import(`../../tabkebab-service-worker.js?ws4=${label}-${++workerNonce}`);
 }
 
 const DAY = 24 * 60 * 60 * 1000;

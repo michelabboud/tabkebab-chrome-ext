@@ -6,6 +6,8 @@ import {
 import { normalizeUrl } from './duplicates.js';
 import { createRestoreOutcome, finalizeRestoreOutcome } from './restore-outcome.js';
 import { getAllTabs } from './tabs-api.js';
+import { createLogger } from './log.js';
+const log = createLogger('restore');
 
 const RESTORE_BATCH = 6;
 const LOAD_TIMEOUT_MS = 15000;
@@ -230,7 +232,7 @@ export async function restoreTabWindows(savedWindows, {
     try {
       await onProgress({ ...progress });
     } catch (error) {
-      console.warn('[TabKebab] restore progress callback failed:', error);
+      log.warn('restore progress callback failed:', error);
     }
   }
 

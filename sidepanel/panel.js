@@ -231,8 +231,10 @@ const focusPanel = new FocusPanel(document.getElementById('view-focus'), {
   listenForRuntimeEvents: false,
   navigate: (target) => navigatePanel(target),
 });
-const focusBannerEl = focusPanel.mountBanner(document.querySelector('.view-container'));
-if (focusBannerEl?.dataset) focusBannerEl.dataset.feature = 'focus';
+// The banner is deliberately NOT tagged data-feature="focus": switching Focus
+// off in Settings → Features must never hide a running/paused session's only
+// End control. FocusBanner hides itself whenever no session is active.
+focusPanel.mountBanner(document.querySelector('.view-container'));
 
 function showFocusView() {
   if (!isFeatureEnabled('focus')) return;

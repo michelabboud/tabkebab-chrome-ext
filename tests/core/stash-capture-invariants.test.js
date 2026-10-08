@@ -4,7 +4,7 @@ import { readWorkerSource } from '../helpers/worker-source.js';
 const workerSource = readWorkerSource();
 
 async function loadWorker() {
-  return import('../../service-worker.js?stash-capture-invariants');
+  return import('../../tabkebab-service-worker.js?stash-capture-invariants');
 }
 
 describe('stash capture commit invariant', () => {

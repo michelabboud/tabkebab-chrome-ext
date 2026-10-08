@@ -29,7 +29,7 @@ async function importDriveClient(label) {
 }
 
 async function importWorker(label) {
-  return import(`../../service-worker.js?${label}=${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?${label}=${++importNonce}`);
 }
 
 function folderRouter({ pages = {}, failCopy = false, calls = [] } = {}) {

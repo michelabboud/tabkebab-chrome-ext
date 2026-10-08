@@ -34,7 +34,7 @@ async function importWorkerWithAi(tabs, complete, windows = [{ id: 1, focused: t
   const originalComplete = AIClient.complete;
   AIClient.complete = complete;
   try {
-    await import(`../../service-worker.js?nl-command=${++workerImportNonce}`);
+    await import(`../../tabkebab-service-worker.js?nl-command=${++workerImportNonce}`);
   } catch (error) {
     AIClient.complete = originalComplete;
     throw error;

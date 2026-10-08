@@ -15,6 +15,8 @@ import {
   resolveGroupAllowlist,
 } from './focus-policy.js';
 import { isConfidentDistraction } from './focus-ai.js';
+import { createLogger } from './log.js';
+const log = createLogger('focus');
 
 const FOCUS_STATE_KEY = 'focusState';
 const FOCUS_HISTORY_KEY = 'focusHistory';
@@ -452,7 +454,7 @@ function scheduleDistractionBadgeReset(runId) {
       _distractionBadgeReset = null;
       await reconcileBadgeUnlocked({ expectedRunId: runId });
     }).catch(() => {
-      console.warn('[TabKebab] Focus badge reset failed.');
+      log.warn('Focus badge reset failed.');
     });
   }, 2000);
 }
@@ -957,7 +959,7 @@ async function performEndFocus(expectedRunId, {
 
   record.teardownFailures = mergeTeardownFailures(record.teardownFailures, teardownFailures);
   if (teardownFailures.length > 0) {
-    console.warn('[TabKebab] Focus teardown completed with failures:', teardownFailures);
+    log.warn('Focus teardown completed with failures:', teardownFailures);
   }
   return record;
 }

@@ -11,6 +11,8 @@ import { reconcileDriveSync } from '../drive-sync.js';
 import { withStateMutationLock } from '../state-mutation-lock.js';
 import { generateBookmarkHtml } from './bookmarks.js';
 import { AUTO_SAVE_PREFIX } from './sessions.js';
+import { createLogger } from '../log.js';
+const log = createLogger('drive');
 
 async function exportDriveSubfolders({ scheduled = false } = {}) {
   const results = { sessions: 0, stashes: 0, bookmarks: 0 };
@@ -120,7 +122,7 @@ export async function autoSyncDrive(sync = syncDriveState) {
   try {
     return await sync({ scheduled: true });
   } catch {
-    console.warn('[TabKebab] automatic Drive sync failed');
+    log.warn('automatic Drive sync failed');
     return null;
   }
 }
@@ -192,7 +194,7 @@ async function runRetentionCleanupUnlocked({
       connected: driveState?.connected,
     }, { now: () => nowMs, listFiles, deleteFile });
   } catch {
-    console.warn('[TabKebab] Drive retention cleanup failed');
+    log.warn('Drive retention cleanup failed');
     return emptyDriveRetentionResult();
   }
 }

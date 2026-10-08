@@ -213,7 +213,7 @@ bun test tests/syntax.test.js
 
 The repository-owned Chrome mock resets local/session storage, listeners, tab/window/group state, runtime ports, failures, and call records between tests. It is intentionally an orchestration boundary, not a browser emulator: DOM, IndexedDB, extension lifecycle, OAuth, and Chrome Prompt API behavior still require the [real-Chrome smoke matrix](docs/guides/real-chrome-smoke-matrix.md).
 
-GitHub Actions runs all three commands, in that order, for pull requests, manual dispatches, and pushes to `main`. After they pass, a dependent Windows job runs `package.cmd`, verifies the version and exact archive root, and uploads one `tabkebab-extension-<version>` artifact. The packager includes only `manifest.json`, `service-worker.js`, `core/`, `sidepanel/`, and `icons/`; it is release packaging, not a runtime build. Tag pushes do not trigger this workflow.
+GitHub Actions runs all three commands, in that order, for pull requests, manual dispatches, and pushes to `main`. After they pass, a dependent Windows job runs `package.cmd`, verifies the version and exact archive root, and uploads one `tabkebab-extension-<version>` artifact. The packager includes only `manifest.json`, `tabkebab-service-worker.js`, `core/`, `sidepanel/`, and `icons/`; it is release packaging, not a runtime build. Tag pushes do not trigger this workflow.
 
 ## Project Structure
 
@@ -221,7 +221,7 @@ GitHub Actions runs all three commands, in that order, for pull requests, manual
 TabKebab/
   manifest.json              # Extension manifest (MV3)
   bunfig.toml                # Bun test preload and coverage settings
-  service-worker.js          # Background service worker & message hub
+  tabkebab-service-worker.js # Background service worker & message hub
   tests/                     # Bun regressions and Chrome API test doubles
   icons/                     # Logo and icon assets (SVG + PNG)
   core/

@@ -1,12 +1,14 @@
 // core/background/lifecycle.js — Browser startup, extension install/update,
 // and service-worker (re)start work. The listeners themselves are registered
-// at the top level of service-worker.js.
+// at the top level of tabkebab-service-worker.js.
 
 import { AIClient } from '../ai/ai-client.js';
 import { getSettings, isFeatureOn } from '../settings.js';
 import { FocusStatus, updateBadge } from '../focus.js';
 import { autoSaveSession } from './sessions.js';
 import { ALARM_AUTO_SAVE, ALARM_FOCUS_TICK, reconfigureManagedAlarms } from './alarms.js';
+import { createLogger } from '../log.js';
+const log = createLogger('lifecycle');
 
 /**
  * Startup/install auto-save is an Automation chore that writes a session:
@@ -35,7 +37,7 @@ export function onBrowserStartup() {
       await autoSaveIfEnabled();
       await reconfigureManagedAlarms();
     } catch (error) {
-      console.warn('[TabKebab] Startup alarm reconciliation failed:', error);
+      log.warn('Startup alarm reconciliation failed:', error);
     }
   }, 5000);
 }
@@ -47,12 +49,12 @@ export async function onExtensionInstalled(details) {
   try {
     await AIClient.clearCache();
   } catch {
-    console.warn('[TabKebab] AI cache migration failed');
+    log.warn('AI cache migration failed');
   }
 
   // Note: sidePanel.open() requires a user gesture, which onInstalled
   // never has, so the panel is not auto-opened here. The toolbar action opens
-  // it (setPanelBehavior in service-worker.js) and the first-run walkthrough shows on first
+  // it (setPanelBehavior in tabkebab-service-worker.js) and the first-run walkthrough shows on first
   // open.
 
   setTimeout(async () => {
@@ -60,7 +62,7 @@ export async function onExtensionInstalled(details) {
       await autoSaveIfEnabled();
       await reconfigureManagedAlarms();
     } catch (error) {
-      console.warn('[TabKebab] Install/update alarm reconciliation failed:', error);
+      log.warn('Install/update alarm reconciliation failed:', error);
     }
   }, 5000);
 }
@@ -80,6 +82,6 @@ export function reconcileWorkerStartup(focusReadiness) {
       await updateBadge(focusState);
     }
   })().catch((error) => {
-    console.warn('[TabKebab] Service-worker alarm reconciliation failed:', error);
+    log.warn('Service-worker alarm reconciliation failed:', error);
   });
 }

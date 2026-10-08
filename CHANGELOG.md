@@ -22,6 +22,9 @@ Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
 
 ### Changed
 
+- The background worker file is now `tabkebab-service-worker.js` (shown as
+  such in `chrome://extensions` and DevTools), and its console output is
+  prefixed `[TabKebab:<scope>]` (worker, router, focus, drive, stash, …).
 - Default AI models updated: OpenAI `gpt-6-luna` (replaces deprecated
   `gpt-4.1-nano`), Claude `claude-haiku-5-5`, Gemini `gemini-3.8-flash`.
   Saved settings that name a retired model move to the provider default.
@@ -35,6 +38,8 @@ Full-codebase review and repair. See `docs/reports/full-review-fix-plan.md`.
 
 ### Fixed
 
+- **Focus banner:** switching Focus off in Settings → Features no longer hides
+  the banner of a running or paused session, so it can always be ended.
 - **Stash data loss:** tabs that restore cannot reopen (extension pages such as
   tab suspenders, `about:`, `data:`, `edge:`) are no longer stashed and closed;
   they stay open.
