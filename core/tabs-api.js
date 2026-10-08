@@ -8,10 +8,24 @@ export function extractDomain(url) {
   }
 }
 
-export async function getAllTabs({ windowId, allWindows = false } = {}) {
+async function queryTabs({ windowId, allWindows }) {
   if (windowId) return chrome.tabs.query({ windowId });
   if (allWindows) return chrome.tabs.query({});
   return chrome.tabs.query({ currentWindow: true });
+}
+
+/**
+ * Query tabs. Persistence paths (sessions, stash, bookmarks, Drive export)
+ * pass `excludeIncognito: true` so private-browsing tabs are never written to
+ * disk or uploaded.
+ */
+export async function getAllTabs({ windowId, allWindows = false, excludeIncognito = false } = {}) {
+  const tabs = await queryTabs({ windowId, allWindows });
+  return excludeIncognito ? excludeIncognitoTabs(tabs) : tabs;
+}
+
+export function excludeIncognitoTabs(tabs) {
+  return Array.isArray(tabs) ? tabs.filter((tab) => tab?.incognito !== true) : [];
 }
 
 export async function getAllWindows() {
@@ -26,12 +40,44 @@ export async function focusTab(tabId) {
   await chrome.tabs.update(tabId, { active: true });
 }
 
+function isMissingTabError(error) {
+  return typeof error?.message === 'string' && error.message.includes('No tab with id');
+}
+
+function missingTabId(error) {
+  const match = /No tab with id:?\s*(-?\d+)/.exec(error?.message || '');
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Close tabs and return how many were actually closed.
+ *
+ * `chrome.tabs.remove(array)` closes ids in order and stops at the first
+ * stale id, so a single stale id must not silently leave the rest open. On a
+ * "No tab with id" failure, ids before the stale one are counted as closed and
+ * every id after it is retried individually; only missing tabs are ignored.
+ */
 export async function closeTabs(tabIds) {
+  const ids = (Array.isArray(tabIds) ? tabIds : [tabIds])
+    .filter((id) => id !== undefined && id !== null);
+  if (ids.length === 0) return 0;
   try {
-    return await chrome.tabs.remove(tabIds);
+    await chrome.tabs.remove(ids);
+    return ids.length;
   } catch (e) {
-    // Tab may already be closed — ignore "No tab with id" errors
-    if (!e.message?.includes('No tab with id')) throw e;
+    if (!isMissingTabError(e)) throw e;
+    const staleIndex = ids.indexOf(missingTabId(e));
+    let closed = staleIndex > 0 ? staleIndex : 0;
+    const remaining = staleIndex >= 0 ? ids.slice(staleIndex + 1) : ids;
+    for (const id of remaining) {
+      try {
+        await chrome.tabs.remove(id);
+        closed++;
+      } catch (err) {
+        if (!isMissingTabError(err)) throw err;
+      }
+    }
+    return closed;
   }
 }
 

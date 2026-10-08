@@ -33,13 +33,34 @@ function openDB() {
   return dbPromise;
 }
 
+/**
+ * Settle a readwrite transaction: resolve only on commit, reject on error or
+ * abort. An aborted transaction (quota exceeded, explicit abort, connection
+ * closing) fires `onabort` without necessarily firing `onerror`; without this
+ * the promise would never settle and would wedge the state mutation lock.
+ */
+function settleWriteTransaction(tx, resolve, reject) {
+  let settled = false;
+  const fail = (fallback) => {
+    if (settled) return;
+    settled = true;
+    reject(tx.error || new Error(fallback));
+  };
+  tx.oncomplete = () => {
+    if (settled) return;
+    settled = true;
+    resolve();
+  };
+  tx.onerror = () => fail('IndexedDB stash transaction failed');
+  tx.onabort = () => fail('IndexedDB stash transaction aborted');
+}
+
 export async function saveStash(stash) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).put(stash);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    settleWriteTransaction(tx, resolve, reject);
   });
 }
 
@@ -79,8 +100,7 @@ export async function deleteStash(id) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    settleWriteTransaction(tx, resolve, reject);
   });
 }
 
@@ -91,6 +111,12 @@ export async function getAllStashes() {
 export async function importStashes(stashes) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
+  // Attach settlement handlers before issuing requests so a commit or abort
+  // that happens while the loop is still awaiting can never be missed.
+  const settled = new Promise((resolve, reject) => {
+    settleWriteTransaction(tx, resolve, reject);
+  });
+  settled.catch(() => {}); // observed below; avoid an unhandled-rejection report
   const store = tx.objectStore(STORE_NAME);
 
   let imported = 0;
@@ -111,10 +137,7 @@ export async function importStashes(stashes) {
     }
   }
 
-  await new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await settled;
 
   return { imported, skipped };
 }
@@ -160,8 +183,7 @@ export async function clearAllStashes() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    settleWriteTransaction(tx, resolve, reject);
   });
 }
 
