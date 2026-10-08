@@ -1,6 +1,6 @@
 // core/engine/planner.js — Phase 3: Diff current vs desired → minimal move plan
 
-import { OpType, createMovePlan } from './types.js';
+import { OpType, createMovePlan, createWindowSlot, createDesiredState } from './types.js';
 
 /**
  * Takes Snapshot + DesiredState, produces a MovePlan with the minimum
@@ -149,6 +149,44 @@ export function plan(snapshot, desiredState) {
   }
 
   return createMovePlan({ operations, stats });
+}
+
+/**
+ * Return a copy of desiredState restricted to tabs that still exist in the
+ * given snapshot. Used before each verification pass: a tab closed (or
+ * pinned, or moved out of scope) mid-run would otherwise make every pass
+ * re-issue CREATE_GROUP for a group that can never match exactly, and could
+ * pick a dead tab as a new window's seed.
+ *
+ * Domain slots that lose tabs and fall below two are dropped (their survivor
+ * becomes a single), and window slots left without domains are dropped.
+ */
+export function pruneDesiredState(desiredState, snapshot) {
+  const live = (id) => snapshot.tabsById.has(id);
+  const windowSlots = [];
+  const singles = desiredState.singles.filter(s => live(s.tabId));
+
+  for (const slot of desiredState.windowSlots) {
+    const domains = [];
+    for (const ds of slot.domains) {
+      const tabIds = ds.tabIds.filter(live);
+      if (tabIds.length === ds.tabIds.length && tabIds.length > 0) {
+        domains.push(ds); // untouched (e.g. a 1-tab final shard stays as planned)
+      } else if (tabIds.length >= 2) {
+        domains.push({ ...ds, tabIds });
+      } else if (tabIds.length === 1) {
+        singles.push({ domain: ds.domain, tabId: tabIds[0] });
+      }
+    }
+    if (domains.length === 0) continue;
+    windowSlots.push(createWindowSlot({
+      id: slot.id,
+      domains,
+      totalTabs: domains.reduce((n, ds) => n + ds.tabIds.length, 0),
+    }));
+  }
+
+  return createDesiredState({ windowSlots, singles });
 }
 
 /**

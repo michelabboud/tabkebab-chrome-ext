@@ -164,8 +164,9 @@ export async function execute(movePlan, onProgress) {
     }
   }
 
-  // Clean up any leftover blank new-tab pages in newly created windows
-  await cleanupBlankTabs(resolvedWindows);
+  // No blank-tab cleanup: windows are always created with
+  // chrome.windows.create({ tabId }), which never opens a New Tab page, so
+  // any blank tab in those windows belongs to the user and must be kept.
 
   return { tabsMoved, windowsCreated, groupsCreated, errors };
 }
@@ -264,26 +265,6 @@ async function getTabWindowId(tabId) {
     return tab.windowId;
   } catch {
     return null;
-  }
-}
-
-/**
- * Remove blank "New Tab" pages left over from chrome.windows.create().
- */
-async function cleanupBlankTabs(resolvedWindows) {
-  for (const windowId of resolvedWindows.values()) {
-    try {
-      const tabs = await chrome.tabs.query({ windowId });
-      const blankTabs = tabs.filter(t =>
-        t.url === 'chrome://newtab/' || t.url === 'about:blank'
-      );
-      // Only remove blanks if there are other tabs in the window
-      if (blankTabs.length > 0 && tabs.length > blankTabs.length) {
-        await chrome.tabs.remove(blankTabs.map(t => t.id));
-      }
-    } catch {
-      // Window may have been closed
-    }
   }
 }
 
