@@ -60,17 +60,23 @@ export async function solveWithAI(
       return null; // Malformed response — fall back
     }
 
-    // Map tabIndices back to actual tab IDs
+    // Map tabIndices back to actual tab IDs. Only integer, in-range indices
+    // are accepted; a tab listed in several groups stays in the first one
+    // (otherwise it would bounce between windows across verification passes).
+    const assignedInBatch = new Set();
     const groups = response.parsed.groups
-      .filter(g => g.name && Array.isArray(g.tabIndices))
-      .map(g => ({
-        name: g.name,
-        color: g.color || 'blue',
-        tabIds: g.tabIndices
-          .filter(idx => idx >= 0 && idx < batch.length)
-          .map(idx => batch[idx].id)
-          .filter(Boolean),
-      }))
+      .filter(g => g && typeof g.name === 'string' && g.name.trim() && Array.isArray(g.tabIndices))
+      .map(g => {
+        const tabIds = [];
+        for (const idx of g.tabIndices) {
+          if (!Number.isInteger(idx) || idx < 0 || idx >= batch.length) continue;
+          const id = batch[idx]?.id;
+          if (id === undefined || id === null || assignedInBatch.has(id)) continue;
+          assignedInBatch.add(id);
+          tabIds.push(id);
+        }
+        return { name: g.name, color: g.color || 'blue', tabIds };
+      })
       .filter(g => g.tabIds.length > 0);
 
     allGroups.push(...groups);
@@ -89,6 +95,9 @@ export async function solveWithAI(
     }
     allGroups = [...merged.values()];
   }
+
+  // A group needs at least two tabs; smaller ones leave their tab as a single.
+  allGroups = allGroups.filter(g => g.tabIds.length >= 2);
 
   if (allGroups.length === 0) return null;
 
@@ -117,7 +126,7 @@ function buildDesiredState(aiGroups, allTabs) {
   const bins = []; // { domains: DomainSlot[], totalTabs: number }
 
   for (const group of aiGroups) {
-    if (group.tabIds.length === 0) continue;
+    if (group.tabIds.length < 2) continue;
 
     for (const id of group.tabIds) assignedTabIds.add(id);
 

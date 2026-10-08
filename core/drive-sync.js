@@ -17,6 +17,10 @@ export const MAX_DRIVE_STRING_LENGTH = 16_384;
 export const MAX_DRIVE_NESTING_DEPTH = 12;
 export const MAX_DRIVE_TIMESTAMP = Number.MAX_SAFE_INTEGER;
 export const MAX_DRIVE_TOMBSTONE = MAX_DRIVE_TIMESTAMP - 1;
+// Tombstones only need to outlive the longest plausible offline gap between
+// devices. Older ones are pruned so the per-kind cap is never reached by
+// routine deletions (auto-save rotation alone adds ~24 per day).
+export const DRIVE_TOMBSTONE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const ROOT_KEYS = new Set(['version', 'sessions', 'manualGroups', 'tombstones']);
@@ -311,16 +315,49 @@ function normalizeDeletionTombstoneState(currentTombstones) {
   const output = emptyDriveTombstones();
   for (const kind of TOMBSTONE_KINDS) {
     const source = Object.hasOwn(root, kind) && isPlainRecord(root[kind]) ? root[kind] : {};
-    const keys = Object.keys(source);
-    if (keys.length > MAX_DRIVE_TOMBSTONES_PER_KIND) {
-      fail(`tombstones.${kind} exceeds the 10,000 tombstone limit`);
-    }
-    output[kind] = sortedNullMap(keys.map((id) => {
+    output[kind] = sortedNullMap(Object.keys(source).map((id) => {
       validateId(id, `tombstones.${kind} key`);
       return [id, normalizeDriveTombstone(source[id])];
     }));
   }
   return output;
+}
+
+function compareTombstoneEntriesNewestFirst([leftId, leftValue], [rightId, rightValue]) {
+  return (rightValue - leftValue) || lexicalCompare(leftId, rightId);
+}
+
+/**
+ * Bound one tombstone map: drop entries older than `cutoff` (when given) and,
+ * if still over the per-kind cap, keep only the newest entries. IDs in
+ * `protectedIds` are always kept and count against the cap first. Pure and
+ * deterministic: the result depends only on the map contents and arguments.
+ */
+export function pruneDriveTombstoneMap(map, { cutoff = null, protectedIds = null, cap = MAX_DRIVE_TOMBSTONES_PER_KIND } = {}) {
+  const kept = [];
+  const candidates = [];
+  for (const id of Object.keys(map)) {
+    const value = map[id];
+    if (protectedIds?.has(id)) {
+      kept.push([id, value]);
+    } else if (cutoff === null || value >= cutoff) {
+      candidates.push([id, value]);
+    }
+  }
+  if (kept.length > cap) {
+    throw new TypeError(`Deletion would exceed the ${cap.toLocaleString('en-US')} tombstone limit`);
+  }
+  candidates.sort(compareTombstoneEntriesNewestFirst);
+  kept.push(...candidates.slice(0, cap - kept.length));
+  return sortedNullMap(kept);
+}
+
+function tombstoneCutoff(now) {
+  if (now === null || now === undefined) return null;
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new TypeError('Tombstone pruning clock must be a non-negative safe integer');
+  }
+  return now - DRIVE_TOMBSTONE_TTL_MS;
 }
 
 /**
@@ -337,14 +374,12 @@ export function recordDeletionTombstones(currentTombstones, kind, entries, delet
   const nextTombstones = normalizeDeletionTombstoneState(currentTombstones);
   const seen = new Set();
   const prepared = [];
-  let added = 0;
   for (const entry of entries) {
     if (!isPlainRecord(entry)) throw new TypeError('Deletion tombstone entry must be an object');
     if (!Object.hasOwn(entry, 'id')) throw new TypeError('Deletion tombstone entry must have an own ID');
     const id = validateId(entry.id, 'deletion tombstone ID');
     if (seen.has(id)) throw new TypeError(`Duplicate deletion tombstone ID: ${id}`);
     seen.add(id);
-    if (!Object.hasOwn(nextTombstones[kind], id)) added += 1;
     prepared.push({
       id,
       timestamp: computeDeletionTombstone(
@@ -355,14 +390,21 @@ export function recordDeletionTombstones(currentTombstones, kind, entries, delet
     });
   }
 
-  if (Object.keys(nextTombstones[kind]).length + added > MAX_DRIVE_TOMBSTONES_PER_KIND) {
-    throw new TypeError(`Deletion would exceed the ${MAX_DRIVE_TOMBSTONES_PER_KIND.toLocaleString('en-US')} tombstone limit`);
-  }
-
-  const updatedEntries = Object.entries(nextTombstones[kind]);
-  const updated = new Map(updatedEntries);
+  const updated = new Map(Object.entries(nextTombstones[kind]));
   for (const { id, timestamp } of prepared) updated.set(id, timestamp);
-  nextTombstones[kind] = sortedNullMap(updated.entries());
+  // Expire tombstones older than the TTL (relative to this deletion) and keep
+  // the newest entries under the cap. Just-recorded IDs are never evicted.
+  const cutoff = tombstoneCutoff(deletedAt);
+  const protectedIds = new Set(prepared.map(({ id }) => id));
+  for (const tombstoneKind of TOMBSTONE_KINDS) {
+    const source = tombstoneKind === kind
+      ? sortedNullMap(updated.entries())
+      : nextTombstones[tombstoneKind];
+    nextTombstones[tombstoneKind] = pruneDriveTombstoneMap(source, {
+      cutoff,
+      protectedIds: tombstoneKind === kind ? protectedIds : null,
+    });
+  }
   const canonicalTombstones = migrateDriveSyncDocument({
     version: DRIVE_SYNC_VERSION,
     sessions: [],
@@ -548,7 +590,15 @@ function mergeTombstones(left, right) {
   return sortedNullMap(entries);
 }
 
-export function mergeDriveSyncDocuments(leftInput, rightInput) {
+/**
+ * Merge two sync documents. Tombstones first suppress older entities, then are
+ * bounded: with `now`, tombstones older than DRIVE_TOMBSTONE_TTL_MS are
+ * expired; any remaining overflow keeps the newest per kind. Live entities are
+ * never dropped here — an over-cap entity count is rejected by validation
+ * before anything is written (see reconcileDriveSync).
+ */
+export function mergeDriveSyncDocuments(leftInput, rightInput, { now = null } = {}) {
+  const cutoff = tombstoneCutoff(now);
   const left = migrateDriveSyncDocument(leftInput);
   const right = migrateDriveSyncDocument(rightInput);
   const sessionEntities = mergeEntityMaps(
@@ -581,8 +631,8 @@ export function mergeDriveSyncDocuments(leftInput, rightInput) {
     sessions,
     manualGroups: sortedNullMap(manualGroupEntries),
     tombstones: {
-      sessions: sessionTombstones,
-      manualGroups: groupTombstones,
+      sessions: pruneDriveTombstoneMap(sessionTombstones, { cutoff }),
+      manualGroups: pruneDriveTombstoneMap(groupTombstones, { cutoff }),
     },
   };
 }
@@ -606,9 +656,9 @@ function normalizeLocalTombstones(value) {
   const root = isPlainRecord(value) ? value : {};
   for (const kind of TOMBSTONE_KINDS) {
     const source = Object.hasOwn(root, kind) && isPlainRecord(root[kind]) ? root[kind] : {};
-    output[kind] = sortedNullMap(
+    output[kind] = pruneDriveTombstoneMap(sortedNullMap(
       Object.keys(source).map((id) => [id, normalizeDriveTombstone(source[id])]),
-    );
+    ));
   }
   return output;
 }
@@ -659,11 +709,46 @@ export async function writeLocalDriveSyncDocument(document) {
   return canonical;
 }
 
-export async function reconcileDriveSync(remoteDocument, writeRemote) {
+/**
+ * Repair a remote document that is otherwise well formed but whose tombstone
+ * maps overflow the per-kind cap (written by an older client that never
+ * pruned). Overflowing maps are expired by TTL and trimmed to the newest
+ * entries; every other defect still fails strict validation. Without this, a
+ * single over-cap remote file would make every future sync throw.
+ */
+export function repairDriveSyncDocument(input, { now = null } = {}) {
+  if (!isPlainRecord(input) || !Object.hasOwn(input, 'tombstones') || !isPlainRecord(input.tombstones)) {
+    return input;
+  }
+  const cutoff = tombstoneCutoff(now);
+  let repairedTombstones = null;
+  for (const kind of TOMBSTONE_KINDS) {
+    if (!Object.hasOwn(input.tombstones, kind)) continue;
+    const map = input.tombstones[kind];
+    if (!isPlainRecord(map)) continue;
+    const keys = Object.keys(map);
+    if (keys.length <= MAX_DRIVE_TOMBSTONES_PER_KIND) continue;
+    // Only repair maps whose entries are individually valid.
+    for (const id of keys) {
+      if (typeof id !== 'string' || id.length === 0 || id.length > MAX_DRIVE_STRING_LENGTH ||
+        DANGEROUS_KEYS.has(id) || !isTombstone(map[id])) {
+        return input;
+      }
+    }
+    repairedTombstones ??= { ...input.tombstones };
+    repairedTombstones[kind] = pruneDriveTombstoneMap(map, { cutoff });
+  }
+  if (repairedTombstones === null) return input;
+  return { ...input, tombstones: repairedTombstones };
+}
+
+export async function reconcileDriveSync(remoteDocument, writeRemote, { now = Date.now() } = {}) {
   if (typeof writeRemote !== 'function') throw new TypeError('Drive remote writer must be a function');
-  const remote = migrateDriveSyncDocument(remoteDocument);
+  const remote = migrateDriveSyncDocument(repairDriveSyncDocument(remoteDocument, { now }));
   const local = await readLocalDriveSyncDocument();
-  const merged = mergeDriveSyncDocuments(local, remote);
+  // Validate the merged document before anything leaves the device: an
+  // invalid upload (e.g. entities over the cap) would break every device.
+  const merged = migrateDriveSyncDocument(mergeDriveSyncDocuments(local, remote, { now }));
   await writeRemote(merged);
   await writeLocalDriveSyncDocument(merged);
   return merged;

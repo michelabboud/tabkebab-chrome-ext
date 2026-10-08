@@ -61,6 +61,10 @@ bookmark HTML exports can load favicon images from Google's s2 service. See
 - Export and import portable JSON backups; optionally create Chrome bookmark
   snapshots or sync TabKebab-created files through Google Drive.
 - Use actionable empty states that take you directly to the next useful step.
+- Switch off any of 11 features you don't use in Settings → Features (Focus
+  Mode, AI, AI command bar, Search, Windows view, Stash, Sessions, Duplicates,
+  Automation, Bookmarks, Google Drive) to declutter the panel; nothing is
+  deleted and recovery always works.
 
 ### Privacy at a glance
 
@@ -71,11 +75,13 @@ bookmark HTML exports can load favicon images from Google's s2 service. See
   API key; custom endpoints are entirely user-configured.
 - API keys stored by TabKebab are encrypted with AES-GCM 256-bit and are never
   persisted to disk in plaintext.
-- Google Drive sync is opt-in and uses the limited `drive.file` scope.
+- Google Drive sync is opt-in and uses the limited `drive.file` scope; Drive
+  retention moves old copies to your Drive trash instead of deleting them.
+- Incognito tabs are never saved to sessions, stashes, or bookmark exports.
 
 ## Why these permissions
 
-This list mirrors `manifest.json` version 1.2.20 exactly.
+This list mirrors `manifest.json` version 1.3.0 exactly.
 
 ### Chrome permissions
 
@@ -98,6 +104,10 @@ This list mirrors `manifest.json` version 1.2.20 exactly.
   retention cleanup, bookmark snapshots, and the active Focus timer.
 - **`bookmarks`** — Reads the Chrome bookmark tree and creates user-enabled
   TabKebab bookmark snapshot folders and entries.
+- **`unlimitedStorage`** — Lifts the 10 MB `chrome.storage.local` quota so
+  saved sessions, stashes, and bookmark snapshot history of heavy users are not
+  silently dropped when the quota is reached. It grants no access to any
+  additional data.
 
 ### Host permissions
 

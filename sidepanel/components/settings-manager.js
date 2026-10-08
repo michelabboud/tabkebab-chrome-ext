@@ -11,17 +11,60 @@ import {
   portableImportToastType,
 } from '../portable-import-summary.js';
 
+/** Gap kept between the sticky index and a section scrolled into view. */
+const SECTION_SCROLL_GAP = 8;
+
+/**
+ * Scroll offset that puts a section just below the sticky settings index,
+ * inside the panel's own scroller (never the document root, which would clip
+ * the header).
+ */
+export function computeSectionScrollTop({
+  containerScrollTop = 0,
+  containerTop = 0,
+  sectionTop = 0,
+  stickyHeight = 0,
+  gap = SECTION_SCROLL_GAP,
+} = {}) {
+  return Math.max(0, Math.round(containerScrollTop + (sectionTop - containerTop) - stickyHeight - gap));
+}
+
+function prefersReducedMotion() {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+  } catch {
+    return false;
+  }
+}
+
 export class SettingsManager {
   constructor(rootEl, {
     confirm = showConfirm,
     notify = showToast,
+    onFeaturesChanged = () => {},
   } = {}) {
     this.root = rootEl;
     this.confirm = confirm;
     this.notify = notify;
+    this.onFeaturesChanged = onFeaturesChanged;
 
     // Collect all setting inputs by data-setting attribute
     this.inputs = rootEl.querySelectorAll('[data-setting]');
+
+    // Settings → Features: one toggle per feature switch. Each change saves
+    // just the features patch and applies it to the panel right away.
+    this.featureInputs = rootEl.querySelectorAll('[data-feature-setting]');
+    this.featureInputs.forEach((input) => {
+      input.addEventListener('change', () => { void this.saveFeaturesFromUI(); });
+    });
+
+    // Sticky in-page index: chips scroll to their section.
+    this.indexEl = rootEl.querySelector('#settings-index');
+    this.indexEl?.addEventListener('click', (event) => {
+      const chip = event.target?.closest?.('[data-settings-target]');
+      if (!chip) return;
+      this.scrollToSection(chip.dataset.settingsTarget);
+    });
 
     // Auto-save on change for every setting input
     this.inputs.forEach(input => {
@@ -53,10 +96,47 @@ export class SettingsManager {
     if (exportSettingsBtn) {
       exportSettingsBtn.addEventListener('click', () => this.exportSettings());
     }
+    // Full backup lives here too, so it stays reachable when the Sessions
+    // view (which also offers it) is switched off in Settings → Features.
+    const exportAllBtn = rootEl.querySelector('#btn-export-all-data');
+    if (exportAllBtn) {
+      exportAllBtn.addEventListener('click', () => this.exportAllData());
+    }
     const importSettingsInput = rootEl.querySelector('#btn-import-settings');
     if (importSettingsInput) {
       importSettingsInput.addEventListener('change', (e) => this.importSettings(e));
     }
+  }
+
+  /**
+   * Bring a settings section into view below the sticky index. Collapsed
+   * <details> sections open first. Returns the section element, or null.
+   */
+  scrollToSection(sectionId) {
+    if (typeof sectionId !== 'string' || !/^[\w-]+$/.test(sectionId)) return null;
+    const section = this.root.querySelector(`#${sectionId}`);
+    if (!section) return null;
+    if (section.tagName === 'DETAILS') section.open = true;
+
+    this.indexEl?.querySelectorAll?.('[data-settings-target]').forEach((chip) => {
+      if (chip.dataset.settingsTarget === sectionId) chip.setAttribute('aria-current', 'true');
+      else chip.removeAttribute('aria-current');
+    });
+
+    const behavior = prefersReducedMotion() ? 'auto' : 'smooth';
+    const container = section.closest?.('.view-container');
+    if (container && typeof container.scrollTo === 'function') {
+      const top = computeSectionScrollTop({
+        containerScrollTop: container.scrollTop,
+        containerTop: container.getBoundingClientRect().top,
+        sectionTop: section.getBoundingClientRect().top,
+        stickyHeight: this.indexEl?.offsetHeight || 0,
+      });
+      container.scrollTo({ top, behavior });
+    } else {
+      section.scrollIntoView?.({ behavior, block: 'nearest' });
+    }
+    return section;
   }
 
   async refresh({ notifyFailure = true } = {}) {
@@ -94,8 +174,36 @@ export class SettingsManager {
       }
     });
 
+    // Feature switches (missing keys read as on)
+    this.featureInputs?.forEach((input) => {
+      input.checked = settings.features?.[input.dataset.featureSetting] !== false;
+    });
+
     // Apply retention disabled state based on never-delete toggle
     this.updateRetentionState(settings.neverDeleteFromDrive);
+  }
+
+  /** Current feature switches as shown by the Features card. */
+  readFeaturesFromUI() {
+    const features = {};
+    this.featureInputs?.forEach((input) => {
+      features[input.dataset.featureSetting] = input.checked === true;
+    });
+    return features;
+  }
+
+  async saveFeaturesFromUI() {
+    const features = this.readFeaturesFromUI();
+    try {
+      const saved = await this.send({ action: 'saveSettings', settings: { features } });
+      const applied = saved?.features || features;
+      this.onFeaturesChanged(applied);
+      return applied;
+    } catch (err) {
+      this.notify('Failed to save settings: ' + err.message, 'error');
+      void this.refresh({ notifyFailure: false }); // show the stored switches again
+      return null;
+    }
   }
 
   /** Gray out Drive retention row when "never delete" is ON, and reset counter on toggle. */
@@ -214,6 +322,16 @@ export class SettingsManager {
       showToast('Settings exported', 'success');
     } catch (err) {
       showToast('Export failed: ' + err.message, 'error');
+    }
+  }
+
+  async exportAllData() {
+    try {
+      const payload = await this.send({ action: 'buildPortableExport', kind: 'full' });
+      downloadJson(payload, `tabkebab-export-${Date.now()}.json`);
+      this.notify('Data exported', 'success');
+    } catch (err) {
+      this.notify('Export failed: ' + err.message, 'error');
     }
   }
 

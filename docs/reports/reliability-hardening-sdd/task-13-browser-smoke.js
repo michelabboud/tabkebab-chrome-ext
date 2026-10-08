@@ -165,7 +165,7 @@ async function launchProfile(profile, display, baseUrl, observations, captureCon
   const worker = await waitFor(
     () => context.serviceWorkers().find((candidate) =>
       candidate.url().startsWith('chrome-extension://') &&
-      candidate.url().endsWith('/service-worker.js')),
+      candidate.url().endsWith('/tabkebab-service-worker.js')),
     'TabKebab service worker',
   );
   return { context, extensionId: new URL(worker.url()).hostname };
@@ -225,7 +225,6 @@ try {
   });
   await page.locator('#btn-settings').click();
   await page.locator('#view-settings:not(.hidden)').waitFor();
-  await page.locator('#ai-enabled').check();
   await page.locator('#ai-provider').selectOption('custom');
   await page.locator('#ai-config-custom:not([hidden])').waitFor();
   await page.waitForFunction(() => !document.querySelector('#ai-provider')?.disabled);

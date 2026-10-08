@@ -29,7 +29,7 @@ async function importDriveClient(label) {
 }
 
 async function importWorker(label) {
-  return import(`../../service-worker.js?${label}=${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?${label}=${++importNonce}`);
 }
 
 function folderRouter({ pages = {}, failCopy = false, calls = [] } = {}) {
@@ -226,30 +226,46 @@ describe('Drive inventory and recoverability boundaries', () => {
     }
   });
 
-  test('fails closed when root or profile folder lookup is ambiguous', async () => {
+  test('resolves duplicate root or profile folders deterministically to the oldest', async () => {
     for (const ambiguousName of ['TabKebab', 'Profile']) {
       installChromeMock({ local: { driveProfileName: 'Profile' } });
       const originalFetch = globalThis.fetch;
+      const parents = [];
       globalThis.fetch = async (input) => {
         const url = new URL(String(input));
         const query = url.searchParams.get('q') || '';
+        expect(url.searchParams.get('fields')).toContain('createdTime');
+        const parent = query.match(/'([^']+)' in parents/)?.[1];
+        if (parent) parents.push(parent);
         const name = query.match(/name='([^']+)'/)?.[1];
         if (name === ambiguousName) {
+          // Two pages; the oldest createdTime lives on the second page.
+          if (!url.searchParams.get('pageToken')) {
+            return jsonResponse({
+              files: [
+                { id: `${ambiguousName}-newer`, name: ambiguousName, createdTime: '2026-02-01T00:00:00.000Z' },
+                { id: `${ambiguousName}-undated`, name: ambiguousName },
+              ],
+              nextPageToken: 'p2',
+            });
+          }
           return jsonResponse({
-            files: [
-              { id: `${ambiguousName}-one`, name: ambiguousName },
-              { id: `${ambiguousName}-two`, name: ambiguousName },
-            ],
+            files: [{ id: `${ambiguousName}-oldest`, name: ambiguousName, createdTime: '2026-01-01T00:00:00.000Z' }],
           });
         }
         if (name) return jsonResponse({ files: [{ id: `${name}-id`, name }] });
         return jsonResponse({ files: [] });
       };
+      const originalWarn = console.warn;
+      console.warn = () => {};
       try {
         const { getSubfolderId } = await importDriveClient('ambiguous-folder');
-        await expect(getSubfolderId('sessions')).rejects.toThrow(/multiple|ambiguous/i);
+        await expect(getSubfolderId('sessions')).resolves.toBe('sessions-id');
+        expect(parents).toContain(`${ambiguousName}-oldest`);
+        expect(parents).not.toContain(`${ambiguousName}-newer`);
       } finally {
         globalThis.fetch = originalFetch;
+        console.warn = originalWarn;
       }
     }
   });
@@ -688,7 +704,7 @@ describe('checked cleanup UI boundary', () => {
       deleted: 2, keptCanonical: 2, keptNewest: 3, ignoredUndated: 4, errors: [],
     })).toEqual({
       type: 'success',
-      message: 'Deleted 2 Drive files. Protected 2 canonical, 3 newest, and 4 undated files.',
+      message: 'Moved 2 Drive files to the trash. Protected 2 canonical, 3 newest, and 4 undated files.',
     });
 
     const partial = formatDriveCleanupResult({
@@ -700,7 +716,7 @@ describe('checked cleanup UI boundary', () => {
     });
     expect(partial.type).toBe('error');
     expect(partial.message).toContain('Cleanup incomplete');
-    expect(partial.message).toContain('Deleted 1');
+    expect(partial.message).toContain('moved 1 Drive files to the trash');
     expect(partial.message).toContain('1 file failed');
     expect(partial.message).toContain('Protected 2 canonical, 3 newest, and 4 undated');
     expect(partial.message).not.toContain('success');
@@ -733,7 +749,7 @@ describe('checked cleanup UI boundary', () => {
     await complete.manager.cleanDriveFiles();
     expect(complete.notifications).toEqual([{
       type: 'success',
-      message: 'Deleted 2 Drive files. Protected 2 canonical, 3 newest, and 4 undated files.',
+      message: 'Moved 2 Drive files to the trash. Protected 2 canonical, 3 newest, and 4 undated files.',
     }]);
     expect(complete.button).toMatchObject({ disabled: false, textContent: 'Clean Drive Files' });
 

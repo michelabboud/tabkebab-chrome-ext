@@ -4,6 +4,7 @@ import {
   PORTABLE_SETTINGS_KEYS,
   SETTINGS_CONSTRAINTS,
   SETTINGS_DEFAULTS,
+  assertFeaturesPatch,
 } from './settings.js';
 import {
   MAX_DRIVE_TIMESTAMP,
@@ -517,6 +518,14 @@ function validateBookmarksCanonical(value) {
 
 function validateSettingValue(key, value) {
   const constraint = SETTINGS_CONSTRAINTS[key];
+  if (constraint.type === 'features') {
+    try {
+      assertFeaturesPatch(value);
+    } catch (error) {
+      fail(`settings.${error.message}`);
+    }
+    return;
+  }
   if (constraint.type === 'boolean') {
     if (typeof value !== 'boolean') fail(`settings.${key} must be a boolean`);
     return;
@@ -532,6 +541,12 @@ function validateSettingValue(key, value) {
   }
 }
 
+function sortedFeatures(value) {
+  const output = Object.create(null);
+  for (const key of Object.keys(value).sort(lexicalCompare)) output[key] = value[key];
+  return output;
+}
+
 function validateSettingsCanonical(value) {
   if (!isPlainRecord(value)) fail('settings must be an object');
   const allowed = new Set(PORTABLE_SETTINGS_KEYS);
@@ -539,7 +554,7 @@ function validateSettingsCanonical(value) {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) fail(`settings contain unknown key ${key}`);
     validateSettingValue(key, value[key]);
-    entries.push([key, value[key]]);
+    entries.push([key, key === 'features' ? sortedFeatures(value[key]) : value[key]]);
   }
   return sortedNullMap(entries);
 }
@@ -1072,36 +1087,58 @@ function reviveImportedGroups(local, incoming, tombstones, now) {
   return sortedNullMap(entries);
 }
 
+function effectiveSetting(settings, key) {
+  return Object.hasOwn(settings || {}, key) ? settings[key] : SETTINGS_DEFAULTS[key];
+}
+
+/**
+ * An import may never make Drive retention more destructive than the local
+ * choice: it cannot turn off "never delete from Drive" and cannot shorten the
+ * Drive retention window. Those keys keep their local (or default) value.
+ */
+function protectRetentionSettings(local, merged) {
+  if (effectiveSetting(local, 'neverDeleteFromDrive') === true && merged.get('neverDeleteFromDrive') !== true) {
+    merged.set('neverDeleteFromDrive', true);
+  }
+  const localDays = effectiveSetting(local, 'driveRetentionDays');
+  const mergedDays = merged.has('driveRetentionDays')
+    ? merged.get('driveRetentionDays')
+    : SETTINGS_DEFAULTS.driveRetentionDays;
+  if (Number.isInteger(localDays) && Number.isInteger(mergedDays) && mergedDays < localDays) {
+    merged.set('driveRetentionDays', localDays);
+  }
+}
+
 function mergeSettings(local, incoming) {
   const merged = new Map(Object.entries(local || {}));
-  for (const [key, value] of Object.entries(incoming || {})) merged.set(key, value);
+  for (const [key, value] of Object.entries(incoming || {})) {
+    // Feature switches merge per feature: an export from an older version
+    // (or a partial one) never silently flips switches it does not mention.
+    if (key === 'features' && isPlainRecord(value)) {
+      const localFeatures = isPlainRecord(local?.features) ? local.features : {};
+      merged.set(key, { ...localFeatures, ...value });
+    } else {
+      merged.set(key, value);
+    }
+  }
+  protectRetentionSettings(local, merged);
   const result = validateSettingsCanonical(sortedNullMap(merged.entries()));
   assertSettingsRelationship(result);
   return result;
 }
 
-function urlOrigin(value) {
-  if (typeof value !== 'string') return null;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-}
-
-function canImportCustomBaseUrl(current, importedBaseUrl) {
-  if (!Object.hasOwn(current, 'apiKey')) return true;
-  const localOrigin = urlOrigin(current.baseUrl);
-  const importedOrigin = urlOrigin(importedBaseUrl);
-  return localOrigin !== null && importedOrigin !== null && localOrigin === importedOrigin;
-}
-
+/**
+ * Imported AI settings only contribute per-provider model names. An import
+ * never enables AI, never switches the active provider, and never sets a
+ * Custom provider endpoint: each of those could route the user's tab data to
+ * a server they did not choose on this device. Local values are kept.
+ */
 function mergeAISettings(local, incoming) {
   if (!incoming) return local;
   const base = isPlainRecord(local) ? local : Object.create(null);
   const output = Object.assign(Object.create(null), base);
-  output.enabled = incoming.enabled;
-  output.providerId = incoming.providerId;
+  output.enabled = base.enabled === true;
+  output.providerId = Object.hasOwn(base, 'providerId') ? base.providerId : null;
   const localConfigs = isPlainRecord(base.providerConfigs) ? base.providerConfigs : Object.create(null);
   const mergedConfigs = new Map(Object.entries(localConfigs));
   for (const [providerId, importedConfig] of Object.entries(incoming.providerConfigs)) {
@@ -1109,13 +1146,6 @@ function mergeAISettings(local, incoming) {
       ? Object.assign(Object.create(null), localConfigs[providerId])
       : Object.create(null);
     if (Object.hasOwn(importedConfig, 'model')) current.model = importedConfig.model;
-    if (
-      providerId === 'custom' &&
-      Object.hasOwn(importedConfig, 'baseUrl') &&
-      canImportCustomBaseUrl(current, importedConfig.baseUrl)
-    ) {
-      current.baseUrl = importedConfig.baseUrl;
-    }
     mergedConfigs.set(providerId, current);
   }
   output.providerConfigs = sortedNullMap(mergedConfigs.entries());

@@ -5,6 +5,30 @@ import { MAX_DRIVE_TIMESTAMP, assertBoundedDriveJsonValue } from './drive-sync.j
 
 const STORAGE_KEY = 'tabkebabSettings';
 
+/**
+ * Per-feature on/off switches. Every feature defaults ON; turning one off
+ * hides its UI, stops its schedules and refuses its message actions, but
+ * never deletes its data. Missing keys (legacy settings) read as ON.
+ */
+export const FEATURE_KEYS = Object.freeze([
+  'focus',
+  'ai',
+  'drive',
+  'bookmarks',
+  'automation',
+  'duplicates',
+  'sessions',
+  'stash',
+  'windows',
+  'commandBar',
+  'search',
+]);
+const FEATURE_KEY_SET = new Set(FEATURE_KEYS);
+
+export function defaultFeatures() {
+  return Object.fromEntries(FEATURE_KEYS.map((key) => [key, true]));
+}
+
 export const SETTINGS_DEFAULTS = {
   // General
   removeStashAfterRestore: true,
@@ -42,6 +66,9 @@ export const SETTINGS_DEFAULTS = {
   autoSyncToDriveIntervalHours: 0, // 0 = manual only
   driveRetentionDays: 30,
   neverDeleteFromDrive: false,
+
+  // Feature switches (all ON by default; see FEATURE_KEYS)
+  features: Object.freeze(defaultFeatures()),
 };
 
 export const PORTABLE_SETTINGS_KEYS = Object.freeze(Object.keys(SETTINGS_DEFAULTS));
@@ -72,6 +99,7 @@ export const SETTINGS_CONSTRAINTS = Object.freeze({
   autoSyncToDriveIntervalHours: { type: 'integer', min: 0, max: 168 },
   driveRetentionDays: { type: 'integer', min: 1, max: 365 },
   neverDeleteFromDrive: { type: 'boolean' },
+  features: { type: 'features' },
 });
 
 const SETTINGS_KEYS = PORTABLE_SETTINGS_KEYS;
@@ -96,8 +124,44 @@ function assertPlainOwnPatch(input) {
   }
 }
 
+/**
+ * Validate a (possibly partial) `features` object: a plain object whose keys
+ * are known feature names and whose values are booleans. Throws otherwise.
+ */
+export function assertFeaturesPatch(value) {
+  if (!isPlainRecord(value)) throw new TypeError('features must be an object');
+  for (const key of Object.keys(value)) {
+    if (!FEATURE_KEY_SET.has(key)) throw new TypeError(`features contains unknown feature ${key}`);
+    if (typeof value[key] !== 'boolean') throw new TypeError(`features.${key} must be a boolean`);
+  }
+}
+
+/**
+ * Merge a partial features patch over a base features object. Missing keys
+ * (and malformed base values) read as ON, so legacy settings load all-on.
+ * The result always lists every feature, in FEATURE_KEYS order.
+ */
+export function mergeFeatures(base, patch = {}) {
+  const source = isPlainRecord(base) ? base : {};
+  const merged = {};
+  for (const key of FEATURE_KEYS) {
+    if (Object.hasOwn(patch, key)) merged[key] = patch[key];
+    else merged[key] = typeof source[key] === 'boolean' ? source[key] : true;
+  }
+  return merged;
+}
+
+/** Whether `name` is on in `settings` (missing settings/keys read as ON). */
+export function isFeatureOn(settings, name) {
+  return settings?.features?.[name] !== false;
+}
+
 function validateSettingValue(key, value) {
   const constraint = SETTINGS_CONSTRAINTS[key];
+  if (constraint.type === 'features') {
+    assertFeaturesPatch(value);
+    return;
+  }
   if (constraint.type === 'boolean') {
     if (typeof value !== 'boolean') throw new TypeError(`${key} must be a boolean`);
     return;
@@ -119,6 +183,8 @@ function canonicalCurrentSettings(currentSettings) {
   for (const key of SETTINGS_KEYS) {
     canonical[key] = Object.hasOwn(current, key) ? current[key] : SETTINGS_DEFAULTS[key];
   }
+  // Legacy or partial stored features: fill every missing switch with ON.
+  canonical.features = mergeFeatures(canonical.features);
   return canonical;
 }
 
@@ -129,7 +195,16 @@ function canonicalCurrentSettings(currentSettings) {
 export function validateSettingsPatch(input, currentSettings = SETTINGS_DEFAULTS) {
   assertPlainOwnPatch(input);
   const canonical = canonicalCurrentSettings(currentSettings);
-  for (const key of Object.keys(input)) canonical[key] = input[key];
+  for (const key of Object.keys(input)) {
+    if (key === 'features') {
+      // A features patch may be partial: validate it, then merge it over the
+      // current switches so unspecified features keep their value.
+      assertFeaturesPatch(input.features);
+      canonical.features = mergeFeatures(canonical.features, input.features);
+    } else {
+      canonical[key] = input[key];
+    }
+  }
   for (const key of SETTINGS_KEYS) validateSettingValue(key, canonical[key]);
   if (canonical.recommendedTabsPerWindow > canonical.maxTabsPerWindow) {
     throw new TypeError('recommendedTabsPerWindow cannot exceed maxTabsPerWindow');
@@ -173,7 +248,10 @@ export async function getSettings() {
   if (stored !== null) {
     if (!isPlainRecord(stored)) throw new TypeError('Stored settings must be a plain object');
     for (const key of SETTINGS_KEYS) {
-      if (Object.hasOwn(stored, key)) storedPatch[key] = stored[key];
+      if (!Object.hasOwn(stored, key)) continue;
+      // Stored switches are read leniently (unknown or malformed entries
+      // fall back to ON) so a downgrade can never lock the panel out.
+      storedPatch[key] = key === 'features' ? mergeFeatures(stored.features) : stored[key];
     }
   }
   return validateSettingsPatch(storedPatch, SETTINGS_DEFAULTS);
@@ -202,4 +280,21 @@ export async function getSetting(key) {
  */
 export async function setSetting(key, value) {
   return saveSettings({ [key]: value });
+}
+
+/**
+ * A settings import must never make Drive retention more destructive than the
+ * local configuration: keep `neverDeleteFromDrive` on and never shorten
+ * `driveRetentionDays`.
+ */
+export function preserveDriveRetentionGuards(current, replacement) {
+  const next = { ...replacement };
+  if (current?.neverDeleteFromDrive === true) next.neverDeleteFromDrive = true;
+  const localDays = Number.isInteger(current?.driveRetentionDays)
+    ? current.driveRetentionDays
+    : SETTINGS_DEFAULTS.driveRetentionDays;
+  if (!Number.isInteger(next.driveRetentionDays) || next.driveRetentionDays < localDays) {
+    next.driveRetentionDays = localDays;
+  }
+  return next;
 }

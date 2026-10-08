@@ -2,7 +2,14 @@
 
 import { showToast } from './toast.js';
 import { showConfirm } from './confirm-dialog.js';
+import { showStashedToast } from './stash-list.js';
 import { sendOrThrow } from '../message-client.js';
+import {
+  createOverflowMenu,
+  makeKeyboardActivatable,
+  setExpanded,
+  wireCollapseToggle,
+} from './keyboard-activate.js';
 
 const PHASE_LABELS = {
   snapshot: 'Reading',
@@ -12,6 +19,13 @@ const PHASE_LABELS = {
 };
 
 const PHASE_INDEX = { snapshot: 1, solver: 2, planner: 3, executor: 4 };
+
+function tabTooltip(tab) {
+  const title = tab?.title || '';
+  const url = tab?.url || tab?.pendingUrl || '';
+  if (title && url && title !== url) return `${title}\n${url}`;
+  return title || url || 'New Tab';
+}
 
 const CHROME_COLORS = {
   grey:   '#5f6368',
@@ -37,8 +51,7 @@ export class WindowList {
 
     // Consolidate button + progress
     this.consolidateBtn = rootEl.querySelector('#btn-consolidate-windows');
-    this.collapseBtn = rootEl.querySelector('#btn-collapse-all');
-    this.expandBtn = rootEl.querySelector('#btn-expand-all');
+    this.collapseToggleBtn = rootEl.querySelector('#btn-toggle-collapse-windows');
     this.progressEl = rootEl.querySelector('#consolidation-progress');
     this.progressPhase = rootEl.querySelector('#consolidation-phase');
     this.progressTitle = rootEl.querySelector('#consolidation-title');
@@ -46,8 +59,10 @@ export class WindowList {
     this.progressFill = rootEl.querySelector('#consolidation-fill');
 
     this.consolidateBtn.addEventListener('click', () => this.consolidate());
-    this.collapseBtn.addEventListener('click', () => this.collapseAll());
-    this.expandBtn.addEventListener('click', () => this.expandAll());
+    this.collapseToggle = wireCollapseToggle(this.collapseToggleBtn, {
+      isAllCollapsed: () => this.isAllCollapsed(),
+      onToggle: (collapse) => (collapse ? this.collapseAll() : this.expandAll()),
+    });
 
     // Listen for consolidation progress from service worker
     chrome.runtime.onMessage.addListener((msg) => {
@@ -114,6 +129,9 @@ export class WindowList {
     }
 
     const data = await this.send({ action: 'getWindowStats' });
+    if (!data || !Array.isArray(data.windows)) {
+      throw new Error('No window data received from background');
+    }
     this.renderWindows(data.windows);
   }
 
@@ -147,6 +165,16 @@ export class WindowList {
     }
   }
 
+  /** True when every window card and group section is collapsed. */
+  isAllCollapsed() {
+    const keys = this.getAllKeys(this.lastWindows || []);
+    return keys.length > 0 && keys.every((key) => this.collapsed.has(key));
+  }
+
+  syncCollapseToggle() {
+    this.collapseToggle?.sync();
+  }
+
   collapseAll() {
     if (!this.lastWindows || this.lastWindows.length === 0) return;
     for (const key of this.getAllKeys(this.lastWindows)) {
@@ -169,6 +197,7 @@ export class WindowList {
 
     if (!windows || windows.length === 0) {
       this.listEl.innerHTML = '<p class="empty-state">No windows found.</p>';
+      this.syncCollapseToggle();
       return;
     }
 
@@ -181,14 +210,17 @@ export class WindowList {
     for (const win of windows) {
       this.listEl.appendChild(this.createWindowCard(win));
     }
+    this.syncCollapseToggle();
   }
 
   createWindowCard(win) {
     const card = document.createElement('div');
-    card.className = 'window-card';
+    card.className = `window-card${win.focused ? ' window-card--active' : ''}`;
 
     const key = `window-${win.windowId}`;
     const isCollapsed = this.collapsed.has(key);
+    const windowName = `Window ${win.windowNumber}`;
+    const tabsText = `${win.tabCount} tab${win.tabCount !== 1 ? 's' : ''}`;
 
     // Header
     const header = document.createElement('div');
@@ -200,18 +232,31 @@ export class WindowList {
     if (win.tabCount >= this.maxTabs) statusColor = 'red';
     else if (win.tabCount >= this.recommendedTabs) statusColor = 'yellow';
     statusDot.className = `window-status-dot status-${statusColor}`;
+    statusDot.setAttribute('aria-hidden', 'true');
 
     const chevron = document.createElement('span');
     chevron.className = 'chevron';
-    chevron.textContent = '\u25BC';
+    chevron.textContent = '▼';
+    chevron.setAttribute('aria-hidden', 'true');
 
     const label = document.createElement('span');
     label.className = 'window-card-label';
-    label.textContent = `Window ${win.windowNumber}`;
+    label.textContent = windowName;
+    label.title = win.focused ? `${windowName} (current window)` : windowName;
 
     header.appendChild(statusDot);
     header.appendChild(chevron);
     header.appendChild(label);
+
+    // The current window is marked by the card's accent edge plus a small
+    // dot after the name (no wrapping text badge).
+    if (win.focused) {
+      const badge = document.createElement('span');
+      badge.className = 'window-focus-badge window-active-dot';
+      badge.title = 'Current window';
+      badge.setAttribute('aria-hidden', 'true');
+      header.appendChild(badge);
+    }
 
     // Show either a warning badge (with count) or a plain count — never both
     if (win.tabCount >= this.maxTabs) {
@@ -230,14 +275,20 @@ export class WindowList {
       const count = document.createElement('span');
       count.className = 'count';
       count.textContent = win.tabCount;
+      count.title = tabsText;
       header.appendChild(count);
     }
 
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+
     // Stash button
     const stashBtn = document.createElement('button');
+    stashBtn.type = 'button';
     stashBtn.className = 'stash-btn';
     stashBtn.textContent = 'Stash';
     stashBtn.title = 'Save and close all tabs in this window';
+    stashBtn.setAttribute('aria-label', `Stash ${windowName} (${tabsText})`);
     stashBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       stashBtn.disabled = true;
@@ -245,7 +296,7 @@ export class WindowList {
       try {
         const result = await this.send({ action: 'stashWindow', windowId: win.windowId, windowNumber: win.windowNumber });
         if (!await this.refreshCommittedState('Window tabs were stashed')) return;
-        showToast(`Stashed ${result.stash.tabCount} tabs from Window ${win.windowNumber}`, 'success');
+        showStashedToast(result?.stash, { from: `Window ${win.windowNumber}`, onUndone: () => this.refresh() });
       } catch (err) {
         showToast('Stash failed: ' + err.message, 'error');
       } finally {
@@ -253,62 +304,36 @@ export class WindowList {
         stashBtn.textContent = 'Stash';
       }
     });
-    header.appendChild(stashBtn);
+    actions.appendChild(stashBtn);
 
-    // Kebab button
-    const kebabBtn = document.createElement('button');
-    kebabBtn.className = 'kebab-btn';
-    kebabBtn.textContent = 'Kebab';
-    kebabBtn.title = 'Discard tabs in this window';
-    kebabBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      kebabBtn.disabled = true;
-      try {
-        const result = await this.send({ action: 'discardTabs', scope: 'window', windowId: win.windowId });
-        if (!await this.refreshCommittedState('Window tabs were kebabed')) return;
-        showToast(`Kebab'd ${result.discarded} tabs (${result.skipped} skipped)`, 'success');
-      } catch (err) {
-        showToast('Kebab failed: ' + err.message, 'error');
-      } finally {
-        kebabBtn.disabled = false;
-      }
-    });
-    header.appendChild(kebabBtn);
-
-    // Close button (only for non-focused windows)
+    const menuItems = [
+      {
+        label: 'Sleep tabs (Kebab)',
+        className: 'kebab-item',
+        title: 'Discard tabs in this window to free memory',
+        onSelect: () => this.kebabWindow(win),
+      },
+    ];
     if (!win.focused) {
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'close-btn';
-      closeBtn.textContent = 'Close';
-      closeBtn.title = 'Close this window';
-      closeBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const ok = await showConfirm({
-          title: 'Close window?',
-          message: `Close Window ${win.windowNumber} with ${win.tabCount} tab${win.tabCount !== 1 ? 's' : ''}? This cannot be undone.`,
-          confirmLabel: 'Close',
-          danger: true,
-        });
-        if (!ok) return;
-        closeBtn.disabled = true;
-        try {
-          await chrome.windows.remove(win.windowId);
-          if (!await this.refreshCommittedState('Window was closed')) return;
-          showToast(`Closed Window ${win.windowNumber}`, 'success');
-        } catch (err) {
-          showToast('Close failed: ' + err.message, 'error');
-          closeBtn.disabled = false;
-        }
+      menuItems.push({
+        label: 'Bring to front',
+        className: 'focus-item',
+        onSelect: () => this.bringWindowToFront(win.windowId),
       });
-      header.appendChild(closeBtn);
+      // Close only for non-focused windows; kept apart as the last item.
+      menuItems.push({
+        label: 'Close window…',
+        danger: true,
+        className: 'close-item',
+        onSelect: () => this.closeWindow(win),
+      });
     }
-
-    if (win.focused) {
-      const badge = document.createElement('span');
-      badge.className = 'window-focus-badge';
-      badge.textContent = 'active';
-      header.appendChild(badge);
-    }
+    const rowMenu = createOverflowMenu({
+      label: `More actions for ${windowName}`,
+      items: menuItems,
+    });
+    actions.appendChild(rowMenu.wrapper);
+    header.appendChild(actions);
 
     header.addEventListener('click', () => {
       const body = card.querySelector('.window-card-body');
@@ -316,11 +341,18 @@ export class WindowList {
         this.collapsed.delete(key);
         header.classList.remove('collapsed');
         body.classList.remove('collapsed');
+        setExpanded(header, true);
       } else {
         this.collapsed.add(key);
         header.classList.add('collapsed');
         body.classList.add('collapsed');
+        setExpanded(header, false);
       }
+      this.syncCollapseToggle();
+    });
+    makeKeyboardActivatable(header, {
+      expanded: !isCollapsed,
+      label: `${windowName}${win.focused ? ' (current window)' : ''}, ${tabsText}`,
     });
 
     // Body
@@ -391,8 +423,10 @@ export class WindowList {
 
     // Bring window to front button
     const focusBtn = document.createElement('button');
-    focusBtn.className = 'window-focus-btn';
-    focusBtn.textContent = 'Bring to Front';
+    focusBtn.type = 'button';
+    focusBtn.className = 'window-focus-btn action-btn secondary';
+    focusBtn.textContent = 'Bring to front';
+    focusBtn.setAttribute('aria-label', `Bring ${windowName} to front`);
     focusBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await this.bringWindowToFront(win.windowId);
@@ -402,6 +436,37 @@ export class WindowList {
     card.appendChild(header);
     card.appendChild(body);
     return card;
+  }
+
+  async kebabWindow(win) {
+    try {
+      const result = await this.send({ action: 'discardTabs', scope: 'window', windowId: win.windowId });
+      if (!await this.refreshCommittedState('Window tabs were kebabed')) return false;
+      showToast(`Kebab'd ${result?.discarded ?? 0} tabs (${result?.skipped ?? 0} skipped)`, 'success');
+      return true;
+    } catch (err) {
+      showToast('Kebab failed: ' + err.message, 'error');
+      return false;
+    }
+  }
+
+  async closeWindow(win) {
+    const ok = await showConfirm({
+      title: 'Close window?',
+      message: `Close Window ${win.windowNumber} with ${win.tabCount} tab${win.tabCount !== 1 ? 's' : ''}? This cannot be undone.`,
+      confirmLabel: 'Close',
+      danger: true,
+    });
+    if (!ok) return false;
+    try {
+      await chrome.windows.remove(win.windowId);
+    } catch (err) {
+      showToast('Close failed: ' + err.message, 'error');
+      return false;
+    }
+    if (!await this.refreshCommittedState('Window was closed')) return false;
+    showToast(`Closed Window ${win.windowNumber}`, 'success');
+    return true;
   }
 
   async bringWindowToFront(windowId) {
@@ -427,6 +492,7 @@ export class WindowList {
     const chevron = document.createElement('span');
     chevron.className = 'chevron';
     chevron.textContent = '\u25BC';
+    chevron.setAttribute('aria-hidden', 'true');
 
     const dot = document.createElement('span');
     dot.className = 'group-chip-dot';
@@ -458,12 +524,20 @@ export class WindowList {
         this.collapsed.delete(key);
         sectionHeader.classList.remove('collapsed');
         sectionBody.classList.remove('collapsed');
+        setExpanded(sectionHeader, true);
       } else {
         this.collapsed.add(key);
         sectionHeader.classList.add('collapsed');
         sectionBody.classList.add('collapsed');
+        setExpanded(sectionHeader, false);
       }
+      this.syncCollapseToggle();
     });
+    makeKeyboardActivatable(sectionHeader, {
+      expanded: !isCollapsed,
+      label: `${group.title || 'Untitled Group'}, ${group.tabCount} tab${group.tabCount !== 1 ? 's' : ''}`,
+    });
+    label.title = group.title || 'Untitled Group';
 
     section.appendChild(sectionHeader);
     section.appendChild(sectionBody);
@@ -483,6 +557,7 @@ export class WindowList {
     const chevron = document.createElement('span');
     chevron.className = 'chevron';
     chevron.textContent = '\u25BC';
+    chevron.setAttribute('aria-hidden', 'true');
 
     const dot = document.createElement('span');
     dot.className = 'group-chip-dot';
@@ -514,11 +589,18 @@ export class WindowList {
         this.collapsed.delete(key);
         sectionHeader.classList.remove('collapsed');
         sectionBody.classList.remove('collapsed');
+        setExpanded(sectionHeader, true);
       } else {
         this.collapsed.add(key);
         sectionHeader.classList.add('collapsed');
         sectionBody.classList.add('collapsed');
+        setExpanded(sectionHeader, false);
       }
+      this.syncCollapseToggle();
+    });
+    makeKeyboardActivatable(sectionHeader, {
+      expanded: !isCollapsed,
+      label: `Ungrouped, ${tabs.length} tab${tabs.length !== 1 ? 's' : ''}`,
     });
 
     section.appendChild(sectionHeader);
@@ -542,6 +624,7 @@ export class WindowList {
     const title = document.createElement('span');
     title.className = 'title';
     title.textContent = tab.title || tab.url || 'New Tab';
+    item.title = tabTooltip(tab);
 
     item.appendChild(favicon);
     item.appendChild(title);
@@ -553,6 +636,7 @@ export class WindowList {
         showToast('Failed to focus tab: ' + err.message, 'error');
       }
     });
+    makeKeyboardActivatable(item, { label: `Switch to ${title.textContent}` });
 
     return item;
   }

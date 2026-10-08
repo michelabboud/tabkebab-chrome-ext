@@ -867,8 +867,9 @@ describe('secret-free portable section merge', () => {
     );
 
     expect(existingAI).toEqual(before);
-    expect(merged.aiSettings.enabled).toBeFalse();
-    expect(merged.aiSettings.providerId).toBe('custom');
+    // Import keeps the local enabled flag and active provider.
+    expect(merged.aiSettings.enabled).toBeTrue();
+    expect(merged.aiSettings.providerId).toBe('openai');
     expect(merged.aiSettings.usePassphrase).toEqual(before.usePassphrase);
     expect(merged.aiSettings.providerConfigs.openai.apiKey).toEqual(before.providerConfigs.openai.apiKey);
     expect(merged.aiSettings.providerConfigs.custom.apiKey).toEqual(before.providerConfigs.custom.apiKey);
@@ -882,7 +883,7 @@ describe('secret-free portable section merge', () => {
     });
   });
 
-  test('only imports a Custom endpoint change when it cannot redirect a local credential', () => {
+  test('never imports a Custom endpoint, whether or not a local credential exists', () => {
     const localKey = { ciphertext: 'local-custom-ciphertext' };
     const base = fullSections({
       aiSettings: {
@@ -899,38 +900,24 @@ describe('secret-free portable section merge', () => {
     });
     const options = { tombstones: { sessions: {}, manualGroups: {} }, now: 100 };
 
-    const sameOrigin = mergePortableSections(base, {
-      aiSettings: {
-        enabled: true,
-        providerId: 'custom',
-        providerConfigs: {
-          custom: { model: 'same-origin', baseUrl: 'https://provider.example.test/v2' },
+    for (const baseUrl of ['https://provider.example.test/v2', 'https://redirect.example.test/v1']) {
+      const merged = mergePortableSections(base, {
+        aiSettings: {
+          enabled: true,
+          providerId: 'custom',
+          providerConfigs: { custom: { model: 'imported', baseUrl } },
         },
-      },
-    }, options);
-    expect(sameOrigin.aiSettings.providerConfigs.custom).toMatchObject({
-      model: 'same-origin',
-      baseUrl: 'https://provider.example.test/v2',
-      apiKey: localKey,
-    });
-
-    const differentOrigin = mergePortableSections(base, {
-      aiSettings: {
-        enabled: true,
-        providerId: 'custom',
-        providerConfigs: {
-          custom: { model: 'different-origin', baseUrl: 'https://redirect.example.test/v1' },
-        },
-      },
-    }, options);
-    expect(differentOrigin.aiSettings.providerConfigs.custom).toMatchObject({
-      model: 'different-origin',
-      baseUrl: 'https://provider.example.test/v1',
-      apiKey: localKey,
-    });
+      }, options);
+      expect(merged.aiSettings.providerConfigs.custom).toMatchObject({
+        model: 'imported',
+        baseUrl: 'https://provider.example.test/v1',
+        apiKey: localKey,
+      });
+    }
 
     const withoutLocalKey = structuredClone(base);
     delete withoutLocalKey.aiSettings.providerConfigs.custom.apiKey;
+    delete withoutLocalKey.aiSettings.providerConfigs.custom.baseUrl;
     const unbound = mergePortableSections(withoutLocalKey, {
       aiSettings: {
         enabled: true,
@@ -940,10 +927,58 @@ describe('secret-free portable section merge', () => {
         },
       },
     }, options);
-    expect(unbound.aiSettings.providerConfigs.custom).toMatchObject({
-      model: 'unbound',
-      baseUrl: 'https://redirect.example.test/v1',
+    expect(unbound.aiSettings.providerConfigs.custom.model).toBe('unbound');
+    expect(Object.hasOwn(unbound.aiSettings.providerConfigs.custom, 'baseUrl')).toBeFalse();
+  });
+
+  test('an import never enables AI or switches the active provider', () => {
+    const options = { tombstones: { sessions: {}, manualGroups: {} }, now: 100 };
+    const imported = {
+      aiSettings: {
+        enabled: true,
+        providerId: 'custom',
+        providerConfigs: { custom: { model: 'm', baseUrl: 'https://evil.example.test/v1' } },
+      },
+    };
+
+    const disabledLocal = mergePortableSections(fullSections({
+      aiSettings: { enabled: false, providerId: 'openai', providerConfigs: {} },
+    }), imported, options);
+    expect(disabledLocal.aiSettings.enabled).toBeFalse();
+    expect(disabledLocal.aiSettings.providerId).toBe('openai');
+    expect(disabledLocal.aiSettings.providerConfigs.custom.baseUrl).toBeUndefined();
+
+    const noLocal = fullSections();
+    delete noLocal.aiSettings;
+    const fresh = mergePortableSections(noLocal, imported, options);
+    expect(fresh.aiSettings.enabled).toBeFalse();
+    expect(fresh.aiSettings.providerId).toBeNull();
+    expect(fresh.aiSettings.providerConfigs.custom.baseUrl).toBeUndefined();
+  });
+
+  test('an import never weakens Drive retention protection', () => {
+    const options = { tombstones: { sessions: {}, manualGroups: {} }, now: 100 };
+    const protectedLocal = fullSections({
+      settings: { neverDeleteFromDrive: true, driveRetentionDays: 90 },
     });
+    const merged = mergePortableSections(protectedLocal, {
+      settings: { neverDeleteFromDrive: false, driveRetentionDays: 1 },
+    }, options);
+    expect(merged.settings.neverDeleteFromDrive).toBeTrue();
+    expect(merged.settings.driveRetentionDays).toBe(90);
+
+    // Safer imported values are still accepted.
+    const safer = mergePortableSections(fullSections({
+      settings: { neverDeleteFromDrive: false, driveRetentionDays: 30 },
+    }), { settings: { neverDeleteFromDrive: true, driveRetentionDays: 120 } }, options);
+    expect(safer.settings.neverDeleteFromDrive).toBeTrue();
+    expect(safer.settings.driveRetentionDays).toBe(120);
+
+    // Missing local keys are protected at their defaults (30 days).
+    const defaults = mergePortableSections(fullSections({ settings: {} }), {
+      settings: { driveRetentionDays: 2 },
+    }, options);
+    expect(defaults.settings.driveRetentionDays).toBe(30);
   });
 
   test('revives explicitly imported sessions and groups above tombstones without clearing them', () => {

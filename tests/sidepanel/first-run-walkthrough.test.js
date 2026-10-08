@@ -166,29 +166,81 @@ describe('first-run walkthrough', () => {
     }]);
   });
 
-  test('step actions navigate to the real panel sections', async () => {
+  test('step actions open the right view and highlight the control the step names', async () => {
     installDocument();
     const destinations = [];
+    const subtabs = [];
+    const lookups = [];
+    const notices = [];
+    const target = {
+      classes: new Set(),
+      classList: {
+        add(...names) { names.forEach((n) => target.classes.add(n)); },
+        remove(...names) { names.forEach((n) => target.classes.delete(n)); },
+      },
+      scrolled: null,
+      focused: false,
+      scrollIntoView(options) { this.scrolled = options; },
+      focus() { this.focused = true; },
+    };
     const root = createWalkthroughRoot();
-    const { FirstRunWalkthrough } =
+    const { FirstRunWalkthrough, HIGHLIGHT_CLASSES } =
       await import('../../sidepanel/components/first-run-walkthrough.js');
     const walkthrough = new FirstRunWalkthrough(root, {
       storage: { get: async () => ({}), set: async () => {} },
       navigate: (destination) => destinations.push(destination),
+      selectSubtab: (name) => subtabs.push(name),
+      findTarget: (selectors) => {
+        lookups.push(selectors);
+        return selectors.includes('#btn-group-by-domain') ? target : null;
+      },
+      delay: async () => {},
+      notify: (message, type) => notices.push({ message, type }),
     });
 
     walkthrough.launch(1);
-    root.elements['walkthrough-action'].click();
-    walkthrough.launch(2);
-    root.elements['walkthrough-action'].click();
-    walkthrough.launch(3);
-    root.elements['walkthrough-action'].click();
+    await expect(walkthrough.runStepAction()).resolves.toBe(target);
+    expect(destinations).toEqual([{ view: 'tabs' }]);
+    expect(subtabs).toEqual(['domains']);
+    for (const name of HIGHLIGHT_CLASSES) expect(target.classes.has(name)).toBeTrue();
+    expect(target.scrolled).toEqual({ block: 'nearest' });
+    expect(target.focused).toBeTrue();
+    walkthrough.clearHighlight();
+    expect(target.classes.size).toBe(0);
 
-    expect(destinations).toEqual([
-      { view: 'tabs' },
-      { view: 'tabs' },
-      { view: 'stash' },
-    ]);
+    // Step 3 points at a Stash button; with no tabs open it explains why.
+    walkthrough.launch(2);
+    await expect(walkthrough.runStepAction()).resolves.toBeNull();
+    expect(lookups.at(-1)).toContain('.stash-btn');
+    expect(notices).toEqual([{
+      message: 'Open a few tabs first: each domain row gets its own Stash button.',
+      type: 'info',
+    }]);
+
+    walkthrough.launch(3);
+    await walkthrough.runStepAction();
+    expect(destinations.at(-1)).toEqual({ view: 'stash' });
+  });
+
+  test('uses the review copy and keeps Skip tour out of the actions row', async () => {
+    const { FIRST_RUN_STEPS } =
+      await import('../../sidepanel/components/first-run-walkthrough.js');
+    expect(FIRST_RUN_STEPS[0].description)
+      .toBe('Group, stash, restore: three steps to a calmer tab bar.');
+    expect(FIRST_RUN_STEPS[2].title).toBe('Stash tabs for later');
+    expect(FIRST_RUN_STEPS[2].description)
+      .toBe('Hit **Stash** on any domain, group or window. The tabs close, but nothing is lost.');
+    // No step offers a pure no-op "go where you already are" action.
+    for (const step of FIRST_RUN_STEPS) {
+      if (step.destination?.view === 'tabs') expect(step.highlight?.length).toBeGreaterThan(0);
+    }
+
+    const html = await Bun.file(new URL('../../sidepanel/panel.html', import.meta.url)).text();
+    const header = html.slice(html.indexOf('class="walkthrough-header"'), html.indexOf('id="walkthrough-title"'));
+    const actions = html.slice(html.indexOf('class="walkthrough-actions"'), html.indexOf('</section>', html.indexOf('class="walkthrough-actions"')));
+    expect(header).toContain('id="walkthrough-dismiss"');
+    expect(actions).not.toContain('id="walkthrough-dismiss"');
+    expect(actions).toContain('id="walkthrough-next"');
   });
 });
 

@@ -1,8 +1,15 @@
 // core/ai/provider-openai.js — OpenAI API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import {
+  AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError,
+  PROVIDER_DEFAULTS, ProviderId,
+} from './provider.js';
 
 const BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_MODEL = PROVIDER_DEFAULTS[ProviderId.OPENAI].model;
+// Reasoning tokens count against max_completion_tokens; leave room for them so
+// a short JSON answer is not starved.
+const REASONING_MIN_COMPLETION_TOKENS = 4096;
 
 function ensureNotAborted(signal) {
   if (signal?.aborted) throw new AIAbortError();
@@ -35,6 +42,45 @@ async function readErrorText(response, signal) {
   }
 }
 
+function normalizeOpenAIModelId(model) {
+  return model.trim().toLowerCase().replace(/^openai\//, '');
+}
+
+/**
+ * o-series and gpt-5+ (gpt-5, gpt-5.x, gpt-6, gpt-6.x, ...) reasoning models
+ * reject `max_tokens` and any non-default `temperature` on Chat Completions.
+ * The `-chat` variants (gpt-5-chat-latest, ...) are non-reasoning chat models.
+ */
+export function isOpenAIReasoningModel(model) {
+  if (typeof model !== 'string') return false;
+  const id = normalizeOpenAIModelId(model);
+  if (/^o\d/.test(id)) return true;
+  if (/-chat(?:$|-)/.test(id)) return false;
+  const match = /^gpt-(\d+)(?=$|[.-])/.exec(id);
+  return Boolean(match) && Number(match[1]) >= 5;
+}
+
+/**
+ * Reasoning effort to request for our short classification calls. `low` is
+ * accepted across o-series, gpt-5.x and gpt-6.x; `-pro` variants only accept
+ * their own default, so they are left alone.
+ */
+export function openAIReasoningEffort(model) {
+  if (!isOpenAIReasoningModel(model)) return null;
+  if (/-pro(?:$|-)/.test(normalizeOpenAIModelId(model))) return null;
+  return 'low';
+}
+
+function applyTokenLimit(body, model, maxTokens) {
+  if (isOpenAIReasoningModel(model)) {
+    body.max_completion_tokens = Math.max(maxTokens, REASONING_MIN_COMPLETION_TOKENS);
+    const effort = openAIReasoningEffort(model);
+    if (effort) body.reasoning_effort = effort;
+  } else {
+    body.max_tokens = maxTokens;
+  }
+}
+
 export const OpenAIProvider = {
   id: 'openai',
   name: 'OpenAI',
@@ -48,11 +94,17 @@ export const OpenAIProvider = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({
-          model: config.model || 'gpt-4.1-nano',
-          messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
-          max_tokens: 5,
-        }),
+        body: JSON.stringify((() => {
+          const model = config.model || DEFAULT_MODEL;
+          const testBody = {
+            model,
+            messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
+          };
+          // Reasoning models spend hidden tokens before answering; applyTokenLimit
+          // raises the cap for them.
+          applyTokenLimit(testBody, model, 5);
+          return testBody;
+        })()),
         signal,
       });
       ensureNotAborted(signal);
@@ -73,12 +125,12 @@ export const OpenAIProvider = {
     }
     messages.push({ role: 'user', content: request.userPrompt });
 
-    const body = {
-      model: config.model || 'gpt-4.1-nano',
-      messages,
-      max_tokens: request.maxTokens || 1024,
-      temperature: request.temperature ?? 0.3,
-    };
+    const model = config.model || DEFAULT_MODEL;
+    const body = { model, messages };
+    applyTokenLimit(body, model, request.maxTokens || 1024);
+    if (!isOpenAIReasoningModel(model)) {
+      body.temperature = request.temperature ?? 0.3;
+    }
 
     if (request.responseFormat === 'json') {
       body.response_format = { type: 'json_object' };
@@ -109,7 +161,7 @@ export const OpenAIProvider = {
     }
     if (!response.ok) {
       const text = await readErrorText(response, signal);
-      throw new AINetworkError(`OpenAI API error ${response.status}: ${text.slice(0, 200)}`);
+      throw providerHttpError('OpenAI', response.status, text);
     }
 
     const data = await abortAware(() => response.json(), signal);

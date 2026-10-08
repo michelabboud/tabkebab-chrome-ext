@@ -30,7 +30,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Comma
     "  $dist = Join-Path $root 'dist';" ^
     "  if ((Test-Path -LiteralPath $dist) -and -not (Test-Path -LiteralPath $dist -PathType Container)) { throw 'dist exists but is not a directory.' }" ^
     "  Remove-OwnedPackages $dist;" ^
-    "  $fileEntries = @('VERSION', 'manifest.json', 'service-worker.js');" ^
+    "  $fileEntries = @('VERSION', 'manifest.json', 'tabkebab-service-worker.js');" ^
     "  $directoryEntries = @('core', 'sidepanel', 'icons');" ^
     "  foreach ($entry in $fileEntries) {" ^
     "    $path = Join-Path $root $entry;" ^
@@ -51,7 +51,7 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Comma
     "  $zipPath = Join-Path $dist ('tabkebab-' + $version + '.zip');" ^
     "  $staging = Join-Path ([IO.Path]::GetTempPath()) ('tabkebab-' + [guid]::NewGuid().ToString('N'));" ^
     "  [IO.Directory]::CreateDirectory($staging) | Out-Null;" ^
-    "  foreach ($entry in @('manifest.json', 'service-worker.js', 'core', 'sidepanel', 'icons')) {" ^
+    "  foreach ($entry in @('manifest.json', 'tabkebab-service-worker.js', 'core', 'sidepanel', 'icons')) {" ^
     "    Copy-Item -LiteralPath (Join-Path $root $entry) -Destination $staging -Recurse -Force -ErrorAction Stop;" ^
     "  }" ^
     "  $fileCount = @(Get-ChildItem -LiteralPath $staging -Recurse -Force -File).Count;" ^

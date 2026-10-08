@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRestoreOutcome,
   finalizeRestoreOutcome,
+  isSettledExceptInvalid,
   shouldDeleteRestoredSource,
 } from '../../core/restore-outcome.js';
 
@@ -58,5 +59,19 @@ describe('restore outcomes', () => {
     expect(shouldDeleteRestoredSource({ complete: true }, false)).toBe(false);
     expect(shouldDeleteRestoredSource({ complete: false }, true)).toBe(false);
     expect(shouldDeleteRestoredSource({ complete: false }, false)).toBe(false);
+  });
+
+  test('invalid-only skips are settled but keep complete false (sources are not deleted)', () => {
+    const outcome = createRestoreOutcome(3);
+    outcome.restoredCount = 2;
+    outcome.skippedInvalid = 1;
+    finalizeRestoreOutcome(outcome);
+    expect(outcome.complete).toBe(false);
+    expect(isSettledExceptInvalid(outcome)).toBe(true);
+    expect(shouldDeleteRestoredSource(outcome, true)).toBe(false);
+
+    outcome.errors.push({ scope: 'create', url: 'x', message: 'failed' });
+    expect(isSettledExceptInvalid(outcome)).toBe(false);
+    expect(isSettledExceptInvalid(finalizeRestoreOutcome(createRestoreOutcome(0)))).toBe(false);
   });
 });

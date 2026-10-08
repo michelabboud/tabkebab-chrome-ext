@@ -1,6 +1,9 @@
 // global-search.js — Global search overlay across tabs, stashes, and sessions
 
 import { sendOrThrow } from '../message-client.js';
+import { makeKeyboardActivatable } from './keyboard-activate.js';
+import { displayStashName } from '../record-format.js';
+import { isFeatureEnabled } from '../feature-flags.js';
 
 export const SEARCH_UNAVAILABLE_MESSAGE = 'Search unavailable — try again.';
 const TAB_ACTIVATION_FAILURE_MESSAGE = 'Could not open tab — try again.';
@@ -94,20 +97,24 @@ export class GlobalSearch {
     if (this.overlay) return;
     this._lifecycleGeneration += 1;
 
+    this._returnFocus = document.activeElement || null;
     this.overlay = document.createElement('div');
     this.overlay.id = 'search-overlay';
     this.overlay.className = 'search-overlay';
+    this.overlay.setAttribute('role', 'dialog');
+    this.overlay.setAttribute('aria-modal', 'true');
+    this.overlay.setAttribute('aria-label', 'Search tabs, stashes and sessions');
     this.overlay.innerHTML = `
       <div class="search-panel">
         <div class="search-input-wrap">
-          <svg class="search-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg class="search-input-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input type="text" class="search-input" placeholder="Search tabs, stashes, sessions\u2026" autocomplete="off" spellcheck="false">
-          <kbd class="search-esc-hint">Esc</kbd>
+          <input type="text" class="search-input" placeholder="Search tabs, stashes, sessions\u2026" aria-label="Search tabs, stashes and sessions" aria-controls="search-results" autocomplete="off" spellcheck="false">
+          <kbd class="search-esc-hint" aria-hidden="true">Esc</kbd>
         </div>
-        <div class="search-results"></div>
+        <div class="search-results" id="search-results" aria-label="Search results"></div>
       </div>
     `;
 
@@ -139,6 +146,9 @@ export class GlobalSearch {
     this._sessions = [];
     this._loadState = 'idle';
     clearTimeout(this._debounceTimer);
+    const returnFocus = this._returnFocus;
+    this._returnFocus = null;
+    if (returnFocus?.isConnected !== false) returnFocus?.focus?.();
   }
 
   async _fetchAll(lifecycleGeneration = this._lifecycleGeneration) {
@@ -157,8 +167,10 @@ export class GlobalSearch {
       ]);
 
       const tabs = flattenGroupedTabs(tabData);
-      const validStashes = validateCurrentWindowRecords(stashes);
-      const validSessions = validateCurrentWindowRecords(sessions);
+      // Records of a feature switched off in Settings → Features stay stored
+      // but are left out of search results.
+      const validStashes = isFeatureEnabled('stash') ? validateCurrentWindowRecords(stashes) : [];
+      const validSessions = isFeatureEnabled('sessions') ? validateCurrentWindowRecords(sessions) : [];
       if (!ownsView()) return false;
       this._tabs = tabs;
       this._stashes = validStashes;
@@ -281,6 +293,8 @@ export class GlobalSearch {
         }
 
         item.append(favicon, title, url);
+        item.title = tab.url ? `${tab.title || 'Untitled'}\n${tab.url}` : (tab.title || 'Untitled');
+        makeKeyboardActivatable(item, { label: `Switch to tab: ${tab.title || 'Untitled'}` });
         return item;
       }, tabs.length > maxPerSection);
     }
@@ -299,7 +313,8 @@ export class GlobalSearch {
 
         const title = document.createElement('span');
         title.className = 'search-item-title';
-        title.textContent = stash.name || 'Unnamed stash';
+        const stashName = stash.name ? displayStashName(stash.name) : 'Unnamed stash';
+        title.textContent = stashName;
 
         const meta = document.createElement('span');
         meta.className = 'search-item-url';
@@ -313,7 +328,9 @@ export class GlobalSearch {
         }
         meta.textContent = parts.join(' \u00B7 ');
 
+        icon.setAttribute('aria-hidden', 'true');
         item.append(icon, title, meta);
+        makeKeyboardActivatable(item, { label: `Open stash: ${stashName}` });
         return item;
       }, stashes.length > maxPerSection);
     }
@@ -346,7 +363,9 @@ export class GlobalSearch {
         }
         meta.textContent = parts.join(' \u00B7 ');
 
+        icon.setAttribute('aria-hidden', 'true');
         item.append(icon, title, meta);
+        makeKeyboardActivatable(item, { label: `Open session: ${session.name || 'Unnamed session'}` });
         return item;
       }, sessions.length > maxPerSection);
     }
@@ -360,6 +379,8 @@ export class GlobalSearch {
   _renderSection(label, totalCount, items, renderItem, hasMore) {
     const header = document.createElement('div');
     header.className = 'search-section-header';
+    header.setAttribute('role', 'heading');
+    header.setAttribute('aria-level', '3');
     header.innerHTML = `<span>${label}</span><span class="search-section-count">${totalCount}</span>`;
     this.resultsEl.appendChild(header);
 
@@ -370,7 +391,8 @@ export class GlobalSearch {
     }
 
     if (hasMore) {
-      const showAll = document.createElement('div');
+      const showAll = document.createElement('button');
+      showAll.type = 'button';
       showAll.className = 'search-show-all';
       showAll.textContent = `Show all ${totalCount}`;
       showAll.addEventListener('click', () => {
@@ -423,17 +445,44 @@ export class GlobalSearch {
       this.close();
       const btn = document.querySelector('.tab-nav [data-view="stash"]');
       if (btn) btn.click();
+      void this._revealRecord(item.dataset.stashId);
       return true;
     } else if (type === 'session') {
       this.close();
       const btn = document.querySelector('.tab-nav [data-view="sessions"]');
       if (btn) btn.click();
+      void this._revealRecord(item.dataset.sessionId);
       return true;
     }
     return false;
   }
 
+  /**
+   * After jumping to Stash/Sessions, scroll the chosen card into view and
+   * pulse it so the user sees which record the result was. The list renders
+   * asynchronously, so look for the card a few times.
+   */
+  async _revealRecord(id, { attempts = 10, delayMs = 80 } = {}) {
+    if (!id) return null;
+    const selector = `[data-restore-id="${String(id).replace(/["\\]/g, '')}"]`;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      // The panel may be torn down between retries.
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null;
+      const card = document.querySelector(selector);
+      if (card) {
+        card.scrollIntoView?.({ block: 'nearest' });
+        card.classList.add('highlight-section');
+        setTimeout(() => card.classList.remove('highlight-section'), 2000);
+        return card;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return null;
+  }
+
   _onKeydown(e) {
+    // A focused result row already handled Enter/Space itself.
+    if (e.defaultPrevented) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -475,9 +524,12 @@ export class GlobalSearch {
     if (this.activeIndex < 0) this.activeIndex = this.flatItems.length - 1;
     if (this.activeIndex >= this.flatItems.length) this.activeIndex = 0;
 
-    // Apply highlight and scroll into view
-    this.flatItems[this.activeIndex].classList.add('active');
-    this.flatItems[this.activeIndex].scrollIntoView({ block: 'nearest' });
+    // Apply highlight and scroll into view. If focus is already on a result
+    // row (Tab into the list), arrows move focus too.
+    const next = this.flatItems[this.activeIndex];
+    next.classList.add('active');
+    next.scrollIntoView({ block: 'nearest' });
+    if (this.flatItems.includes(document.activeElement)) next.focus();
   }
 
   _formatDate(dateStr) {

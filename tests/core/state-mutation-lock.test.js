@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { installChromeMock } from '../helpers/chrome-mock.js';
 import { sendOrThrow } from '../../sidepanel/message-client.js';
+import { handlerBody, readWorkerModule, sliceBetween } from '../helpers/worker-source.js';
 
 let importNonce = 0;
 
@@ -10,7 +11,7 @@ async function lockModule() {
 }
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task7=${label}-${++importNonce}`);
+  return import(`../../tabkebab-service-worker.js?task7=${label}-${++importNonce}`);
 }
 
 function deferred() {
@@ -526,15 +527,19 @@ describe('service-worker portable-state ownership', () => {
   });
 
   test('internal sync/export helpers contain no nested lock acquisition and legacy group writers are gone', async () => {
-    const workerSource = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
-    const unlockedSync = workerSource.slice(
-      workerSource.indexOf('async function syncDriveStateUnlocked'),
-      workerSource.indexOf('export async function syncDriveState'),
+    const driveSource = readWorkerModule('core/background/drive.js');
+    const unlockedSync = sliceBetween(
+      driveSource,
+      'async function syncDriveStateUnlocked',
+      'export async function syncDriveState',
     );
-    const exportHelper = workerSource.slice(
-      workerSource.indexOf('async function exportDriveSubfolders'),
-      workerSource.indexOf('async function setCompletedDriveState'),
+    const exportHelper = sliceBetween(
+      driveSource,
+      'async function exportDriveSubfolders',
+      'async function setCompletedDriveState',
     );
+    expect(unlockedSync).toContain('reconcileDriveSync(');
+    expect(exportHelper).toContain('exportToSubfolder(');
     expect(unlockedSync).not.toContain('withStateMutationLock');
     expect(unlockedSync).not.toContain('chrome.runtime.sendMessage');
     expect(exportHelper).not.toContain('withStateMutationLock');
@@ -545,6 +550,21 @@ describe('service-worker portable-state ownership', () => {
       'saveManualGroup', 'addTabToManualGroup', 'removeTabFromManualGroup', 'removeTabFromAllGroups',
     ]) {
       expect(groupingSource).not.toContain(`function ${legacy}`);
+    }
+  });
+
+  test('every state-mutating worker action keeps exactly one outer mutation-lock boundary', () => {
+    for (const action of [
+      'saveSession', 'deleteSession', 'undoDeleteSession',
+      'createManualGroup', 'moveTabToManualGroup', 'deleteManualGroup',
+      'buildPortableExport', 'buildPortableSessionExport', 'buildPortableStashExport', 'importPortableData',
+      'saveSettings', 'importDriveSettings', 'undoDriveSettings', 'saveFocusProfilePrefs',
+      'unlockAIApiKey', 'saveAISettings',
+      'saveKeepAwakeList', 'toggleKeepAwakeDomain', 'setKeepAwake',
+      'stashWindow', 'stashGroup', 'stashDomain', 'restoreStash', 'deleteStash', 'undoDeleteStash', 'importStashes',
+      'startFocus', 'endFocus', 'pauseFocus', 'resumeFocus', 'extendFocus',
+    ]) {
+      expect(handlerBody(action).match(/withStateMutationLock/g) || []).toHaveLength(1);
     }
   });
 
@@ -827,6 +847,11 @@ describe('panel mutation and checked-message boundaries', () => {
       if (methods.some((method) => typeof GroupEditor.prototype[method] !== 'function')) return;
 
       installChromeMock({
+        // Live group membership is re-read at action time (WS6.1).
+        tabs: [
+          { id: 10, groupId: 4, url: 'https://a.test/' },
+          { id: 11, groupId: 4, url: 'https://b.test/' },
+        ],
         runtimeHandler: async ({ action }) => {
           if (action === 'discardTabs') return { discarded: 2, skipped: 1 };
           if (action === 'stashGroup') return { stash: { tabCount: 3 } };

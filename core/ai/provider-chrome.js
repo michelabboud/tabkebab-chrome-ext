@@ -13,6 +13,16 @@ function getLanguageModelAPI() {
   return null;
 }
 
+/**
+ * Prompt API language options. Chrome logs a warning on every availability()
+ * or create() call that does not name the input/output language, and the
+ * availability check must use the same options as the session it guards.
+ */
+export const CHROME_AI_LANGUAGE_OPTIONS = Object.freeze({
+  expectedInputs: Object.freeze([Object.freeze({ type: 'text', languages: Object.freeze(['en']) })]),
+  expectedOutputs: Object.freeze([Object.freeze({ type: 'text', languages: Object.freeze(['en']) })]),
+});
+
 function ensureNotAborted(signal) {
   if (signal?.aborted) throw new AIAbortError();
 }
@@ -28,7 +38,7 @@ async function requireAvailable(api, signal) {
   let status;
   try {
     if (typeof api.availability === 'function') {
-      status = await api.availability();
+      status = await api.availability(CHROME_AI_LANGUAGE_OPTIONS);
     } else if (typeof api.capabilities === 'function') {
       const capabilities = await api.capabilities();
       status = capabilities?.available === 'readily'
@@ -90,7 +100,7 @@ export class ChromeAIProvider {
 
     let session;
     try {
-      const options = {};
+      const options = { ...CHROME_AI_LANGUAGE_OPTIONS };
       if (request.systemPrompt) {
         options.systemPrompt = request.systemPrompt;
       }

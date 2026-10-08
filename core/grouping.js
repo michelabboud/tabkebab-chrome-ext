@@ -11,7 +11,7 @@ import {
   classifySmartGroupFailure,
   selectSmartGroupRoute,
 } from './ai/smart-group-route.js';
-import { plan } from './engine/planner.js';
+import { plan, pruneDesiredState } from './engine/planner.js';
 import { execute, moveTabsInBatches } from './engine/executor.js';
 import {
   DRIVE_TOMBSTONES_KEY,
@@ -22,6 +22,8 @@ import {
   migrateDriveSyncDocument,
   recordDeletionTombstones,
 } from './drive-sync.js';
+import { createLogger } from './log.js';
+const log = createLogger('grouping');
 
 const MAX_VERIFY_PASSES = 3;
 const MIN_WINDOW_TABS = 3;
@@ -56,7 +58,7 @@ export async function applyDomainGroupsToChrome(onProgress) {
 
   // Phase 2: Solver — compute ideal end-state
   report(Phase.SOLVER, `Computing layout for ${snapshot.tabs.length} tabs across ${snapshot.tabsByDomain.size} domains...`);
-  const desiredState = solve(snapshot);
+  let desiredState = solve(snapshot);
 
   // Phase 3: Planner — diff current vs desired → minimal move plan
   report(Phase.PLANNER, 'Planning minimal moves...');
@@ -89,6 +91,8 @@ export async function applyDomainGroupsToChrome(onProgress) {
   for (let pass = 0; pass < MAX_VERIFY_PASSES; pass++) {
     report(Phase.SNAPSHOT, `Verifying (pass ${pass + 1}/${MAX_VERIFY_PASSES})...`);
     const freshSnapshot = await takeSnapshot();
+    // Tabs closed (or pinned) mid-run must not keep the plan from converging.
+    desiredState = pruneDesiredState(desiredState, freshSnapshot);
 
     report(Phase.PLANNER, 'Checking for remaining moves...');
     const verifyPlan = plan(freshSnapshot, desiredState);
@@ -126,6 +130,10 @@ export async function applySmartGroupsToChrome(onProgress) {
   // Phase 1: Snapshot
   report(Phase.SNAPSHOT, 'Reading all tabs and windows...');
   const snapshot = await takeSnapshot();
+  // Incognito tab titles and URLs are never sent to an AI provider.
+  if ([...snapshot.tabsById.values()].some((tab) => tab.incognito)) {
+    throw new Error('Smart group is not available for incognito windows.');
+  }
 
   // Phase 2: AI Solver. Failure returns a fixed, actionable fallback outcome;
   // the panel owns the user's one-click decision to run deterministic grouping.
@@ -205,6 +213,7 @@ export async function applySmartGroupsToChrome(onProgress) {
   for (let pass = 0; pass < MAX_VERIFY_PASSES; pass++) {
     report(Phase.SNAPSHOT, `Verifying (pass ${pass + 1}/${MAX_VERIFY_PASSES})...`);
     const freshSnapshot = await takeSnapshot();
+    desiredState = pruneDesiredState(desiredState, freshSnapshot);
 
     report(Phase.PLANNER, 'Checking for remaining moves...');
     const verifyPlan = plan(freshSnapshot, desiredState);
@@ -289,7 +298,8 @@ const CONSOLIDATION_THRESHOLD = 30;
  * Returns structured data about all Chrome windows for the Windows view.
  */
 export async function getWindowStats() {
-  const snapshot = await takeSnapshot();
+  // Display-only: show every tab, including pinned ones and incognito windows.
+  const snapshot = await takeSnapshot({ includePinned: true, includeAllProfiles: true });
   const windowObjMap = new Map(snapshot.windows.map(w => [w.id, w]));
   const windowList = [];
 
@@ -444,7 +454,7 @@ export async function consolidateWindows(onProgress) {
             }
             tabsRedistributed += remaining.length;
           } catch (e) {
-            console.warn('[TabKebab] Failed to create overflow window:', e);
+            log.warn('Failed to create overflow window:', e);
           }
         }
       }
@@ -570,7 +580,7 @@ export async function consolidateWindows(onProgress) {
               groupCount: 1,
             });
           } catch (e) {
-            console.warn('[TabKebab] Failed to create window for group:', e);
+            log.warn('Failed to create window for group:', e);
           }
         }
       }
@@ -581,9 +591,11 @@ export async function consolidateWindows(onProgress) {
   report(Phase.SNAPSHOT, 'Re-grouping after consolidation...');
   const pipelineResult = await applyDomainGroupsToChrome(onProgress);
 
-  // Count how many source windows were closed
-  const postSnapshot = await takeSnapshot();
-  const survivingIds = new Set(postSnapshot.tabsByWindow.keys());
+  // Count how many source windows were closed. Ask Chrome for the live
+  // windows: a snapshot omits pinned tabs, so a window that kept only pinned
+  // tabs would otherwise look closed.
+  const liveWindows = await chrome.windows.getAll();
+  const survivingIds = new Set(liveWindows.map(w => w.id));
   const windowsClosed = sources.filter(s => !survivingIds.has(s.windowId)).length;
 
   return { tabsMoved: totalTabsMoved, windowsClosed, windowsConsolidated, tabsRedistributed, groupsMoved, pipelineResult };
@@ -704,6 +716,7 @@ export async function moveTabToManualGroup(tabUrl, targetGroupId) {
 
   if (targetGroupId !== 'ungrouped') {
     const target = groups[targetGroupId];
+    if (!Array.isArray(target.tabUrls)) target.tabUrls = [];
     if (!target.tabUrls.includes(tabUrl)) target.tabUrls.push(tabUrl);
     target.modifiedAt = timestamp;
   }
@@ -717,9 +730,12 @@ export async function applyManualGroupToChrome(groupId) {
   const group = groups[groupId];
   if (!group) return;
 
+  const tabUrls = Array.isArray(group.tabUrls) ? group.tabUrls : [];
+  if (tabUrls.length === 0) return;
+
   const allTabs = await getAllTabs({ allWindows: true });
   const tabIds = allTabs
-    .filter(t => group.tabUrls.includes(t.url))
+    .filter(t => tabUrls.includes(t.url))
     .map(t => t.id);
 
   if (tabIds.length === 0) return;

@@ -1,9 +1,64 @@
 // core/ai/provider-claude.js — Anthropic Claude API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import {
+  AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError,
+  PROVIDER_DEFAULTS, ProviderId,
+} from './provider.js';
 
 const BASE_URL = 'https://api.anthropic.com/v1';
 const API_VERSION = '2023-06-01';
+const DEFAULT_MODEL = PROVIDER_DEFAULTS[ProviderId.CLAUDE].model;
+// Thinking (on by default on current models) counts against max_tokens; keep
+// enough headroom that it cannot truncate the JSON answer.
+const THINKING_MIN_MAX_TOKENS = 4096;
+
+/**
+ * Request traits per Claude model family.
+ * - Current models (Haiku/Sonnet/Opus 5+, Opus 4.7/4.8, Fable, Mythos) reject
+ *   non-default sampling parameters (temperature/top_p) with a 400, think by
+ *   default, and take `output_config.effort` to control thinking depth.
+ * - Opus 4.6 / Sonnet 4.6 accept temperature and effort; thinking is off unless
+ *   requested.
+ * - Haiku 4.5, Sonnet 4.5 and older accept temperature; effort errors on
+ *   Sonnet/Haiku 4.5, so it is not sent.
+ * We never send `thinking` (budget_tokens 400s on current models) and never
+ * prefill the assistant turn (400 on 4.6+).
+ */
+export function claudeModelTraits(model) {
+  const id = typeof model === 'string' ? model.trim().toLowerCase() : '';
+  let current = /^claude-(fable|mythos)\b/.test(id) || /^claude-opus-4-[78](?=$|-)/.test(id);
+  const versioned = /^claude-(?:opus|sonnet|haiku)-(\d+)(?=$|-)/.exec(id);
+  if (versioned && Number(versioned[1]) >= 5) current = true;
+  const gen46 = /^claude-(?:opus|sonnet)-4-6(?=$|-)/.test(id);
+  return {
+    acceptsTemperature: !current,
+    effort: current || gen46 ? 'low' : null,
+    thinksByDefault: current,
+  };
+}
+
+/** Joins the text blocks of a Messages API response, skipping thinking blocks. */
+export function extractClaudeText(data) {
+  const blocks = data?.content;
+  if (!Array.isArray(blocks)) return '';
+  return blocks
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('');
+}
+
+function buildMessagesBody(model, { maxTokens, userContent, system, temperature }) {
+  const traits = claudeModelTraits(model);
+  const body = {
+    model,
+    max_tokens: traits.thinksByDefault ? Math.max(maxTokens, THINKING_MIN_MAX_TOKENS) : maxTokens,
+    messages: [{ role: 'user', content: userContent }],
+  };
+  if (system) body.system = system;
+  if (traits.acceptsTemperature && temperature != null) body.temperature = temperature;
+  if (traits.effort) body.output_config = { effort: traits.effort };
+  return body;
+}
 
 function ensureNotAborted(signal) {
   if (signal?.aborted) throw new AIAbortError();
@@ -51,11 +106,10 @@ export const ClaudeProvider = {
           'anthropic-version': API_VERSION,
           'anthropic-dangerous-direct-browser-access': 'true',
         },
-        body: JSON.stringify({
-          model: config.model || 'claude-haiku-4-5',
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'Reply with the word "ok".' }],
-        }),
+        body: JSON.stringify(buildMessagesBody(config.model || DEFAULT_MODEL, {
+          maxTokens: 10,
+          userContent: 'Reply with the word "ok".',
+        })),
         signal,
       });
       ensureNotAborted(signal);
@@ -75,20 +129,12 @@ export const ClaudeProvider = {
       systemPrompt += '\n\nRespond ONLY with valid JSON. No markdown, no explanation.';
     }
 
-    const body = {
-      model: config.model || 'claude-haiku-4-5',
-      max_tokens: request.maxTokens || 1024,
-      messages: [{ role: 'user', content: request.userPrompt }],
-    };
-
-    if (systemPrompt) {
-      body.system = systemPrompt;
-    }
-
-    // Anthropic doesn't have a temperature=0 but supports 0.0-1.0
-    if (request.temperature != null) {
-      body.temperature = request.temperature;
-    }
+    const body = buildMessagesBody(config.model || DEFAULT_MODEL, {
+      maxTokens: request.maxTokens || 1024,
+      userContent: request.userPrompt,
+      system: systemPrompt,
+      temperature: request.temperature,
+    });
 
     let response;
     try {
@@ -117,11 +163,11 @@ export const ClaudeProvider = {
     }
     if (!response.ok) {
       const errText = await readErrorText(response, signal);
-      throw new AINetworkError(`Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
+      throw providerHttpError('Anthropic', response.status, errText);
     }
 
     const data = await abortAware(() => response.json(), signal);
-    const text = data.content?.[0]?.text || '';
+    const text = extractClaudeText(data);
     const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
 
     let parsed = null;
@@ -171,13 +217,14 @@ export const ClaudeProvider = {
       // Fall through to hardcoded list
     }
 
-    // Hardcoded fallback — current models as of Jan 2026
+    // Hardcoded fallback — current models as of Oct 2026
     return [
-      { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
-      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+      { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
+      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+      { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
     ];
   },
 };

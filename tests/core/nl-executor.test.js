@@ -25,16 +25,16 @@ async function waitFor(predicate, message) {
   throw new Error(message);
 }
 
-async function importWorkerWithAi(tabs, complete) {
+async function importWorkerWithAi(tabs, complete, windows = [{ id: 1, focused: true }]) {
   const harness = installChromeMock({
-    windows: [{ id: 1, focused: true }],
+    windows,
     tabs,
   });
   const { AIClient } = await import('../../core/ai/ai-client.js');
   const originalComplete = AIClient.complete;
   AIClient.complete = complete;
   try {
-    await import(`../../service-worker.js?nl-command=${++workerImportNonce}`);
+    await import(`../../tabkebab-service-worker.js?nl-command=${++workerImportNonce}`);
   } catch (error) {
     AIClient.complete = originalComplete;
     throw error;
@@ -87,6 +87,49 @@ describe('executeNLAction live-tab authority', () => {
     harness = installActionTabs();
     await executeNLAction({ action: 'focus', tabIds: [12] }, [liveTab]);
     expect(harness.calls.tabs.get).toEqual([[11]]);
+  });
+});
+
+describe('executeNLAction pinned tabs and close counts', () => {
+  test('group leaves pinned tabs out and reports only grouped tabs', async () => {
+    const pinnedTab = { id: 21, windowId: 1, url: 'https://github.com/pinned', title: 'Pinned', pinned: true };
+    const plainTab = { id: 22, windowId: 1, url: 'https://github.com/plain', title: 'Plain' };
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [pinnedTab, plainTab] });
+
+    const result = await executeNLAction({ action: 'group', groupName: 'Code' }, [pinnedTab, plainTab]);
+
+    expect(result).toEqual({ executed: true, message: 'Grouped 1 tab(s) as "Code"' });
+    expect(harness.calls.tabs.group.map(([options]) => options.tabIds)).toEqual([[22]]);
+    expect(harness.snapshot().tabs.find(({ id }) => id === 21).pinned).toBeTrue();
+  });
+
+  test('group with only pinned matches returns an error and groups nothing', async () => {
+    const pinnedTab = { id: 21, windowId: 1, url: 'https://github.com/pinned', title: 'Pinned', pinned: true };
+    const harness = installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [pinnedTab] });
+
+    const result = await executeNLAction({ action: 'group', groupName: 'Code' }, [pinnedTab]);
+
+    expect(result.error).toContain('Pinned tabs cannot be grouped');
+    expect(harness.calls.tabs.group).toEqual([]);
+  });
+
+  test('group confirmation counts only unpinned tabs', async () => {
+    const { buildNLConfirmation } = await import('../../core/nl-executor.js');
+    const text = buildNLConfirmation('group', [
+      { id: 1, windowId: 1, title: 'A', pinned: true },
+      { id: 2, windowId: 1, title: 'B' },
+    ], { groupName: 'Code' });
+    expect(text).toContain('Group 1 tab as "Code"');
+    expect(text).toContain('skipping 1 pinned');
+  });
+
+  test('close reports the number of tabs actually closed', async () => {
+    const live = { id: 31, windowId: 1, url: 'https://github.com/live', title: 'Live' };
+    installChromeMock({ windows: [{ id: 1, focused: true }], tabs: [live] });
+
+    const result = await executeNLAction({ action: 'close' }, [live, { id: 99, windowId: 1, url: 'https://github.com/gone' }]);
+
+    expect(result).toEqual({ executed: true, message: 'Closed 1 tab(s)' });
   });
 });
 
@@ -401,6 +444,212 @@ describe('natural-language destructive command authority', () => {
         },
       })).toEqual({ error: 'Invalid command confirmation' });
       expect(context.harness.calls.tabs.remove).toEqual([]);
+    } finally {
+      context.restore();
+    }
+  });
+});
+
+describe('WS2 2.1 close confirmation is derived from the live match set', () => {
+  const tabs = [
+    { id: 11, windowId: 1, active: true, url: 'https://github.com/a', title: 'Repo A', pinned: true },
+    { id: 12, windowId: 2, active: true, url: 'https://github.com/b', title: 'Repo B' },
+    { id: 13, windowId: 1, active: false, url: 'https://docs.test/', title: 'Docs' },
+    { id: 14, windowId: 1, active: false, url: 'https://news.test/', title: 'News' },
+  ];
+  const windows = [{ id: 1, focused: true }, { id: 2, focused: false }];
+
+  test('ignores AI-authored confirmation text and describes the real effect', async () => {
+    const context = await importWorkerWithAi(tabs, async () => ({
+      parsed: {
+        action: 'close',
+        filter: { domain: 'github.com' },
+        confirmation: 'Close 1 harmless ad tab?',
+      },
+    }), windows);
+    try {
+      const preview = await chrome.runtime.sendMessage({
+        action: 'executeNLCommand',
+        command: 'close github tabs',
+      });
+      expect(preview.confirmation).not.toContain('harmless');
+      expect(preview.confirmation).toContain('Close 2 tabs');
+      expect(preview.confirmation).toContain('2 windows');
+      expect(preview.confirmation).toContain('1 pinned');
+      expect(preview.confirmation).toContain('"Repo A"');
+      expect(preview.parsedCommand).toEqual({
+        action: 'close',
+        filter: { domain: 'github.com' },
+        tabIds: [11, 12],
+      });
+      expect(context.harness.calls.tabs.remove).toEqual([]);
+    } finally {
+      context.restore();
+    }
+  });
+
+  for (const [label, filter] of [
+    ['matches every open tab', { urlContains: 'https' }],
+    ['uses a one-character urlContains', { urlContains: '.' }],
+    ['uses a bare TLD as urlContains', { urlContains: 'com' }],
+    ['uses a bare TLD as domain', { domain: 'com' }],
+    ['matches every tab via a broad title', { titleContains: 'e' }],
+  ]) {
+    test(`rejects an over-broad close filter that ${label}`, async () => {
+      const context = await importWorkerWithAi(tabs, async () => ({
+        parsed: { action: 'close', filter },
+      }), windows);
+      try {
+        const result = await chrome.runtime.sendMessage({
+          action: 'executeNLCommand',
+          command: 'close stuff',
+        });
+        expect(result.confirmation).toBeUndefined();
+        expect(result.error).toMatch(/more specific/);
+        expect(context.harness.calls.tabs.remove).toEqual([]);
+      } finally {
+        context.restore();
+      }
+    });
+  }
+
+  test('rejects a filter that matches every open tab even when the text looks specific', async () => {
+    const allGithub = [
+      { id: 21, windowId: 1, url: 'https://github.com/a', title: 'A' },
+      { id: 22, windowId: 1, url: 'https://github.com/b', title: 'B' },
+      { id: 23, windowId: 1, url: 'https://github.com/c', title: 'C' },
+    ];
+    const context = await importWorkerWithAi(allGithub, async () => ({
+      parsed: { action: 'close', filter: { domain: 'github.com' } },
+    }));
+    try {
+      const result = await chrome.runtime.sendMessage({
+        action: 'executeNLCommand',
+        command: 'close github',
+      });
+      expect(result.error).toMatch(/more specific/);
+    } finally {
+      context.restore();
+    }
+  });
+});
+
+describe('WS2 2.2 NL group and move safety', () => {
+  test('sanitizes group color and name', async () => {
+    const {
+      sanitizeGroupColor,
+      sanitizeGroupName,
+      MAX_GROUP_NAME_LENGTH,
+    } = await import('../../core/nl-executor.js');
+    expect(sanitizeGroupColor('Purple')).toBe('purple');
+    expect(sanitizeGroupColor('gray')).toBe('grey');
+    expect(sanitizeGroupColor('magenta')).toBe('blue');
+    expect(sanitizeGroupColor({})).toBe('blue');
+    expect(sanitizeGroupName(undefined)).toBe('AI Group');
+    expect(sanitizeGroupName('  \u0000\n ')).toBe('AI Group');
+    expect(sanitizeGroupName('Work\nStuff')).toBe('Work Stuff');
+    expect([...sanitizeGroupName('x'.repeat(500))]).toHaveLength(MAX_GROUP_NAME_LENGTH);
+  });
+
+  test('executes a small single-window group immediately with a valid color', async () => {
+    const context = await importWorkerWithAi([
+      { id: 11, windowId: 1, url: 'https://github.com/a', title: 'A' },
+      { id: 12, windowId: 1, url: 'https://github.com/b', title: 'B' },
+      { id: 13, windowId: 1, url: 'https://docs.test/', title: 'Docs' },
+    ], async () => ({
+      parsed: {
+        action: 'group',
+        filter: { domain: 'github.com' },
+        groupName: 'Code',
+        color: 'chartreuse',
+      },
+    }));
+    try {
+      const result = await chrome.runtime.sendMessage({
+        action: 'executeNLCommand',
+        command: 'group github',
+      });
+      expect(result).toEqual({ executed: true, message: 'Grouped 2 tab(s) as "Code"' });
+      expect(context.harness.calls.tabs.group).toHaveLength(1);
+      expect(context.harness.calls.tabGroups.update[0][1]).toEqual({ title: 'Code', color: 'blue' });
+    } finally {
+      context.restore();
+    }
+  });
+
+  test('requires confirmation for a multi-window group and then groups per window', async () => {
+    const context = await importWorkerWithAi([
+      { id: 11, windowId: 1, url: 'https://github.com/a', title: 'A' },
+      { id: 12, windowId: 2, url: 'https://github.com/b', title: 'B' },
+      { id: 13, windowId: 1, url: 'https://docs.test/', title: 'Docs' },
+    ], async () => ({
+      parsed: { action: 'group', filter: { domain: 'github.com' }, groupName: 'Code', color: 'red' },
+    }), [{ id: 1, focused: true }, { id: 2, focused: false }]);
+    try {
+      const preview = await chrome.runtime.sendMessage({
+        action: 'executeNLCommand',
+        command: 'group github',
+      });
+      expect(preview.confirmation).toContain('Group 2 tabs as "Code"');
+      expect(preview.confirmation).toContain('2 windows');
+      expect(preview.parsedCommand).toEqual({
+        action: 'group',
+        filter: { domain: 'github.com' },
+        tabIds: [11, 12],
+        groupName: 'Code',
+        color: 'red',
+      });
+      expect(context.harness.calls.tabs.group).toEqual([]);
+
+      const result = await chrome.runtime.sendMessage({
+        action: 'confirmNLCommand',
+        parsedCommand: preview.parsedCommand,
+      });
+      expect(result.executed).toBeTrue();
+      const grouped = context.harness.calls.tabs.group.map(([options]) => options);
+      expect(grouped).toHaveLength(2);
+      expect(grouped).toContainEqual({ createProperties: { windowId: 1 }, tabIds: [11] });
+      expect(grouped).toContainEqual({ createProperties: { windowId: 2 }, tabIds: [12] });
+    } finally {
+      context.restore();
+    }
+  });
+
+  test('requires confirmation to move more than 20 tabs', async () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({
+      id: 100 + index,
+      windowId: 1,
+      url: `https://github.com/${index}`,
+      title: `Repo ${index}`,
+    }));
+    many.push({ id: 200, windowId: 1, url: 'https://docs.test/', title: 'Docs' });
+    const context = await importWorkerWithAi(many, async () => ({
+      parsed: { action: 'move', filter: { domain: 'github.com' } },
+    }));
+    try {
+      const preview = await chrome.runtime.sendMessage({
+        action: 'executeNLCommand',
+        command: 'move github',
+      });
+      expect(preview.confirmation).toContain('Move 25 tabs to a new window');
+      expect(preview.confirmation).toContain('and 22 more');
+      expect(context.harness.calls.windows.create).toEqual([]);
+    } finally {
+      context.restore();
+    }
+  });
+
+  test('confirmation rejects non-mutating actions', async () => {
+    const context = await importWorkerWithAi([
+      { id: 11, windowId: 1, url: 'https://github.com/', title: 'GitHub' },
+    ], async () => {
+      throw new Error('AI should not be called by confirmation');
+    });
+    try {
+      expect(await chrome.runtime.sendMessage({
+        action: 'confirmNLCommand',
+        parsedCommand: { action: 'focus', filter: { domain: 'github.com' }, tabIds: [11] },
+      })).toEqual({ error: 'Invalid command confirmation' });
     } finally {
       context.restore();
     }

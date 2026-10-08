@@ -1,8 +1,15 @@
 // core/ai/provider-gemini.js — Google Gemini API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import {
+  AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError,
+  PROVIDER_DEFAULTS, ProviderId,
+} from './provider.js';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const DEFAULT_MODEL = PROVIDER_DEFAULTS[ProviderId.GEMINI].model;
+// Thinking tokens count against maxOutputTokens. For models that think, keep
+// enough headroom that reasoning cannot starve the JSON answer.
+const THINKING_MIN_OUTPUT_TOKENS = 4096;
 
 function ensureNotAborted(signal) {
   if (signal?.aborted) throw new AIAbortError();
@@ -35,6 +42,76 @@ async function readErrorText(response, signal) {
   }
 }
 
+function normalizeGeminiModelId(model) {
+  return model.trim().toLowerCase().replace(/^models\//, '');
+}
+
+/** Major version of a `gemini-N[.M]-...` model ID, or null. */
+function geminiMajorVersion(id) {
+  const match = /^gemini-(\d+)(?:\.\d+)?(?=$|-)/.exec(id);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Per-family thinking control for our short classification/JSON jobs.
+ * - Gemini 2.5 Flash / Flash-Lite: thinking can be disabled -> thinkingBudget: 0.
+ * - Gemini 2.5 Pro: cannot disable thinking; left at its default.
+ * - Gemini 3+ (non-Lite): thinking cannot be fully disabled and the legacy
+ *   thinkingBudget must not be combined with thinkingLevel; request the
+ *   lowest level every 3.x Flash/Pro model accepts, "low".
+ * - Gemini 3+ Flash-Lite: already defaults to minimal thinking; left alone.
+ */
+export function geminiThinkingConfig(model) {
+  if (typeof model !== 'string') return null;
+  const id = normalizeGeminiModelId(model);
+  if (/^gemini-2\.5-flash/.test(id)) return { thinkingBudget: 0 };
+  const major = geminiMajorVersion(id);
+  if (major !== null && major >= 3) {
+    if (/-flash-lite/.test(id)) return null;
+    return { thinkingLevel: 'low' };
+  }
+  return null;
+}
+
+/** True when the model will spend output tokens on thinking with our config. */
+export function geminiModelThinks(model) {
+  if (typeof model !== 'string') return false;
+  const id = normalizeGeminiModelId(model);
+  if (/^gemini-2\.5-flash/.test(id)) return false;
+  const major = geminiMajorVersion(id);
+  return /^gemini-2\.5-pro/.test(id) || (major !== null && major >= 3);
+}
+
+/**
+ * Gemini 3+ models are tuned for the default temperature (1.0); Google warns
+ * lower values can cause looping, so we do not override it there.
+ */
+export function geminiAcceptsTemperatureOverride(model) {
+  if (typeof model !== 'string') return true;
+  const major = geminiMajorVersion(normalizeGeminiModelId(model));
+  return major === null || major < 3;
+}
+
+function outputTokenBudget(model, requested) {
+  return geminiModelThinks(model) ? Math.max(requested, THINKING_MIN_OUTPUT_TOKENS) : requested;
+}
+
+function withThinkingConfig(generationConfig, model) {
+  const thinkingConfig = geminiThinkingConfig(model);
+  if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
+  return generationConfig;
+}
+
+/** Concatenates answer text, skipping any thought-summary parts. */
+function extractGeminiText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .filter((part) => part && !part.thought && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('');
+}
+
 export const GeminiProvider = {
   id: 'gemini',
   name: 'Google Gemini',
@@ -42,7 +119,8 @@ export const GeminiProvider = {
   async testConnection(config, signal) {
     ensureNotAborted(signal);
     try {
-      const url = `${BASE_URL}/models/${config.model || 'gemini-2.5-flash'}:generateContent`;
+      const model = config.model || DEFAULT_MODEL;
+      const url = `${BASE_URL}/models/${model}:generateContent`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -51,7 +129,10 @@ export const GeminiProvider = {
         },
         body: JSON.stringify({
           contents: [{ parts: [{ text: 'Reply with the word "ok".' }] }],
-          generationConfig: { maxOutputTokens: 5 },
+          generationConfig: withThinkingConfig(
+            { maxOutputTokens: outputTokenBudget(model, 5) },
+            model,
+          ),
         }),
         signal,
       });
@@ -67,19 +148,22 @@ export const GeminiProvider = {
 
   async complete(request, config, signal) {
     ensureNotAborted(signal);
-    const model = config.model || 'gemini-2.5-flash';
+    const model = config.model || DEFAULT_MODEL;
     const url = `${BASE_URL}/models/${model}:generateContent`;
-
-    const contents = [];
 
     // Gemini uses systemInstruction for system prompts
     const body = {
       contents: [{ role: 'user', parts: [{ text: request.userPrompt }] }],
       generationConfig: {
-        maxOutputTokens: request.maxTokens || 1024,
-        temperature: request.temperature ?? 0.3,
+        maxOutputTokens: outputTokenBudget(model, request.maxTokens || 1024),
       },
     };
+
+    if (geminiAcceptsTemperatureOverride(model)) {
+      body.generationConfig.temperature = request.temperature ?? 0.3;
+    }
+
+    withThinkingConfig(body.generationConfig, model);
 
     if (request.systemPrompt) {
       body.systemInstruction = { parts: [{ text: request.systemPrompt }] };
@@ -114,11 +198,11 @@ export const GeminiProvider = {
     }
     if (!response.ok) {
       const errText = await readErrorText(response, signal);
-      throw new AINetworkError(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`);
+      throw providerHttpError('Gemini', response.status, errText);
     }
 
     const data = await abortAware(() => response.json(), signal);
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const text = extractGeminiText(data);
     const tokensUsed = (data.usageMetadata?.totalTokenCount) || 0;
 
     let parsed = null;

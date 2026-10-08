@@ -17,7 +17,7 @@ Required to create, update, and query Chrome native tab groups. This is core fun
 
 PERMISSION: storage
 JUSTIFICATION:
-Required to persist user data locally: saved sessions, custom tab groups, keep-awake domain lists, AI provider settings, encrypted API keys, and cached AI responses. All data stays on the user's device.
+Required to persist user data locally: settings, saved sessions, custom tab groups, keep-awake domain lists, local bookmark snapshots, Focus Mode state and history, Drive sync state, AI provider settings, encrypted API keys, and cached AI responses. All data stays on the user's device unless the user opts in to Google Drive sync or an AI provider.
 
 PERMISSION: sidePanel
 JUSTIFICATION:
@@ -29,7 +29,15 @@ Required for optional Google Drive sync. Users who choose to connect Google Driv
 
 PERMISSION: alarms
 JUSTIFICATION:
-Required for the auto-save feature that creates a session backup every 24 hours. A single recurring alarm triggers the auto-save function. No other alarms are used.
+Schedules the automation the user has enabled: session auto-save (every 24 hours by default), automatic tab discard and auto-stash checks, optional Google Drive sync and Drive retention cleanup, bookmark snapshots, and the timer of an active Focus Mode session. Alarms for features that are off are cleared.
+
+PERMISSION: bookmarks
+JUSTIFICATION:
+Reads the Chrome bookmark tree and creates TabKebab bookmark snapshot folders and bookmarks when the user clicks "Bookmark Now" or enables auto-bookmark on stash with Chrome Bookmarks (or All destinations) selected. Exports stay inside one "TabKebab" folder (at most 4 folder levels, newest 30 date folders kept); no other bookmarks are changed.
+
+PERMISSION: unlimitedStorage
+JUSTIFICATION:
+Lifts the 10 MB chrome.storage.local quota so heavy users' saved sessions, stash history, and bookmark snapshots are not silently dropped when the quota is reached. It grants no access to any additional data.
 
 HOST PERMISSION: https://api.openai.com/*
 JUSTIFICATION:

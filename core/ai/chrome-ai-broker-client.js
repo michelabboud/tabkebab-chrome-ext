@@ -64,17 +64,23 @@ function validateSignal(signal) {
   }
 }
 
+/**
+ * Worker-side client for the side-panel Chrome AI broker.
+ *
+ * Several side panels may be connected at once. New requests always go to the
+ * newest connected panel; requests already in flight stay on the port that
+ * accepted them and settle there (the panels serialize actual Prompt API work
+ * with a shared Web Lock, so they cannot overlap). Only losing a port rejects
+ * that port's own pending requests.
+ */
 export class ChromeAIBrokerClient {
   constructor() {
     this.port = null;
     this.pending = new Map();
     this.onMessage = null;
     this.onDisconnect = null;
-    this.generation = 0;
     this.connections = [];
     this.activeConnection = null;
-    this.replacementConnection = null;
-    this.switching = false;
     this.nextConnectionSequence = 0;
   }
 
@@ -88,42 +94,25 @@ export class ChromeAIBrokerClient {
       onMessage: null,
       onDisconnect: null,
     };
+    connection.onMessage = (message) => this.handleMessage(message, connection);
     connection.onDisconnect = () => this.handlePortDisconnect(connection);
     this.connections.push(connection);
+    port.onMessage.addListener(connection.onMessage);
     port.onDisconnect.addListener(connection.onDisconnect);
-
-    if (!this.activeConnection) {
-      this.promoteConnection(connection);
-      return;
-    }
-
-    if (this.hasPendingForGeneration(this.generation)) {
-      this.stageReplacement(connection);
-      return;
-    }
 
     this.promoteConnection(connection);
   }
 
   promoteConnection(connection) {
     if (!connection || !this.connections.includes(connection)) return;
-    if (this.activeConnection === connection) return;
-
-    if (this.activeConnection?.onMessage) {
-      this.activeConnection.port.onMessage.removeListener(this.activeConnection.onMessage);
-      this.activeConnection.onMessage = null;
-    }
-    const generation = ++this.generation;
-    connection.onMessage = (message) => this.handleMessage(message, connection, generation);
-    connection.port.onMessage.addListener(connection.onMessage);
     this.activeConnection = connection;
     this.port = connection.port;
     this.onMessage = connection.onMessage;
     this.onDisconnect = connection.onDisconnect;
   }
 
-  handleMessage(message, connection, generation) {
-    if (this.activeConnection !== connection || this.generation !== generation) return;
+  handleMessage(message, connection) {
+    if (!this.connections.includes(connection)) return;
     let result;
     try {
       result = parseChromeAIResult(message);
@@ -131,11 +120,7 @@ export class ChromeAIBrokerClient {
       const request = error instanceof AIMalformedResultError
         ? this.pending.get(error.requestId)
         : null;
-      if (
-        !request ||
-        request.connection !== connection ||
-        request.generation !== generation
-      ) return;
+      if (!request || request.connection !== connection) return;
       this.pending.delete(error.requestId);
       removeAbortListener(request);
       // A matching terminal result is posted only after panel cleanup. If a
@@ -143,17 +128,12 @@ export class ChromeAIBrokerClient {
       request.reject(request.cancelling
         ? (request.cancelError ?? new AIAbortError())
         : error);
-      this.finishSwitchIfReady(generation);
       return;
     }
     if (!result) return;
 
     const request = this.pending.get(result.requestId);
-    if (
-      !request ||
-      request.connection !== connection ||
-      request.generation !== generation
-    ) return;
+    if (!request || request.connection !== connection) return;
     this.pending.delete(result.requestId);
     removeAbortListener(request);
     if (request.cancelling) {
@@ -168,50 +148,6 @@ export class ChromeAIBrokerClient {
     } else {
       request.resolve(result.value);
     }
-    this.finishSwitchIfReady(generation);
-  }
-
-  stageReplacement(connection) {
-    this.replacementConnection = connection;
-    this.switching = true;
-    const generation = this.generation;
-    for (const [requestId, request] of this.pending) {
-      if (request.generation !== generation || request.cancelling) continue;
-      request.cancelling = true;
-      request.cancelError = new AIForegroundRequiredError();
-      removeAbortListener(request);
-      try {
-        request.port.postMessage(parseChromeAIRequest({
-          type: 'chrome-ai/cancel',
-          requestId,
-        }));
-      } catch {
-        this.dropConnection(request.connection, true);
-        return;
-      }
-    }
-    this.finishSwitchIfReady(generation);
-  }
-
-  finishSwitchIfReady(generation) {
-    if (!this.switching || this.generation !== generation) return;
-    for (const request of this.pending.values()) {
-      if (request.generation === generation) return;
-    }
-
-    this.switching = false;
-    const target = this.connections.includes(this.replacementConnection)
-      ? this.replacementConnection
-      : this.newestConnection(this.activeConnection);
-    this.replacementConnection = null;
-    if (target && target !== this.activeConnection) this.promoteConnection(target);
-  }
-
-  hasPendingForGeneration(generation) {
-    for (const request of this.pending.values()) {
-      if (request.generation === generation) return true;
-    }
-    return false;
   }
 
   newestConnection(exclude = null) {
@@ -232,22 +168,15 @@ export class ChromeAIBrokerClient {
     if (index < 0) return;
 
     this.connections.splice(index, 1);
-    if (connection.onMessage) {
-      connection.port.onMessage.removeListener(connection.onMessage);
-      connection.onMessage = null;
-    }
+    connection.port.onMessage.removeListener(connection.onMessage);
     connection.port.onDisconnect.removeListener(connection.onDisconnect);
-    if (this.replacementConnection === connection) this.replacementConnection = null;
+    this.rejectPendingFor(connection, new AIForegroundRequiredError());
 
     if (this.activeConnection === connection) {
       this.activeConnection = null;
       this.port = null;
       this.onMessage = null;
       this.onDisconnect = null;
-      this.generation += 1;
-      this.switching = false;
-      this.rejectPending(new AIForegroundRequiredError());
-      this.replacementConnection = null;
       const standby = this.newestConnection();
       if (standby) this.promoteConnection(standby);
     }
@@ -268,20 +197,14 @@ export class ChromeAIBrokerClient {
   disconnect() {
     const connections = [...this.connections];
     for (const connection of connections) {
-      if (connection.onMessage) {
-        connection.port.onMessage.removeListener(connection.onMessage);
-        connection.onMessage = null;
-      }
+      connection.port.onMessage.removeListener(connection.onMessage);
       connection.port.onDisconnect.removeListener(connection.onDisconnect);
     }
     this.connections = [];
     this.activeConnection = null;
-    this.replacementConnection = null;
-    this.switching = false;
     this.port = null;
     this.onMessage = null;
     this.onDisconnect = null;
-    this.generation += 1;
     this.rejectPending(new AIForegroundRequiredError());
     for (const connection of connections) {
       try {
@@ -293,7 +216,12 @@ export class ChromeAIBrokerClient {
   }
 
   rejectPending(error) {
+    this.rejectPendingFor(null, error);
+  }
+
+  rejectPendingFor(connection, error) {
     for (const [requestId, request] of this.pending) {
+      if (connection && request.connection !== connection) continue;
       this.pending.delete(requestId);
       removeAbortListener(request);
       request.reject(new AIForegroundRequiredError(error.message));
@@ -307,7 +235,7 @@ export class ChromeAIBrokerClient {
       return Promise.reject(error);
     }
     if (signal?.aborted) return Promise.reject(new AIAbortError());
-    if (!this.activeConnection || this.switching) {
+    if (!this.activeConnection) {
       return Promise.reject(new AIForegroundRequiredError());
     }
 
@@ -349,7 +277,6 @@ export class ChromeAIBrokerClient {
         cancelError: null,
         port: this.port,
         connection: this.activeConnection,
-        generation: this.generation,
         method,
       };
       request.abortListener = () => {

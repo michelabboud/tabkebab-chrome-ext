@@ -1,5 +1,18 @@
 const FOCUS_EVENT_TYPES = new Set(['focusDistraction', 'focusEnded']);
 
+/**
+ * Durable Focus state carried by a chrome.storage change, reduced to what the
+ * cross-view indicators show: the run while it is active or paused, null once
+ * it is ending or gone, and undefined when the change is not about Focus.
+ * Runs can start, pause or end outside this panel (another window's panel,
+ * the timer), and only a timer expiry is broadcast as a message.
+ */
+export function focusIndicatorStateFromStorageChange(changes, area) {
+  if (area !== 'local' || !changes || !Object.hasOwn(changes, 'focusState')) return undefined;
+  const state = changes.focusState?.newValue;
+  return state?.status === 'active' || state?.status === 'paused' ? state : null;
+}
+
 export function createFocusRunCommand(action, state, details = {}) {
   const expectedRunId = typeof state?.runId === 'string' && state.runId.length > 0
     ? state.runId

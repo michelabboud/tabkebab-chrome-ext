@@ -27,6 +27,7 @@ const AUDITED_SIDE_PANEL_FILES = [
   'sidepanel/components/focus-panel.js',
   'sidepanel/components/global-search.js',
   'sidepanel/components/group-editor.js',
+  'sidepanel/components/keyboard-activate.js',
   'sidepanel/components/session-manager.js',
   'sidepanel/components/settings-manager.js',
   'sidepanel/components/smart-group-fallback.js',
@@ -382,6 +383,11 @@ describe('checked component messaging boundary', () => {
     const calls = [];
     try {
       installChromeMock({
+        // Selections are re-validated against live tabs at action time (WS6.1).
+        tabs: [
+          { id: 1, url: 'https://duplicate.test/' },
+          { id: 2, url: 'https://duplicate.test/' },
+        ],
         runtimeHandler: async (message) => {
           calls.push(message);
           if (message.action === 'closeTabs') return { success: true };
@@ -517,8 +523,10 @@ describe('checked component messaging boundary', () => {
       expect(snapshot()).toEqual(expected);
       expect(expected).toEqual({
         message: 'Close 3 old tabs?',
-        buttons: ['Confirm', 'Cancel'],
+        buttons: ['Close tabs', 'Cancel'],
       });
+      // A close confirmation is styled as the destructive action it is.
+      expect(confirmButton.className).toBe('action-btn danger');
       expect(manager.inputEl.value).toBe('close old tabs');
       expect(manager.pending).toBeFalse();
       expect(manager.inputEl.disabled).toBeFalse();
@@ -573,11 +581,9 @@ describe('checked component messaging boundary', () => {
         else gate.reject(new Error('old command rejected'));
         await oldExecution;
 
-        expect(busyState).toEqual({
-          pending: true,
-          inputDisabled: true,
-          markup: '<p class="loading-text">Executing...</p>',
-        });
+        expect(busyState).toMatchObject({ pending: true, inputDisabled: true });
+        expect(busyState.markup).toContain('pipeline-progress active');
+        expect(busyState.markup).toContain('progress-bar-fill indeterminate');
         expect(newerSnapshot).toEqual({
           message: 'Run newer command?',
           buttons: ['Confirm', 'Cancel'],

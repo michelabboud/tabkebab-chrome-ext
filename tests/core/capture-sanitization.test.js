@@ -86,6 +86,22 @@ describe('capture-time sanitization (F10 regression)', () => {
     await expect(readLocalDriveSyncDocument()).resolves.toMatchObject({ version: 2 });
   });
 
+  test('tabs restore cannot reopen (about:, chrome:) are not stored in a session', async () => {
+    installChromeMock({
+      windows: [{ id: 1, focused: true }],
+      tabs: [
+        liveTab(1, { url: 'about:blank' }),
+        liveTab(2),
+        liveTab(3, { url: 'chrome://newtab/' }),
+      ],
+    });
+
+    await saveSession('internal pages');
+    const [stored] = storedSessions();
+    expect(stored.windows[0].tabs.map(({ url }) => url)).toEqual(['https://capture.test/2']);
+    expect(stored.windows[0].tabCount).toBe(1);
+  });
+
   test('an oversized session name is bounded at capture', async () => {
     installChromeMock({
       windows: [{ id: 1, focused: true }],

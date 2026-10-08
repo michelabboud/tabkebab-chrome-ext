@@ -18,24 +18,26 @@ TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, an
 • Blocks navigation to distracting sites (YouTube, Reddit, social media)
 • Three blocking modes: Strict (whitelist only), Curated Categories, AI Detection
 • Flexible allowlist for domains, URLs, and Chrome tab groups
+• Focus banner on every view with time left and an End button
 • Session reports with stats and focus history
 
 🗂 ORGANIZE
 • Group tabs by domain into native Chrome tab groups with one click
-• AI-powered smart grouping that understands context (research, shopping, work)
+• AI-powered smart grouping that understands context (research, shopping, work) — uses Chrome's on-device AI with no API key when available
 • Drag-and-drop custom groups with color coding
 • Consolidate scattered windows into fewer, organized ones
 
 📦 STASH
 • Save and close tabs by window, Chrome group, or domain
-• Tabs are offloaded to local IndexedDB — no cloud, no size limits
+• Tabs are offloaded to local IndexedDB — no cloud
+• Undo right from the toast if you stash by mistake
 • Restore later in discarded mode so tabs don't all load at once
 • Favicon previews, source badges, and one-click restore or delete
 
 💾 SESSIONS
 • Save full snapshots of every window, tab, and group layout
 • Restore with automatic deduplication — already-open tabs are skipped
-• Auto-saves on browser start and every 24 hours, keeping the last 2
+• Auto-saves on browser start and every 24 hours, keeping 7 days of auto-saves (and always the 2 newest)
 • Per-session export for sharing or backup
 
 😴 TAB SLEEP (KEBAB)
@@ -46,24 +48,29 @@ TabKebab is a side panel extension that tames tab chaos. Group, stash, sleep, an
 
 🔍 FIND & CLEAN
 • Duplicate detection and bulk close across all windows
-• Empty pages cleanup (about:blank, new tabs)
-• Natural language commands: "close YouTube tabs", "find my GitHub tabs", "group by project"
+• Empty pages cleanup (about:blank and URL-less tabs; Chrome's New Tab pages are kept)
+• Search open tabs, stashes, and sessions at once (Ctrl+K)
+• Natural language commands: "close YouTube tabs", "find my GitHub tabs", "move my docs tabs to a new window"
 
 📤 EXPORT & SYNC
 • Full JSON export/import of sessions, stashes, groups, and settings
 • Individual session and stash exports
 • Google Drive sync (optional)
 
+⚙️ YOUR TOOLBOX
+• Settings → Features: switch off any of 11 features you don't use (Focus Mode, AI, command bar, Search, Windows, Stash, Sessions, Duplicates, Automation, Bookmarks, Google Drive) to declutter the panel — nothing is deleted
+
 🤖 AI PROVIDERS (all optional, bring your own key)
-• OpenAI (GPT-4.1, GPT-5, o4-mini)
-• Anthropic Claude (Haiku, Sonnet, Opus)
-• Google Gemini (2.5 Flash/Pro, 3.0 preview)
+• OpenAI (GPT-6 Luna by default, GPT-5.x, GPT-4.1)
+• Anthropic Claude (Haiku 5.5 by default, Sonnet, Opus)
+• Google Gemini (3.8 Flash by default, 3.x Flash-Lite, 3.1 Pro preview)
 • Chrome Built-in AI (Gemini Nano, on-device, no API key needed)
 • Any OpenAI-compatible endpoint (Ollama, LM Studio, Groq, Together AI)
 
 🔒 PRIVACY
 • Zero data collection — no telemetry, no analytics, no tracking
 • Everything stored locally unless you explicitly opt in to AI or Drive
+• Incognito tabs are never saved to sessions, stashes, or bookmarks
 • API keys encrypted with AES-GCM 256-bit
 • Full privacy policy: https://tabkebab.com/privacy
 

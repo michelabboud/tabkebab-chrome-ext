@@ -2,8 +2,13 @@
 
 ## Current state
 
-- Repository version: `1.2.18`
-- Active initiative: reliability and data-safety hardening
+- Repository version: `1.3.0`
+- Active initiative: full-codebase review and repair (WS1–WS7) plus the side-panel UI/UX overhaul and Settings → Features switches; see [`docs/reports/full-review-fix-plan.md`](docs/reports/full-review-fix-plan.md), [`docs/reports/uiux-after.md`](docs/reports/uiux-after.md), and [`CHANGELOG.md`](CHANGELOG.md)
+- Status: implemented and merged on `claude/sleepy-galileo-6w8h0l`; `bun test` passes `1423 / 0` across 70 files under Bun `1.4.2`. The UI/UX pass ran the unpacked panel in headless Chromium; the exact-package real-Chrome matrix has not been run for `1.3.0`
+- Growth-wave releases `1.2.19`–`1.2.20` (capture sanitization, first-run guide, actionable empty states, on-device Smart Group) are recorded in [`CHANGELOG.md`](CHANGELOG.md)
+
+Previous initiative (reliability and data-safety hardening, `1.2.3`–`1.2.18`):
+
 - Design status: architecture and written specification approved on 2026-07-14
 - Plan status: approved 15-task TDD implementation plan in progress
 - Implementation status: Tasks 1–14 implemented and independently code-reviewed; Chrome Built-in AI now executes only in the side-panel document through a bounded named-port protocol while preserving Task 13 cleanup-before-settlement
@@ -187,6 +192,20 @@
   version parity, whitespace, zero-dependency metadata, and secret scanning are
   clean.
 
+### Full review and repair, UI/UX overhaul (`1.3.0`)
+
+- Split the background worker into `core/background/{router,tabs,sessions,grouping,stash,bookmarks,drive,settings,ai,focus,alarms,lifecycle}.js` behind a renamed entry `tabkebab-service-worker.js`, which only registers listeners and wires the router. Worker output goes through `core/log.js` with a `[TabKebab:<scope>]` prefix.
+- Added Settings → Features: eleven switches (`FEATURE_KEYS`), panel-side hiding in `sidepanel/feature-flags.js`, and worker refusal through `ACTION_FEATURES` in `core/background/router.js`. Alarms of switched-off features are cleared; listing, recovery, exports, and ending a running Focus session are never gated, and no data is deleted.
+- WS1 stash/Focus data safety: tabs that restore cannot reopen and incognito tabs are never stashed or closed; Focus no longer sticks in its ending state, "+5 min" no longer ends open-ended runs, and the group action works per window.
+- WS2 AI safety and reliability: close confirmations come from the real match set, over-broad filters are rejected, group/move confirm across windows or above 20 tabs, failed responses are not cached, client errors are not retried, and a second side panel no longer cancels Chrome AI work.
+- WS3 Drive and import: deletion tombstones expire after 180 days and are capped, interrupted creates no longer duplicate folders/files, retention keeps the newest export of every stash and moves files to the Drive trash, and imports cannot enable AI, change its provider/endpoint, or weaken Drive retention.
+- WS4 scheduling, storage, bookmarks: alarms are reconciled instead of reset on restart/save, `unlimitedStorage` was added, incognito tabs are excluded from sessions/stashes/bookmarks, and Chrome bookmark exports have a 4-level depth budget, a persisted root, 30-date-folder retention, and a 5,000-bookmark cap.
+- WS5 grouping engine: pinned tabs and popup/app windows are left alone, duplicated or invalid AI indices cannot scramble groups, and blank/New Tab pages are not grouped or closed.
+- WS6 side panel: live re-checks before close/ungroup, keyboard-accessible headers and rows, focus-trapped dialogs, per-restore progress, and clear errors for missing worker responses.
+- WS7 third parties: default models `gpt-6-luna`, `claude-haiku-5-5`, `gemini-3.8-flash` with per-family request bodies and retired-model migration; PBKDF2 600,000 iterations for new keys; CI on `actions/checkout@v7` and `actions/upload-artifact@v7`; Bun pinned to `1.4.2`. Gemini 3.x `thinkingLevel` was verified with one live call.
+- UI/UX overhaul: view bar Tabs · Windows · Stash · Sessions, one-line stats strip, split **Group by domain ▾** button, row **⋯** menus, toasts with Undo, settings index and reorder, AI provider select with **Off**, Focus banner synced across panels, and AA contrast tokens.
+- Verification: `bun test` `1423 pass / 0 fail` across 70 files; `bun test tests/syntax.test.js` passes. All changes are covered by mocked-Chrome tests; the UI was exercised in headless Chromium, and the exact-package real-Chrome matrix remains to be run.
+
 ## Confirmed remediation scope
 
 The hardening initiative covers all thirteen findings from the 2026-07-14 code
@@ -213,11 +232,13 @@ matrix still governs publication.
 ## Approved technical direction
 
 - Deliver narrow, independently testable hardening slices instead of a large rewrite.
-- Use Bun `1.3.11` and `bun:test` for zero-package unit and integration tests.
+- Use Bun `1.4.2` and `bun:test` for zero-package unit and integration tests.
 - Use explicit Chrome API test doubles for non-browser tests.
 - Keep IndexedDB, DOM, extension-context messaging, and Prompt API verification in the real-Chrome smoke matrix.
 - Preserve backward compatibility for existing local data, Drive sync version 1, and export version 1.
 
 ## Next gate
 
-Finish and independently review Task 15, publish immutable `v1.2.17` to exact-commit CI, download its unique Windows artifact, and run all eleven rows against that expansion. Create the GitHub release only if every row passes. The public production identity is now pinned and verified, but live OAuth/Drive still requires an operator-authenticated disposable Google session. The installed WSL Chrome Prompt model is currently unavailable. Neither live gate may be replaced by synthetic evidence or transmitted credentials.
+For `1.3.0`: follow the release checklist (merge `dev` → `main`, production OAuth client, version), then run the exact-package real-Chrome matrix against the CI artifact. Changes covered only by mocked-Chrome tests (incognito exclusion, Drive trash retention, bookmark depth budget, feature switches, Focus banner sync) need a real-browser pass before publication.
+
+Earlier `1.2.17` gate, as recorded at the time: Finish and independently review Task 15, publish immutable `v1.2.17` to exact-commit CI, download its unique Windows artifact, and run all eleven rows against that expansion. Create the GitHub release only if every row passes. The public production identity is now pinned and verified, but live OAuth/Drive still requires an operator-authenticated disposable Google session. The installed WSL Chrome Prompt model is currently unavailable. Neither live gate may be replaced by synthetic evidence or transmitted credentials.

@@ -496,6 +496,9 @@ describe('ending and recovery', () => {
         restoreStashTabs: async () => {
           order.push(`restore:${readStorageArea('local').focusState.status}`);
         },
+        deleteStash: async (id) => {
+          order.push(`delete-stash:${id}`);
+        },
         ungroupTabs: async (ids) => {
           order.push(`ungroup:${ids.join(',')}:${readStorageArea('local').focusState.status}`);
         },
@@ -504,6 +507,7 @@ describe('ending and recovery', () => {
 
     expect(order[0]).toBe('state:ending');
     expect(order).toContain('restore:ending');
+    expect(order).toContain('delete-stash:stash-1');
     expect(order).toContain('ungroup:8:ending');
     expect(order.at(-1)).toBe('remove:focusState');
     expect(harness.calls.tabs.query).toContainEqual([{ groupId: 0 }]);
@@ -593,7 +597,7 @@ describe('ending and recovery', () => {
     });
     expect(warnings).toHaveLength(1);
 
-    await import(`../../service-worker.js?focus-recovery=${++importNonce}`);
+    await import(`../../tabkebab-service-worker.js?focus-recovery=${++importNonce}`);
     await waitFor(
       () => readStorageArea('local').focusState === undefined,
       'worker restart did not recover the ending run',
@@ -1212,7 +1216,7 @@ describe('stale lifecycle continuations', () => {
         'delayed badge reset rejection was not reported',
       );
 
-      expect(warnings).toEqual([['[TabKebab] Focus badge reset failed.']]);
+      expect(warnings).toEqual([['[TabKebab:focus] Focus badge reset failed.']]);
     } finally {
       if (installedChrome) globalThis.chrome = installedChrome;
       globalThis.setTimeout = originalSetTimeout;

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { installChromeMock } from '../helpers/chrome-mock.js';
+import { readWorkerSource } from '../helpers/worker-source.js';
 import * as DriveSync from '../../core/drive-sync.js';
 import * as Sessions from '../../core/sessions.js';
 import * as Grouping from '../../core/grouping.js';
@@ -19,7 +20,7 @@ const {
 let workerNonce = 0;
 
 async function freshWorker(label) {
-  return import(`../../service-worker.js?task8=${label}-${++workerNonce}`);
+  return import(`../../tabkebab-service-worker.js?task8=${label}-${++workerNonce}`);
 }
 
 function session(id, timestamp = 1, overrides = {}) {
@@ -192,12 +193,15 @@ describe('pure deletion tombstone timestamp policy', () => {
     for (let index = 0; index < MAX_DRIVE_TOMBSTONES_PER_KIND; index += 1) {
       full[`id-${index}`] = 1;
     }
-    expect(() => DriveSync.recordDeletionTombstones(
+    // At the cap, a new deletion evicts the oldest tombstone instead of failing.
+    const atCap = DriveSync.recordDeletionTombstones(
       tombstones({ sessions: full }),
       'sessions',
       [{ id: 'new-id', entity: session('new-id') }],
       2,
-    )).toThrow(/10,000|limit|capacity/i);
+    );
+    expect(Object.keys(atCap.nextTombstones.sessions)).toHaveLength(MAX_DRIVE_TOMBSTONES_PER_KIND);
+    expect(atCap.nextTombstones.sessions['new-id']).toBe(2);
     expect(DriveSync.recordDeletionTombstones(
       tombstones({ sessions: full }),
       'sessions',
@@ -661,7 +665,7 @@ describe('transactional manual-group deletion', () => {
     expect(json(initial)).toBe(before);
   });
 
-  test('supports future and ceiling timestamps plus tombstone-cap updates but rejects additions', async () => {
+  test('supports future and ceiling timestamps plus tombstone-cap updates and evicts the oldest on additions', async () => {
     let harness = installChromeMock({
       local: {
         manualGroups: { future: group('Future', 5) },
@@ -719,8 +723,13 @@ describe('transactional manual-group deletion', () => {
         driveSyncTombstones: tombstones({ manualGroups: full }),
       },
     });
-    await expect(Grouping.deleteManualGroup('new-id', 2)).rejects.toThrow(/10,000|limit/i);
-    expect(harness.calls.storage.local.set).toEqual([]);
+    await expect(Grouping.deleteManualGroup('new-id', 2)).resolves.toEqual({
+      deleted: true,
+      tombstoneAt: 2,
+    });
+    const capped = harness.snapshot().local.driveSyncTombstones.manualGroups;
+    expect(Object.keys(capped)).toHaveLength(MAX_DRIVE_TOMBSTONES_PER_KIND);
+    expect(capped['new-id']).toBe(2);
   });
 
   test('missing, invalid, unrepresentable, and rejected writes never partially mutate state', async () => {
@@ -1046,7 +1055,7 @@ describe('retention and worker ownership', () => {
   });
 
   test('source contains no direct retention deletion or optimistic panel success path', async () => {
-    const workerSource = await Bun.file(new URL('../../service-worker.js', import.meta.url)).text();
+    const workerSource = readWorkerSource();
     const sessionPanel = await Bun.file(
       new URL('../../sidepanel/components/session-manager.js', import.meta.url),
     ).text();

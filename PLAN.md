@@ -1,6 +1,6 @@
 # TabKebab — Chrome Extension Plan
 
-> **Historical plan.** This document records the original implementation roadmap and no longer describes every shipped behavior. Current reliability work is specified in [`docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md`](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md) and tracked in [`PROGRESS.md`](PROGRESS.md).
+> **Historical plan.** This document records the original implementation roadmap and no longer describes every shipped behavior. Current reliability work is specified in [`docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md`](docs/superpowers/specs/2026-07-14-tabkebab-reliability-hardening-design.md) and tracked in [`PROGRESS.md`](PROGRESS.md). File names below are historical too: the worker is now `tabkebab-service-worker.js` with feature modules in `core/background/`, Drive uses the `drive.file` scope, and the panel's views are Tabs · Windows · Stash · Sessions (see [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`CHANGELOG.md`](CHANGELOG.md)).
 
 A privacy-first Chrome extension for organizing tabs, built with vanilla JS (no frameworks, no build tools).
 

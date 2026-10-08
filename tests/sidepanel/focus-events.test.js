@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   createFocusRunCommand,
+  focusIndicatorStateFromStorageChange,
   focusMessageMatchesState,
   handleFocusPanelMessage,
   routePanelFocusMessage,
@@ -228,5 +229,22 @@ describe('Focus runtime event identity', () => {
       ['component', 'focusEnded'],
       ['button'],
     ]);
+  });
+});
+
+describe('focusIndicatorStateFromStorageChange', () => {
+  test('maps durable focusState changes to the run the banner should show', () => {
+    const active = { status: 'active', runId: 'a' };
+    const paused = { status: 'paused', runId: 'a' };
+    expect(focusIndicatorStateFromStorageChange({ focusState: { newValue: active } }, 'local')).toBe(active);
+    expect(focusIndicatorStateFromStorageChange({ focusState: { newValue: paused } }, 'local')).toBe(paused);
+    expect(focusIndicatorStateFromStorageChange({ focusState: { newValue: { status: 'ending', runId: 'a' } } }, 'local')).toBeNull();
+    expect(focusIndicatorStateFromStorageChange({ focusState: { oldValue: active } }, 'local')).toBeNull();
+  });
+
+  test('ignores changes that are not about Focus', () => {
+    expect(focusIndicatorStateFromStorageChange({ tabkebabSettings: { newValue: {} } }, 'local')).toBeUndefined();
+    expect(focusIndicatorStateFromStorageChange({ focusState: { newValue: { status: 'active' } } }, 'session')).toBeUndefined();
+    expect(focusIndicatorStateFromStorageChange(null, 'local')).toBeUndefined();
   });
 });

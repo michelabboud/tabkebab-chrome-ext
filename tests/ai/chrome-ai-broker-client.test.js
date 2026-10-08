@@ -603,7 +603,7 @@ describe('ChromeAIBrokerClient port lifecycle', () => {
     );
   });
 
-  test('replacement cancels and settles old work before activating the new generation', async () => {
+  test('a second panel keeps old in-flight work and routes new work to the newest port', async () => {
     const client = new ChromeAIBrokerClient();
     const oldPair = createRuntimePortPair(PORT_NAME);
     const newPair = createRuntimePortPair(PORT_NAME);
@@ -617,40 +617,35 @@ describe('ChromeAIBrokerClient port lifecycle', () => {
     let oldSettled = false;
     oldPending.finally(() => { oldSettled = true; }).catch(() => {});
     client.attachPort(newPair.workerPort);
-    expect(oldSettled).toBeFalse();
-    expect(client.port).toBe(oldPair.workerPort);
-    expect(oldOutbound.map(({ type }) => type)).toEqual([
-      'chrome-ai/request',
-      'chrome-ai/cancel',
-    ]);
-    await expect(client.complete(completionRequest('too-early'), {}, undefined))
-      .rejects.toBeInstanceOf(AIForegroundRequiredError);
 
-    await oldPair.clientPort.postMessage({
-      type: 'chrome-ai/result',
-      requestId: oldOutbound[0].requestId,
-      ok: false,
-      error: { code: 'AI_ABORTED', message: 'Old provider cleanup completed.' },
-    });
-    const oldError = await oldPending.catch((reason) => reason);
-    expect(oldError).toBeInstanceOf(AIForegroundRequiredError);
+    // No cancellation of the in-flight request; new work goes to the newest panel.
+    expect(oldSettled).toBeFalse();
     expect(client.port).toBe(newPair.workerPort);
+    expect(oldOutbound.map(({ type }) => type)).toEqual(['chrome-ai/request']);
 
     const current = client.complete(completionRequest('new'), {}, undefined);
-    let currentSettled = false;
-    current.finally(() => {
-      currentSettled = true;
-    }).catch(() => {});
+    expect(newOutbound.map(({ type }) => type)).toEqual(['chrome-ai/request']);
 
+    // A result for the new request arriving on the old port is not trusted.
+    let currentSettled = false;
+    current.finally(() => { currentSettled = true; }).catch(() => {});
     await oldPair.workerPort.onMessage.dispatch({
       type: 'chrome-ai/result',
       requestId: newOutbound[0].requestId,
       ok: true,
       value: completionValue('stale-old-port'),
     }, oldPair.workerPort);
-    await oldPair.workerPort.onDisconnect.dispatch(oldPair.workerPort);
     await Promise.resolve();
     expect(currentSettled).toBeFalse();
+
+    // The old request still completes successfully on its own port.
+    await oldPair.clientPort.postMessage({
+      type: 'chrome-ai/result',
+      requestId: oldOutbound[0].requestId,
+      ok: true,
+      value: completionValue('old'),
+    });
+    await expect(oldPending).resolves.toEqual(completionValue('old'));
 
     await newPair.clientPort.postMessage({
       type: 'chrome-ai/result',
@@ -659,8 +654,35 @@ describe('ChromeAIBrokerClient port lifecycle', () => {
       value: completionValue('new'),
     });
     await expect(current).resolves.toEqual(completionValue('new'));
-    expect(oldOutbound).toHaveLength(2);
+    expect(oldOutbound).toHaveLength(1);
     expect(newOutbound).toHaveLength(1);
+    client.disconnect();
+  });
+
+  test('losing an older port rejects only the requests it owned', async () => {
+    const client = new ChromeAIBrokerClient();
+    const oldPair = createRuntimePortPair(PORT_NAME);
+    const newPair = createRuntimePortPair(PORT_NAME);
+    const newOutbound = [];
+    newPair.clientPort.onMessage.addListener((message) => newOutbound.push(message));
+    client.attachPort(oldPair.workerPort);
+    const oldPending = client.complete(completionRequest('old'), {}, undefined);
+    client.attachPort(newPair.workerPort);
+    const current = client.complete(completionRequest('new'), {}, undefined);
+
+    await oldPair.workerPort.disconnect();
+    await expect(oldPending).rejects.toBeInstanceOf(AIForegroundRequiredError);
+    expect(client.port).toBe(newPair.workerPort);
+    expect(client.pending.size).toBe(1);
+
+    await newPair.clientPort.postMessage({
+      type: 'chrome-ai/result',
+      requestId: newOutbound[0].requestId,
+      ok: true,
+      value: completionValue('new'),
+    });
+    await expect(current).resolves.toEqual(completionValue('new'));
+    client.disconnect();
   });
 
   test('promotes a still-open standby when the newest panel disconnects', async () => {

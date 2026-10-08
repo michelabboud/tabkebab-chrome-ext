@@ -5,7 +5,7 @@ import { Storage } from './storage.js';
 import {
   restoreTabWindows,
   sanitizeCapturedGroupTitle,
-  sanitizeCapturedTab,
+  sanitizeStashableTab,
 } from './tab-restore.js';
 import {
   DRIVE_TOMBSTONES_KEY,
@@ -100,7 +100,8 @@ export async function saveSession(name, allWindows = true) {
   const sessionName = typeof name === 'string'
     ? name.slice(0, MAX_CAPTURED_TEXT_LENGTH)
     : name;
-  const tabs = await getAllTabs({ allWindows });
+  // Incognito tabs are never persisted.
+  const tabs = await getAllTabs({ allWindows, excludeIncognito: true });
 
   // Query all Chrome tab groups for group metadata
   let chromeGroups = [];
@@ -124,14 +125,16 @@ export async function saveSession(name, allWindows = true) {
     if (!windowMap.has(t.windowId)) windowMap.set(t.windowId, { tabs: [], groupIds: new Set() });
     const entry = windowMap.get(t.windowId);
 
-    const savedTab = sanitizeCapturedTab({
+    const savedTab = sanitizeStashableTab({
       url: t.url,
       title: t.title,
       favIconUrl: t.favIconUrl,
       pinned: t.pinned || false,
     });
     // A tab whose URL cannot satisfy the canonical string bound cannot be
-    // stored without poisoning later canonicalization; skip it.
+    // stored without poisoning later canonicalization, and one restore would
+    // refuse to reopen (about:, chrome:, …) would only make every restore of
+    // this session report "incomplete"; skip both.
     if (!savedTab) continue;
 
     // Save group membership (groupId -1 means ungrouped)

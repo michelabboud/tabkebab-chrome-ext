@@ -2,6 +2,21 @@
 
 import { showToast } from './toast.js';
 import { sendOrThrow } from '../message-client.js';
+import { makeKeyboardActivatable } from './keyboard-activate.js';
+import { friendlyErrorMessage } from '../restore-feedback.js';
+
+// Parsed NL actions whose confirmation closes or removes tabs.
+const DESTRUCTIVE_ACTIONS = new Set(['close', 'stash', 'discard', 'kebab']);
+
+const THINKING_HTML = `
+  <div class="pipeline-progress active command-progress" role="status">
+    <div class="phase-label"><span>Thinking\u2026</span></div>
+    <div class="progress-bar"><div class="progress-bar-fill indeterminate"></div></div>
+  </div>`;
+
+function progressHtml(label) {
+  return THINKING_HTML.replace('Thinking\u2026', label);
+}
 
 export class CommandBar {
   constructor(rootEl) {
@@ -30,12 +45,15 @@ export class CommandBar {
     this._confirmationGeneration += 1;
     this.pending = true;
     this.inputEl.disabled = true;
-    this.resultsEl.innerHTML = '<p class="loading-text">Thinking...</p>';
+    this.resultsEl.innerHTML = THINKING_HTML;
 
     try {
       const result = await this.send({ action: 'executeNLCommand', command });
 
-      if (result.error) {
+      if (!result || typeof result !== 'object') {
+        showToast('Command failed: no response from background', 'error');
+        this.resultsEl.innerHTML = '';
+      } else if (result.error) {
         showToast(result.error, 'error');
         this.resultsEl.innerHTML = '';
       } else if (result.confirmation) {
@@ -46,9 +64,12 @@ export class CommandBar {
         showToast(result.message || 'Done', 'success');
         this.resultsEl.innerHTML = '';
         this.inputEl.value = '';
+      } else {
+        showToast('Command produced no result', 'error');
+        this.resultsEl.innerHTML = '';
       }
     } catch (err) {
-      showToast('Command failed: ' + err.message, 'error');
+      showToast('Command failed: ' + friendlyErrorMessage(err), 'error');
       this.resultsEl.innerHTML = '';
     } finally {
       this.pending = false;
@@ -85,7 +106,7 @@ export class CommandBar {
         this.resultsEl.innerHTML = '';
         this.inputEl.value = '';
       } catch (err) {
-        showToast('Failed to group: ' + err.message, 'error');
+        showToast('Could not group tabs: ' + friendlyErrorMessage(err), 'error');
       }
     });
 
@@ -118,9 +139,10 @@ export class CommandBar {
         try {
           await this.send({ action: 'focusTab', tabId: tab.id });
         } catch (err) {
-          showToast('Failed to focus tab: ' + err.message, 'error');
+          showToast('Could not switch to tab: ' + friendlyErrorMessage(err), 'error');
         }
       });
+      makeKeyboardActivatable(row, { label: `Switch to ${tab.title || tab.url || 'tab'}` });
 
       const favicon = document.createElement('img');
       favicon.className = 'find-result-favicon';
@@ -165,7 +187,7 @@ export class CommandBar {
         this.inputEl.value = '';
         this.resultsEl.innerHTML = '';
       } catch (err) {
-        showToast('Failed to close: ' + err.message, 'error');
+        showToast('Could not close tabs: ' + friendlyErrorMessage(err), 'error');
       }
     });
 
@@ -195,26 +217,31 @@ export class CommandBar {
     msg.className = 'command-confirmation';
     msg.textContent = result.confirmation;
 
+    const parsedAction = String(result.parsedCommand?.action || '').toLowerCase();
+    const destructive = DESTRUCTIVE_ACTIONS.has(parsedAction);
     const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'action-btn';
-    confirmBtn.textContent = 'Confirm';
+    confirmBtn.type = 'button';
+    confirmBtn.className = destructive ? 'action-btn danger' : 'action-btn';
+    confirmBtn.textContent = parsedAction === 'close' ? 'Close tabs'
+      : parsedAction === 'stash' ? 'Stash tabs'
+      : 'Confirm';
     confirmBtn.addEventListener('click', async () => {
       if (this._confirmationGeneration !== generation) return false;
       this._setConfirmationBusy(true);
-      this.resultsEl.innerHTML = '<p class="loading-text">Executing...</p>';
+      this.resultsEl.innerHTML = progressHtml('Working\u2026');
       try {
         const execResult = await this.send({
           action: 'confirmNLCommand',
           parsedCommand: result.parsedCommand,
         });
         if (this._confirmationGeneration !== generation) return false;
-        showToast(execResult.message || 'Done', 'success');
+        showToast(execResult?.message || 'Done', 'success');
         this.inputEl.value = '';
         this.resultsEl.innerHTML = '';
         return true;
       } catch (err) {
         if (this._confirmationGeneration !== generation) return false;
-        showToast('Execution failed: ' + err.message, 'error');
+        showToast('Execution failed: ' + friendlyErrorMessage(err), 'error');
         this.showConfirmation(result);
         return false;
       } finally {

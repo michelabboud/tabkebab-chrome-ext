@@ -5,10 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TabKebab</title>
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="views.css">
+  <link rel="stylesheet" href="features.css">
+  <link rel="stylesheet" href="settings-focus.css">
 </head>
 <body>
   <header class="app-header">
-    <svg class="logo" width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg class="logo" width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
       <!-- Skewer stick -->
       <rect x="58" y="10" width="12" height="100" rx="6" fill="currentColor"/>
       <polygon points="58,104 70,104 64,120" fill="currentColor"/>
@@ -33,84 +36,66 @@
     </svg>
     <h1>TabKebab</h1>
     <div class="header-icons">
-      <button id="btn-drive-status" class="settings-btn status-icon has-tooltip-down" aria-label="Google Drive" data-tooltip="Google Drive: Checking...">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="btn-drive-status" data-feature="drive" class="settings-btn status-icon has-tooltip-down" data-state="off" aria-label="Google Drive: checking status" data-tooltip="Google Drive: checking…">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
         </svg>
       </button>
-      <button id="btn-ai-status" class="settings-btn status-icon has-tooltip-down" aria-label="AI" data-tooltip="AI: Checking...">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      <button type="button" id="btn-ai-status" data-feature="ai" class="settings-btn status-icon has-tooltip-down" data-state="off" aria-label="AI: checking status" data-tooltip="AI: checking…">
+        <!-- Sparkles: AI (the old ★ read as "favourite") -->
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M10 3.5l1.6 4.4a2 2 0 0 0 1.2 1.2l4.4 1.6-4.4 1.6a2 2 0 0 0-1.2 1.2L10 17.9l-1.6-4.4a2 2 0 0 0-1.2-1.2L2.8 10.7l4.4-1.6a2 2 0 0 0 1.2-1.2z"/>
+          <path d="M18.5 14.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>
+          <path d="M18 3v4"/>
+          <path d="M16 5h4"/>
         </svg>
       </button>
-      <button id="btn-focus" class="settings-btn has-tooltip-down" aria-label="Focus Mode" data-tooltip="Focus Mode (F)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="btn-focus" data-feature="focus" class="settings-btn has-tooltip-down" aria-label="Focus Mode (F)" aria-controls="view-focus" data-tooltip="Focus Mode (F)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <circle cx="12" cy="12" r="10"/>
           <circle cx="12" cy="12" r="6"/>
           <circle cx="12" cy="12" r="2"/>
         </svg>
       </button>
-      <button id="btn-search" class="settings-btn has-tooltip-down" aria-label="Search" data-tooltip="Search (Ctrl+K)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="btn-search" data-feature="search" class="settings-btn has-tooltip-down" aria-label="Search (Ctrl+K)" aria-haspopup="dialog" data-tooltip="Search (Ctrl+K)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <circle cx="11" cy="11" r="8"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
       </button>
-      <button id="btn-help" class="settings-btn has-tooltip-down" aria-label="Help" data-tooltip="Help (?)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="btn-help" class="settings-btn has-tooltip-down" aria-label="Help and keyboard shortcuts (?)" aria-haspopup="dialog" data-tooltip="Help (?)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <circle cx="12" cy="12" r="10"/>
           <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
           <line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
       </button>
-      <button id="btn-settings" class="settings-btn has-tooltip-down" aria-label="Settings" data-tooltip="Settings">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="btn-settings" class="settings-btn has-tooltip-down" aria-label="Settings" aria-controls="view-settings" data-tooltip="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
     </div>
-    <div class="header-meta">
-      <span class="header-version app-version"></span>
-      <div class="header-links">
-        <a href="https://github.com/michelabboud/tabkebab-chrome-ext" target="_blank" rel="noopener">GitHub</a>
-        <span class="about-sep">|</span>
-        <a href="https://github.com/michelabboud/tabkebab-chrome-ext/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
-      </div>
-    </div>
   </header>
 
-  <nav class="tab-nav" role="tablist">
-    <button role="tab" data-view="windows" aria-selected="false">Windows</button>
-    <button role="tab" data-view="tabs" class="active" aria-selected="true">Tabs</button>
-    <button role="tab" data-view="stash" aria-selected="false">Stash</button>
-    <button role="tab" data-view="sessions" aria-selected="false">Sessions</button>
+  <nav class="tab-nav" role="tablist" aria-label="Views">
+    <button type="button" role="tab" id="nav-tab-tabs" data-view="tabs" class="active" aria-selected="true" aria-controls="view-tabs" tabindex="0" title="Tabs (1)">Tabs</button>
+    <button type="button" role="tab" id="nav-tab-windows" data-view="windows" data-feature="windows" aria-selected="false" aria-controls="view-windows" tabindex="-1" title="Windows (2)">Windows</button>
+    <button type="button" role="tab" id="nav-tab-stash" data-view="stash" data-feature="stash" aria-selected="false" aria-controls="view-stash" tabindex="-1" title="Stash (3)">Stash</button>
+    <button type="button" role="tab" id="nav-tab-sessions" data-view="sessions" data-feature="sessions" aria-selected="false" aria-controls="view-sessions" tabindex="-1" title="Sessions (4)">Sessions</button>
   </nav>
 
-  <div id="global-stats-bar" class="global-stats-bar">
-    <div class="stat-card">
-      <div class="stat-value" id="stat-windows">0</div>
-      <div class="stat-label">Windows</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value" id="stat-tabs">0</div>
-      <div class="stat-label">Tabs</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value" id="stat-kebab">—</div>
-      <div class="stat-label">Active / Kebab</div>
-    </div>
-  </div>
-  <div class="stats-hint">Kebab = discarded tabs saving memory</div>
+  <div id="global-stats-bar" class="global-stats-bar" title="Sleeping tabs are discarded (&quot;kebab'd&quot;) to free memory. They reload when you open them.">0 windows · 0 tabs · 0 sleeping</div>
 
   <!-- AI Command Bar -->
-  <div id="command-bar" class="command-bar" hidden>
+  <div id="command-bar" class="command-bar" data-feature="ai commandBar" hidden>
     <div class="command-bar-row">
-      <textarea id="ai-command-input" class="input" rows="2" placeholder="Ask AI... (e.g., 'close YouTube tabs')"></textarea>
-      <button id="btn-ai-command" class="action-btn">Go</button>
+      <textarea id="ai-command-input" class="input" rows="1" placeholder="Ask TabKebab&hellip; (e.g. close YouTube tabs)" aria-label="Ask TabKebab: describe what to do with your tabs" aria-describedby="ai-provider-label"></textarea>
+      <button id="btn-ai-command" type="button" class="action-btn">Go</button>
     </div>
     <span id="ai-provider-label" class="ai-provider-label"></span>
-    <div id="command-results" class="command-results"></div>
+    <div id="command-results" class="command-results" aria-live="polite"></div>
   </div>
 
   <main class="view-container">
@@ -118,13 +103,14 @@
       <div class="walkthrough-header">
         <span class="walkthrough-kicker">Getting started</span>
         <span id="walkthrough-step" class="walkthrough-step">1 of 4</span>
+        <span class="walkthrough-spacer"></span>
+        <button id="walkthrough-dismiss" type="button" class="walkthrough-skip">Skip tour</button>
       </div>
       <h2 id="walkthrough-title" class="walkthrough-title">Welcome to TabKebab</h2>
       <p id="walkthrough-description" class="walkthrough-description"></p>
       <div class="walkthrough-actions">
         <button id="walkthrough-action" type="button" class="action-btn secondary" hidden></button>
         <span class="walkthrough-spacer"></span>
-        <button id="walkthrough-dismiss" type="button" class="action-btn secondary">Skip tour</button>
         <button id="walkthrough-back" type="button" class="action-btn secondary" hidden>Back</button>
         <button id="walkthrough-next" type="button" class="action-btn">Next</button>
       </div>
@@ -132,9 +118,19 @@
 
     <!-- Sessions view -->
     <section id="view-sessions" class="view hidden">
-      <div class="toolbar">
-        <input type="text" id="session-name" placeholder="Session name..." class="input">
-        <button id="btn-save-session" class="action-btn">Save</button>
+      <div class="toolbar record-toolbar">
+        <input type="text" id="session-name" placeholder="Session name (optional)" class="input" aria-label="Session name (optional)" maxlength="200">
+        <button id="btn-save-session" type="button" class="action-btn" title="Save all open windows as a session">Save</button>
+        <details class="more-menu">
+          <summary class="action-btn secondary icon-btn more-menu-trigger" aria-label="More session actions" title="More actions">&#x22EF;</summary>
+          <div class="more-menu-list">
+            <button id="btn-export" type="button" class="more-menu-item">Export all data (JSON)</button>
+            <label class="more-menu-item file-label">
+              Import JSON&hellip;
+              <input type="file" id="btn-import" accept=".json" hidden>
+            </label>
+          </div>
+        </details>
       </div>
 
       <nav class="sub-nav session-sub-nav" role="tablist">
@@ -144,22 +140,13 @@
 
       <div id="session-list-saved" class="session-list"></div>
       <div id="session-list-auto" class="session-list" hidden></div>
-
-      <div class="toolbar" style="margin-top: 12px;">
-        <button id="btn-export" class="action-btn secondary">Export JSON</button>
-        <label class="action-btn secondary file-label">
-          Import JSON
-          <input type="file" id="btn-import" accept=".json" hidden>
-        </label>
-      </div>
     </section>
 
     <!-- Windows view -->
     <section id="view-windows" class="view hidden">
-      <div class="toolbar">
-        <button id="btn-consolidate-windows" class="action-btn">Consolidate Windows</button>
-        <button id="btn-collapse-all" class="action-btn secondary">Collapse All</button>
-        <button id="btn-expand-all" class="action-btn secondary">Expand All</button>
+      <div class="toolbar view-toolbar">
+        <button id="btn-consolidate-windows" type="button" class="action-btn" title="Merge under-used windows">Consolidate windows</button>
+        <button id="btn-toggle-collapse-windows" type="button" class="icon-toggle-btn collapse-toggle-btn" aria-label="Collapse all" aria-pressed="false" title="Collapse all">&#x21D5;</button>
       </div>
       <div id="consolidation-progress" class="pipeline-progress">
         <div class="phase-label">
@@ -176,40 +163,51 @@
 
     <!-- Stash view -->
     <section id="view-stash" class="view hidden">
-      <div id="stash-list" class="stash-list"></div>
-      <div class="toolbar" style="margin-top: 12px;">
-        <button id="btn-export-stashes" class="action-btn secondary">Export Stashes</button>
-        <label class="action-btn secondary file-label">
-          Import Stashes
-          <input type="file" id="btn-import-stashes" accept=".json" hidden>
-        </label>
+      <div class="view-heading-row">
+        <h2 class="view-heading">Stashed tabs</h2>
+        <details class="more-menu">
+          <summary class="action-btn secondary icon-btn more-menu-trigger" aria-label="More stash actions" title="More actions">&#x22EF;</summary>
+          <div class="more-menu-list">
+            <button id="btn-export-stashes" type="button" class="more-menu-item">Export stashes (JSON)</button>
+            <label class="more-menu-item file-label">
+              Import stashes&hellip;
+              <input type="file" id="btn-import-stashes" accept=".json" hidden>
+            </label>
+          </div>
+        </details>
       </div>
+      <div id="stash-list" class="stash-list"></div>
     </section>
 
     <!-- Tabs view (with sub-tabs: Domains, Groups, Duplicates) -->
     <section id="view-tabs" class="view active">
-      <nav class="sub-nav" role="tablist">
-        <button role="tab" data-subtab="domains" class="active" aria-selected="true">Domains</button>
-        <button role="tab" data-subtab="groups" aria-selected="false">Groups</button>
-        <button role="tab" data-subtab="duplicates" aria-selected="false">Duplicates <span id="dupe-badge" class="dupe-badge" hidden></span></button>
+      <nav class="sub-nav" role="tablist" aria-label="Tabs views">
+        <button role="tab" id="subtab-domains" data-subtab="domains" class="active" aria-selected="true" aria-controls="sub-domains">Domains</button>
+        <button role="tab" id="subtab-groups" data-subtab="groups" aria-selected="false" aria-controls="sub-groups">Groups</button>
+        <button role="tab" id="subtab-duplicates" data-subtab="duplicates" data-feature="duplicates" aria-selected="false" aria-controls="sub-duplicates">Duplicates <span id="dupe-badge" class="dupe-badge" hidden></span></button>
       </nav>
 
       <!-- Domains sub-view -->
-      <div id="sub-domains" class="sub-view">
-        <div class="toolbar">
-          <button id="btn-group-by-domain" class="action-btn">Group by Domain</button>
-          <button id="btn-smart-group" class="action-btn">Smart Group</button>
-          <button id="btn-ungroup-all" class="action-btn secondary">Ungroup All</button>
-          <button id="btn-kebab-all" class="action-btn kebab">Kebab All</button>
-          <button id="btn-collapse-all-tabs" class="action-btn secondary">Collapse All</button>
-          <button id="btn-expand-all-tabs" class="action-btn secondary">Expand All</button>
+      <div id="sub-domains" class="sub-view" role="tabpanel" aria-labelledby="subtab-domains">
+        <div class="toolbar view-toolbar">
+          <div class="split-btn">
+            <button id="btn-group-by-domain" type="button" class="action-btn split-btn-main" title="Group tabs into Chrome tab groups by domain">Group by domain</button>
+            <button id="btn-group-menu" type="button" class="action-btn split-btn-toggle" aria-label="More grouping options" aria-haspopup="menu" aria-expanded="false" aria-controls="group-menu">&#x25BE;</button>
+            <div id="group-menu" class="row-menu" role="menu" aria-label="Grouping options" data-align="start" hidden>
+              <button id="btn-smart-group" data-feature="ai" type="button" role="menuitem" tabindex="-1" class="row-menu-item" title="Groups tabs by topic using AI">Smart group (AI)</button>
+              <div class="row-menu-separator" data-feature="ai" role="separator"></div>
+              <button id="btn-ungroup-all" type="button" role="menuitem" tabindex="-1" class="row-menu-item danger">Ungroup all&hellip;</button>
+            </div>
+          </div>
+          <button id="btn-kebab-all" type="button" class="action-btn secondary sleep-all-btn" title="Kebab: discard all background tabs to free memory">Sleep all</button>
+          <button id="btn-toggle-collapse-tabs" type="button" class="icon-toggle-btn collapse-toggle-btn" aria-label="Collapse all" aria-pressed="true" title="Expand all">&#x21D5;</button>
         </div>
-        <p id="smart-group-zero-config-note" class="smart-group-zero-config-note">
-          Smart Group uses Chrome's built-in AI by default. No key or account is needed,
-          and no data leaves this machine.
+        <p id="smart-group-ai-hint" data-feature="ai" class="smart-group-ai-hint" hidden>
+          On-device AI is ready: Smart group sorts tabs by topic, and nothing leaves this computer.
         </p>
         <div
           id="smart-group-fallback"
+          data-feature="ai"
           class="smart-group-fallback"
           role="status"
           aria-live="polite"
@@ -220,9 +218,9 @@
             <button
               id="btn-smart-group-domain-fallback"
               type="button"
-              class="action-btn secondary"
-            >Use domain grouping instead</button>
-            <a id="link-smart-group-settings" href="#settings-ai-section">Set up an API key</a>
+              class="action-btn"
+            >Group by domain</button>
+            <button id="link-smart-group-settings" type="button" class="action-btn secondary">Add an API key</button>
           </div>
         </div>
         <div id="pipeline-progress" class="pipeline-progress">
@@ -239,12 +237,12 @@
       </div>
 
       <!-- Groups sub-view -->
-      <div id="sub-groups" class="sub-view hidden">
+      <div id="sub-groups" class="sub-view hidden" role="tabpanel" aria-labelledby="subtab-groups">
         <h3 class="section-title section-collapsible" id="section-custom-groups"><span class="section-chevron">&#x25bc;</span> Custom Groups</h3>
         <div id="custom-groups-content">
           <div class="toolbar">
-            <input type="text" id="new-group-name" placeholder="New group name..." class="input">
-            <select id="new-group-color" class="input color-select">
+            <input type="text" id="new-group-name" placeholder="New group name..." class="input" aria-label="New group name">
+            <select id="new-group-color" class="input color-select" aria-label="Group color">
               <option value="blue">Blue</option>
               <option value="red">Red</option>
               <option value="yellow">Yellow</option>
@@ -267,7 +265,7 @@
       </div>
 
       <!-- Duplicates sub-view -->
-      <div id="sub-duplicates" class="sub-view hidden">
+      <div id="sub-duplicates" data-feature="duplicates" class="sub-view hidden" role="tabpanel" aria-labelledby="subtab-duplicates">
         <!-- Empty pages row -->
         <div id="empty-pages-row" class="empty-pages-row" hidden>
           <div class="empty-pages-info">
@@ -278,8 +276,8 @@
           <button id="btn-close-empty" class="action-btn danger">Close Empty Pages</button>
         </div>
         <div class="toolbar">
-          <button id="btn-scan-dupes" class="action-btn">Scan for Duplicates</button>
-          <button id="btn-close-all-dupes" class="action-btn danger" disabled>Close All Duplicates</button>
+          <button id="btn-scan-dupes" type="button" class="action-btn">Scan for duplicates</button>
+          <button id="btn-close-all-dupes" type="button" class="action-btn danger" disabled>Close duplicates</button>
         </div>
         <div id="duplicate-list" class="duplicate-list">
           <p class="empty-state">Click "Scan" to find duplicate tabs.</p>
@@ -295,86 +293,19 @@
     <!-- Settings view -->
     <section id="view-settings" class="view hidden">
 
-      <!-- ─── Google Drive ─── -->
-      <div class="settings-section settings-card" id="settings-drive-section">
-        <div class="settings-card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
-          <h3 class="settings-card-title">Google Drive</h3>
-        </div>
-        <div class="settings-card-body">
-          <p class="setting-section-desc">Backup data to Google Drive under TabKebab / sessions, stashes, bookmarks subfolders.</p>
-          <div id="drive-status" class="drive-status">Not connected</div>
-          <div class="toolbar" style="margin-top: 8px;">
-            <button id="btn-connect-drive" class="action-btn">Connect Google Drive</button>
-            <button id="btn-sync-now" class="action-btn secondary" disabled>Sync Now</button>
-          </div>
-          <button id="btn-disconnect-drive" class="action-btn danger" hidden style="margin-top: 8px;">Disconnect</button>
-
-          <div id="drive-settings-connected" class="drive-connected-settings" hidden>
-            <div class="setting-divider"></div>
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">Auto-export sessions</span>
-                <span class="setting-hint">Push sessions to Drive on sync</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="setting-autoExportSessionsToDrive" data-setting="autoExportSessionsToDrive">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">Auto-export stashes</span>
-                <span class="setting-hint">Push stashes to Drive on sync</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="setting-autoExportStashesToDrive" data-setting="autoExportStashesToDrive">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">Auto-sync interval</span>
-                <span class="setting-hint">Hours between automatic Drive syncs (0 = manual)</span>
-              </div>
-              <div class="setting-number-unit">
-                <input type="number" id="setting-autoSyncToDriveIntervalHours" class="setting-number" data-setting="autoSyncToDriveIntervalHours" min="0" max="168">
-                <span class="setting-unit">hrs</span>
-              </div>
-            </div>
-            <div class="setting-row" id="drive-retention-row">
-              <div class="setting-info">
-                <span class="setting-label">Drive retention</span>
-                <span class="setting-hint">Auto-delete Drive files older than this</span>
-              </div>
-              <div class="setting-number-unit">
-                <input type="number" id="setting-driveRetentionDays" class="setting-number" data-setting="driveRetentionDays" min="1" max="365">
-                <span class="setting-unit">days</span>
-              </div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">Never delete from Drive</span>
-                <span class="setting-hint">Override retention and keep all files forever</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="setting-neverDeleteFromDrive" data-setting="neverDeleteFromDrive">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-            <button id="btn-undo-drive-settings" class="action-btn secondary" hidden
-                    style="margin-bottom: 8px;">Undo Last Settings Import</button>
-            <div class="setting-divider"></div>
-            <div class="toolbar">
-              <input type="number" id="drive-cleanup-days" class="setting-number" value="30" min="1" max="365" style="width: 64px; flex: 0;">
-              <button id="btn-clean-drive" class="action-btn secondary">Clean Drive Files</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- ─── In-page index (sticky) ─── -->
+      <nav class="settings-index" id="settings-index" aria-label="Settings sections">
+        <button type="button" class="settings-index-chip" data-settings-target="settings-general-section">General</button>
+        <button type="button" class="settings-index-chip" data-settings-target="settings-features-section">Features</button>
+        <button type="button" class="settings-index-chip" data-settings-target="settings-sleep-section">Sleep</button>
+        <button type="button" class="settings-index-chip" data-feature="ai" data-settings-target="settings-ai-section">AI</button>
+        <button type="button" class="settings-index-chip" data-feature="automation" data-settings-target="settings-automation-section">Automation</button>
+        <button type="button" class="settings-index-chip" data-feature="bookmarks" data-settings-target="settings-bookmarks-section">Bookmarks</button>
+        <button type="button" class="settings-index-chip" data-feature="drive" data-settings-target="settings-drive-section">Drive</button>
+      </nav>
 
       <!-- ─── General Settings ─── -->
-      <div class="settings-section settings-card">
+      <div class="settings-section settings-card" id="settings-general-section">
         <div class="settings-card-header">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <h3 class="settings-card-title">General</h3>
@@ -382,29 +313,7 @@
         <div class="settings-card-body">
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Remove stash after restore</span>
-              <span class="setting-hint">Automatically delete stash entries once restored</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-removeStashAfterRestore" data-setting="removeStashAfterRestore">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Default view</span>
-              <span class="setting-hint">Which view opens when you launch the panel</span>
-            </div>
-            <select id="setting-defaultView" class="setting-select" data-setting="defaultView">
-              <option value="tabs">Tabs</option>
-              <option value="windows">Windows</option>
-              <option value="stash">Stash</option>
-              <option value="sessions">Sessions</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Theme</span>
+              <label class="setting-label" for="setting-theme">Theme</label>
               <span class="setting-hint">Choose light, dark, or follow system preference</span>
             </div>
             <select id="setting-theme" class="setting-select" data-setting="theme">
@@ -415,208 +324,211 @@
           </div>
           <div class="setting-row">
             <div class="setting-info">
+              <label class="setting-label" for="setting-defaultView">Default view</label>
+              <span class="setting-hint">Which view opens when you launch the panel</span>
+            </div>
+            <select id="setting-defaultView" class="setting-select" data-setting="defaultView">
+              <option value="tabs">Tabs</option>
+              <option value="windows" data-feature="windows">Windows</option>
+              <option value="stash" data-feature="stash">Stash</option>
+              <option value="sessions" data-feature="sessions">Sessions</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-removeStashAfterRestore">Remove stash after restore</label>
+              <span class="setting-hint">Automatically delete stash entries once restored</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-removeStashAfterRestore" data-setting="removeStashAfterRestore">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
               <span class="setting-label">Getting started</span>
               <span class="setting-hint">Replay the four-step guide to grouping, stashing, and restoring tabs</span>
             </div>
             <button id="btn-relaunch-walkthrough" type="button" class="action-btn secondary">Replay guide</button>
           </div>
-          <div class="setting-divider"></div>
-          <div class="toolbar">
-            <button id="btn-export-settings" class="action-btn secondary">Export Settings</button>
-            <label class="action-btn secondary file-label">
-              Import Settings
-              <input type="file" id="btn-import-settings" accept=".json" hidden>
+        </div>
+      </div>
+
+      <!-- ─── Features (on/off switches) ─── -->
+      <div class="settings-section settings-card" id="settings-features-section">
+        <div class="settings-card-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="5" width="22" height="14" rx="7"/><circle cx="16" cy="12" r="3"/></svg>
+          <h3 class="settings-card-title">Features</h3>
+        </div>
+        <div class="settings-card-body">
+          <p class="setting-section-desc">Switch off what you don't use to declutter the panel. Turning a feature off hides it and stops its schedules; your data is kept, and turning it back on restores everything.</p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-focus">Focus Mode</label>
+              <span class="setting-hint">Off: Hides the Focus button, banner and F shortcut. A running session finishes normally.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-focus" data-feature-setting="focus" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-ai">AI</label>
+              <span class="setting-hint">Off: Hides AI status, Smart group, summaries, AI suggestions and AI settings. Keys stay saved.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-ai" data-feature-setting="ai" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-commandBar">AI command bar</label>
+              <span class="setting-hint">Off: Hides the natural-language command bar (it also needs AI on).</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-commandBar" data-feature-setting="commandBar" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-search">Search</label>
+              <span class="setting-hint">Off: Hides the search button and Ctrl+K search.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-search" data-feature-setting="search" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-windows">Windows view</label>
+              <span class="setting-hint">Off: Hides the Windows view and window consolidation.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-windows" data-feature-setting="windows" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-stash">Stash</label>
+              <span class="setting-hint">Off: Hides the Stash view and Stash buttons, and stops auto-stash. Stashes stay restorable.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-stash" data-feature-setting="stash" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-sessions">Sessions</label>
+              <span class="setting-hint">Off: Hides the Sessions view and stops auto-save. Saved sessions are kept.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-sessions" data-feature-setting="sessions" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-duplicates">Duplicates</label>
+              <span class="setting-hint">Off: Hides the Duplicates tab and badge and stops the background duplicate scan.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-duplicates" data-feature-setting="duplicates" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-automation">Automation</label>
+              <span class="setting-hint">Off: Stops auto-save, auto-kebab and auto-stash schedules and hides their settings.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-automation" data-feature-setting="automation" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-bookmarks">Bookmarks</label>
+              <span class="setting-hint">Off: Stops bookmark snapshots (manual and on stash) and hides bookmark settings.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-bookmarks" data-feature-setting="bookmarks" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="feature-drive">Google Drive</label>
+              <span class="setting-hint">Off: Stops Drive sync and Drive retention and hides Drive buttons and settings. Nothing is removed from Drive.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="feature-drive" data-feature-setting="drive" checked>
+              <span class="toggle-slider"></span>
             </label>
           </div>
         </div>
       </div>
 
-      <!-- ─── Tab Limits ─── -->
-      <div class="settings-section settings-card">
+      <!-- ─── Tab Sleep (Kebab) ─── -->
+      <div class="settings-section settings-card" id="settings-sleep-section">
         <div class="settings-card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
-          <h3 class="settings-card-title">Tab Limits</h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 18a5 5 0 0 0-10 0"/><line x1="12" y1="2" x2="12" y2="9"/><line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/><line x1="1" y1="18" x2="3" y2="18"/><line x1="21" y1="18" x2="23" y2="18"/><line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/></svg>
+          <h3 class="settings-card-title">Tab Sleep (Kebab)</h3>
         </div>
         <div class="settings-card-body">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Warning threshold (yellow)</span>
-              <span class="setting-hint">Tabs per window before yellow warning</span>
-            </div>
-            <input type="number" id="setting-recommendedTabsPerWindow" class="setting-number" data-setting="recommendedTabsPerWindow" min="1" max="500">
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Danger threshold (red)</span>
-              <span class="setting-hint">Tabs per window before red warning</span>
-            </div>
-            <input type="number" id="setting-maxTabsPerWindow" class="setting-number" data-setting="maxTabsPerWindow" min="1" max="500">
-          </div>
-        </div>
-      </div>
+          <p class="setting-section-desc">Domains in the keep-awake list are never discarded when you "Kebab" tabs.</p>
 
-      <!-- ─── Automation ─── -->
-      <div class="settings-section settings-card" id="settings-automation-section">
-        <div class="settings-card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <h3 class="settings-card-title">Automation</h3>
-        </div>
-        <div class="settings-card-body">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Auto-save interval</span>
-              <span class="setting-hint">Hours between automatic session saves</span>
-            </div>
-            <div class="setting-number-unit">
-              <input type="number" id="setting-autoSaveIntervalHours" class="setting-number" data-setting="autoSaveIntervalHours" min="1" max="168">
-              <span class="setting-unit">hrs</span>
-            </div>
+          <label class="input-label" for="keep-awake-domain-input">Add a domain to keep awake</label>
+          <div class="toolbar settings-field-row">
+            <input type="text" id="keep-awake-domain-input" class="input" placeholder="e.g. slack.com">
+            <button id="btn-add-keep-awake" class="action-btn secondary btn-inline">Add</button>
           </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Auto-save retention</span>
-              <span class="setting-hint">Days to keep auto-saved sessions</span>
-            </div>
-            <div class="setting-number-unit">
-              <input type="number" id="setting-autoSaveRetentionDays" class="setting-number" data-setting="autoSaveRetentionDays" min="1" max="365">
-              <span class="setting-unit">days</span>
-            </div>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Auto-kebab idle tabs</span>
-              <span class="setting-hint">Discard tabs idle for this many hours (0 = off)</span>
-            </div>
-            <div class="setting-number-unit">
-              <input type="number" id="setting-autoKebabAfterHours" class="setting-number" data-setting="autoKebabAfterHours" min="0" max="720">
-              <span class="setting-unit">hrs</span>
-            </div>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Auto-stash inactive tabs</span>
-              <span class="setting-hint">Stash and close tabs inactive for this many days (0 = off)</span>
-            </div>
-            <div class="setting-number-unit">
-              <input type="number" id="setting-autoStashAfterDays" class="setting-number" data-setting="autoStashAfterDays" min="0" max="365">
-              <span class="setting-unit">days</span>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- ─── Bookmarks ─── -->
-      <div class="settings-section settings-card">
-        <div class="settings-card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-          <h3 class="settings-card-title">Bookmarks</h3>
-        </div>
-        <div class="settings-card-body">
-          <p class="setting-section-desc">Choose how tabs are organized when bookmarked. Select multiple formats.</p>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">By Windows</span>
-              <span class="setting-hint">TabKebab / date / Windows / Window 1..N / tabs</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-bookmarkByWindows" data-setting="bookmarkByWindows">
-              <span class="toggle-slider"></span>
-            </label>
+          <div class="keep-awake-list-header">
+            <span id="keep-awake-count" class="keep-awake-count" aria-live="polite"></span>
+            <label class="visually-hidden" for="keep-awake-filter">Filter keep-awake domains</label>
+            <input type="search" id="keep-awake-filter" class="input keep-awake-filter" placeholder="Filter domains" autocomplete="off">
           </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">By Groups</span>
-              <span class="setting-hint">TabKebab / date / Groups / group name / tabs</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-bookmarkByGroups" data-setting="bookmarkByGroups">
-              <span class="toggle-slider"></span>
-            </label>
+
+          <div id="keep-awake-domain-list" class="keep-awake-domain-list" aria-label="Keep-awake domains"></div>
+          <button type="button" id="btn-keep-awake-show-all" class="settings-link-btn" hidden>Show all</button>
+
+          <div class="toolbar settings-gap-top">
+            <button id="btn-suggest-keep-awake" data-feature="ai" class="action-btn secondary ai-feature" hidden>Suggest (AI)</button>
+            <button id="btn-reset-keep-awake" class="action-btn secondary">Reset to Defaults</button>
           </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">By Domains</span>
-              <span class="setting-hint">TabKebab / date / Domains / domain / tabs</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-bookmarkByDomains" data-setting="bookmarkByDomains">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="setting-divider"></div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Destination</span>
-              <span class="setting-hint">Where to save bookmark data</span>
-            </div>
-            <select id="setting-bookmarkDestination" class="setting-select" data-setting="bookmarkDestination">
-              <option value="chrome">Chrome Bookmarks</option>
-              <option value="indexeddb">Local Storage</option>
-              <option value="drive">Google Drive</option>
-              <option value="all">All destinations</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Auto-bookmark on stash</span>
-              <span class="setting-hint">Automatically create bookmarks when stashing tabs</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-autoBookmarkOnStash" data-setting="autoBookmarkOnStash">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Compressed export</span>
-              <span class="setting-hint">Compress bookmark exports to save space</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-compressedExport" data-setting="compressedExport">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">HTML bookmarks to Drive</span>
-              <span class="setting-hint">Upload a browsable HTML page with search to Google Drive alongside JSON</span>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="setting-exportHtmlBookmarkToDrive" data-setting="exportHtmlBookmarkToDrive">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="setting-divider"></div>
-          <div class="toolbar">
-            <button id="btn-bookmark-now" class="action-btn secondary">Bookmark Now</button>
-          </div>
+
+          <div id="keep-awake-suggestions" class="keep-awake-suggestions" hidden></div>
         </div>
       </div>
 
       <!-- AI Settings -->
-      <div class="settings-section settings-card" id="settings-ai-section">
+      <div class="settings-section settings-card" id="settings-ai-section" data-feature="ai">
         <div class="settings-card-header">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v1a1 1 0 0 0 1 1h1a4 4 0 0 1 0 8h-1a1 1 0 0 0-1 1v1a4 4 0 0 1-8 0v-1a1 1 0 0 0-1-1H6a4 4 0 0 1 0-8h1a1 1 0 0 0 1-1V6a4 4 0 0 1 4-4z"/></svg>
           <h3 class="settings-card-title">AI Features</h3>
         </div>
         <div class="settings-card-body">
-        <p class="description">Enable AI-powered smart grouping, tab summaries, and natural language commands. Your API keys are encrypted and stored locally.</p>
+        <p class="description">AI-powered smart grouping, tab summaries, and natural language commands. Your API keys are encrypted and stored locally.</p>
 
-        <label class="ai-toggle">
-          <input type="checkbox" id="ai-enabled">
-          <span>Enable AI Features</span>
-        </label>
+        <label class="input-label" for="ai-provider">AI provider</label>
+        <select id="ai-provider" class="input settings-field-row" aria-describedby="ai-off-hint">
+          <option value="">Off</option>
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="chrome-ai">Chrome Built-in AI (Experimental)</option>
+          <option value="custom">Custom (OpenAI-Compatible)</option>
+        </select>
+        <p id="ai-off-hint" class="setting-hint ai-off-hint">AI is off. Pick a provider to set it up.</p>
 
         <div id="ai-config" class="ai-config" hidden>
-          <label class="input-label">AI Provider</label>
-          <select id="ai-provider" class="input" style="margin-bottom: 12px;">
-            <option value="">Select a provider...</option>
-            <option value="openai">OpenAI (GPT)</option>
-            <option value="claude">Claude (Anthropic)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="chrome-ai">Chrome Built-in AI (Experimental)</option>
-            <option value="custom">Custom (OpenAI-Compatible)</option>
-          </select>
 
           <!-- OpenAI config -->
           <div id="ai-config-openai" class="provider-config" hidden>
@@ -625,22 +537,24 @@
               <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>
               <p class="api-guide-note">Requires an OpenAI account with billing enabled.</p>
             </div>
-            <label class="input-label">API Key</label>
-            <div class="toolbar" style="margin-bottom: 8px;">
+            <label class="input-label" for="openai-api-key">API Key</label>
+            <div class="toolbar settings-field-row">
               <input type="password" id="openai-api-key" class="input" placeholder="sk-...">
-              <button id="btn-toggle-openai-key" class="action-btn secondary" style="flex:0">Show</button>
+              <button id="btn-toggle-openai-key" class="action-btn secondary btn-inline" aria-label="Show OpenAI API key">Show</button>
             </div>
-            <label class="input-label">Model</label>
-            <div class="toolbar" style="margin-bottom: 12px;">
+            <label class="input-label" for="openai-model">Model</label>
+            <div class="toolbar settings-field-row-lg">
               <select id="openai-model" class="input">
-                <option value="gpt-4.1-nano">GPT-4.1 Nano (fastest)</option>
+                <option value="gpt-6-luna">GPT-6 Luna (fastest)</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
                 <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
                 <option value="gpt-4.1">GPT-4.1</option>
-                <option value="gpt-5-mini">GPT-5 Mini</option>
-                <option value="gpt-5.2">GPT-5.2</option>
-                <option value="o4-mini">o4-mini (reasoning)</option>
+                <option value="gpt-6-astra">GPT-6 Astra</option>
               </select>
-              <button class="action-btn secondary btn-load-models" data-provider="openai" style="flex:0">Load</button>
+              <button class="action-btn secondary btn-load-models" data-provider="openai">Load</button>
             </div>
           </div>
 
@@ -651,21 +565,22 @@
               <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com/settings/keys</a>
               <p class="api-guide-note">Requires an Anthropic account with API access.</p>
             </div>
-            <label class="input-label">API Key</label>
-            <div class="toolbar" style="margin-bottom: 8px;">
+            <label class="input-label" for="claude-api-key">API Key</label>
+            <div class="toolbar settings-field-row">
               <input type="password" id="claude-api-key" class="input" placeholder="sk-ant-...">
-              <button id="btn-toggle-claude-key" class="action-btn secondary" style="flex:0">Show</button>
+              <button id="btn-toggle-claude-key" class="action-btn secondary btn-inline" aria-label="Show Claude API key">Show</button>
             </div>
-            <label class="input-label">Model</label>
-            <div class="toolbar" style="margin-bottom: 12px;">
+            <label class="input-label" for="claude-model">Model</label>
+            <div class="toolbar settings-field-row-lg">
               <select id="claude-model" class="input">
-                <option value="claude-haiku-4-5">Claude Haiku 4.5 (fastest)</option>
+                <option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest)</option>
+                <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
+                <option value="claude-opus-5-5">Claude Opus 5.5</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
                 <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
                 <option value="claude-opus-4-5">Claude Opus 4.5</option>
-                <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                <option value="claude-opus-4-20250514">Claude Opus 4</option>
               </select>
-              <button class="action-btn secondary btn-load-models" data-provider="claude" style="flex:0">Load</button>
+              <button class="action-btn secondary btn-load-models" data-provider="claude">Load</button>
             </div>
           </div>
 
@@ -676,20 +591,23 @@
               <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
               <p class="api-guide-note">Free tier available with generous limits.</p>
             </div>
-            <label class="input-label">API Key</label>
-            <div class="toolbar" style="margin-bottom: 8px;">
+            <label class="input-label" for="gemini-api-key">API Key</label>
+            <div class="toolbar settings-field-row">
               <input type="password" id="gemini-api-key" class="input" placeholder="AIza...">
-              <button id="btn-toggle-gemini-key" class="action-btn secondary" style="flex:0">Show</button>
+              <button id="btn-toggle-gemini-key" class="action-btn secondary btn-inline" aria-label="Show Gemini API key">Show</button>
             </div>
-            <label class="input-label">Model</label>
-            <div class="toolbar" style="margin-bottom: 12px;">
+            <label class="input-label" for="gemini-model">Model</label>
+            <div class="toolbar settings-field-row-lg">
               <select id="gemini-model" class="input">
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash (fastest)</option>
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini-3-flash-preview">Gemini 3 Flash (preview)</option>
-                <option value="gemini-3-pro-preview">Gemini 3 Pro (preview)</option>
+                <option value="gemini-3.8-flash">Gemini 3.8 Flash (recommended)</option>
+                <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (fastest)</option>
+                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (preview)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (existing users only)</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (existing users only)</option>
               </select>
-              <button class="action-btn secondary btn-load-models" data-provider="gemini" style="flex:0">Load</button>
+              <button class="action-btn secondary btn-load-models" data-provider="gemini">Load</button>
             </div>
           </div>
 
@@ -725,19 +643,19 @@
           <!-- Custom (OpenAI-compatible) config -->
           <div id="ai-config-custom" class="provider-config" hidden>
             <p class="description">Connect to any OpenAI-compatible API: Ollama, LM Studio, vLLM, Together AI, Groq, etc.</p>
-            <label class="input-label">Base URL</label>
-            <input type="text" id="custom-base-url" class="input" placeholder="http://localhost:11434/v1" style="margin-bottom: 8px;">
-            <label class="input-label">API Key (optional)</label>
-            <div class="toolbar" style="margin-bottom: 8px;">
+            <label class="input-label" for="custom-base-url">Base URL</label>
+            <input type="text" id="custom-base-url" class="input settings-field-row" placeholder="http://localhost:11434/v1">
+            <label class="input-label" for="custom-api-key">API Key (optional)</label>
+            <div class="toolbar settings-field-row">
               <input type="password" id="custom-api-key" class="input" placeholder="(leave blank if not needed)">
-              <button id="btn-toggle-custom-key" class="action-btn secondary" style="flex:0">Show</button>
+              <button id="btn-toggle-custom-key" class="action-btn secondary btn-inline" aria-label="Show custom API key">Show</button>
             </div>
-            <label class="input-label">Model</label>
-            <div class="toolbar" style="margin-bottom: 12px;">
+            <label class="input-label" for="custom-model">Model</label>
+            <div class="toolbar settings-field-row-lg">
               <select id="custom-model" class="input">
                 <option value="default">default</option>
               </select>
-              <button class="action-btn secondary btn-load-models" data-provider="custom" style="flex:0">Load</button>
+              <button class="action-btn secondary btn-load-models" data-provider="custom">Load</button>
             </div>
           </div>
 
@@ -749,7 +667,7 @@
             </label>
             <div id="ai-passphrase-section" class="passphrase-section" hidden>
               <p class="description">You'll need to enter this passphrase once per browser session to unlock AI features.</p>
-              <input type="password" id="ai-passphrase" class="input" placeholder="Enter passphrase...">
+              <input type="password" id="ai-passphrase" class="input" placeholder="Enter passphrase..." aria-label="Passphrase">
             </div>
           </div>
 
@@ -757,56 +675,297 @@
           <div id="ai-unlock-section" class="passphrase-area" hidden>
             <label class="input-label" for="ai-unlock-passphrase">Unlock selected provider</label>
             <p class="description">This provider is passphrase-protected and locked for this browser session.</p>
-            <div class="toolbar" style="margin-bottom: 8px;">
+            <div class="toolbar settings-field-row">
               <input type="password" id="ai-unlock-passphrase" class="input" placeholder="Enter provider passphrase..." autocomplete="current-password">
-              <button type="button" id="btn-unlock-ai" class="action-btn secondary" style="flex:0">Unlock</button>
+              <button type="button" id="btn-unlock-ai" class="action-btn secondary btn-inline">Unlock</button>
             </div>
           </div>
           <div id="ai-unlock-result" class="drive-status" role="status" aria-live="polite" hidden></div>
 
-          <!-- Actions -->
-          <div class="toolbar">
-            <button id="btn-test-ai" class="action-btn secondary">Test Connection</button>
-            <button id="btn-save-ai" class="action-btn">Save Settings</button>
-          </div>
-
-          <div id="ai-test-result" class="drive-status" hidden></div>
-
-          <div class="toolbar" style="margin-top: 12px;">
+          <div class="toolbar settings-gap-top">
             <button id="btn-clear-ai-cache" class="action-btn secondary">Clear AI Cache</button>
           </div>
         </div>
+
+          <!-- Actions (Save stays visible so "Off" can be saved) -->
+          <div class="toolbar settings-gap-top">
+            <button id="btn-test-ai" class="action-btn secondary" hidden>Test Connection</button>
+            <button id="btn-save-ai" class="action-btn">Save Settings</button>
+          </div>
+
+          <div id="ai-test-result" class="drive-status settings-gap-top" role="status" aria-live="polite" hidden></div>
         </div>
       </div>
 
-      <!-- Tab Sleep (Kebab) -->
-      <div class="settings-section settings-card">
+      <!-- ─── Automation ─── -->
+      <div class="settings-section settings-card" id="settings-automation-section" data-feature="automation">
         <div class="settings-card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 18a5 5 0 0 0-10 0"/><line x1="12" y1="2" x2="12" y2="9"/><line x1="4.22" y1="10.22" x2="5.64" y2="11.64"/><line x1="1" y1="18" x2="3" y2="18"/><line x1="21" y1="18" x2="23" y2="18"/><line x1="18.36" y1="11.64" x2="19.78" y2="10.22"/></svg>
-          <h3 class="settings-card-title">Tab Sleep (Kebab)</h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <h3 class="settings-card-title">Automation</h3>
         </div>
         <div class="settings-card-body">
-          <p class="setting-section-desc">Domains in the keep-awake list are never discarded when you "Kebab" tabs.</p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-autoSaveIntervalHours">Auto-save interval</label>
+              <span class="setting-hint">Hours between automatic session saves</span>
+            </div>
+            <div class="setting-number-unit">
+              <input type="number" id="setting-autoSaveIntervalHours" class="setting-number" data-setting="autoSaveIntervalHours" min="1" max="168">
+              <span class="setting-unit">hrs</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-autoSaveRetentionDays">Auto-save retention</label>
+              <span class="setting-hint">Days to keep auto-saved sessions</span>
+            </div>
+            <div class="setting-number-unit">
+              <input type="number" id="setting-autoSaveRetentionDays" class="setting-number" data-setting="autoSaveRetentionDays" min="1" max="365">
+              <span class="setting-unit">days</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-autoKebabAfterHours">Auto-kebab idle tabs</label>
+              <span class="setting-hint">Discard tabs idle for this many hours (0 = off)</span>
+            </div>
+            <div class="setting-number-unit">
+              <input type="number" id="setting-autoKebabAfterHours" class="setting-number" data-setting="autoKebabAfterHours" min="0" max="720">
+              <span class="setting-unit">hrs</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-autoStashAfterDays">Auto-stash inactive tabs</label>
+              <span class="setting-hint">Stash and close tabs inactive for this many days (0 = off)</span>
+            </div>
+            <div class="setting-number-unit">
+              <input type="number" id="setting-autoStashAfterDays" class="setting-number" data-setting="autoStashAfterDays" min="0" max="365">
+              <span class="setting-unit">days</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
-          <div class="toolbar" style="margin-bottom: 8px;">
-            <input type="text" id="keep-awake-domain-input" class="input" placeholder="Add domain (e.g. slack.com)">
-            <button id="btn-add-keep-awake" class="action-btn secondary">Add</button>
+      <!-- ─── Tab Limits (advanced, collapsed) ─── -->
+      <details class="settings-section settings-card settings-card-collapsible" id="settings-limits-section">
+        <summary class="settings-card-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+          <h3 class="settings-card-title">Tab Limits</h3>
+          <span class="settings-card-summary-hint">Advanced</span>
+        </summary>
+        <div class="settings-card-body">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-recommendedTabsPerWindow">Warning threshold (yellow)</label>
+              <span class="setting-hint">Tabs per window before yellow warning</span>
+            </div>
+            <input type="number" id="setting-recommendedTabsPerWindow" class="setting-number" data-setting="recommendedTabsPerWindow" min="1" max="500">
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-maxTabsPerWindow">Danger threshold (red)</label>
+              <span class="setting-hint">Tabs per window before red warning</span>
+            </div>
+            <input type="number" id="setting-maxTabsPerWindow" class="setting-number" data-setting="maxTabsPerWindow" min="1" max="500">
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── Bookmarks ─── -->
+      <div class="settings-section settings-card" id="settings-bookmarks-section" data-feature="bookmarks">
+        <div class="settings-card-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          <h3 class="settings-card-title">Bookmarks</h3>
+        </div>
+        <div class="settings-card-body">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-bookmarkDestination">Destination</label>
+              <span class="setting-hint">Where to save bookmark data</span>
+            </div>
+            <select id="setting-bookmarkDestination" class="setting-select" data-setting="bookmarkDestination">
+              <option value="chrome">Chrome Bookmarks</option>
+              <option value="indexeddb">Local Storage</option>
+              <option value="drive">Google Drive</option>
+              <option value="all">All destinations</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="setting-autoBookmarkOnStash">Auto-bookmark on stash</label>
+              <span class="setting-hint">Automatically create bookmarks when stashing tabs</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-autoBookmarkOnStash" data-setting="autoBookmarkOnStash">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
 
-          <div id="keep-awake-domain-list" class="keep-awake-domain-list"></div>
+          <details class="settings-subdetails" id="settings-bookmark-formats">
+            <summary>Folder formats and export options</summary>
+            <p class="setting-section-desc">Choose how tabs are organized when bookmarked. Select multiple formats.</p>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-bookmarkByWindows">By Windows</label>
+                <span class="setting-hint">TabKebab / date / Windows / Window 1..N / tabs</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-bookmarkByWindows" data-setting="bookmarkByWindows">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-bookmarkByGroups">By Groups</label>
+                <span class="setting-hint">TabKebab / date / Groups / group name / tabs</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-bookmarkByGroups" data-setting="bookmarkByGroups">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-bookmarkByDomains">By Domains</label>
+                <span class="setting-hint">TabKebab / date / Domains / domain / tabs</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-bookmarkByDomains" data-setting="bookmarkByDomains">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-compressedExport">Compressed export</label>
+                <span class="setting-hint">Compress bookmark exports to save space</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-compressedExport" data-setting="compressedExport">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-exportHtmlBookmarkToDrive">HTML bookmarks to Drive</label>
+                <span class="setting-hint">Upload a browsable HTML page with search to Google Drive alongside JSON</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-exportHtmlBookmarkToDrive" data-setting="exportHtmlBookmarkToDrive">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </details>
 
-          <div class="toolbar" style="margin-top: 8px;">
-            <button id="btn-suggest-keep-awake" class="action-btn secondary ai-feature" hidden>Suggest (AI)</button>
-            <button id="btn-reset-keep-awake" class="action-btn secondary">Reset to Defaults</button>
+          <div class="toolbar settings-gap-top">
+            <button id="btn-bookmark-now" class="action-btn secondary">Bookmark Now</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Google Drive (opt-in) ─── -->
+      <div class="settings-section settings-card" id="settings-drive-section" data-feature="drive">
+        <div class="settings-card-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+          <h3 class="settings-card-title">Google Drive</h3>
+        </div>
+        <div class="settings-card-body">
+          <p class="setting-section-desc">Optional. Back up sessions, stashes and bookmarks to your own Google Drive, under a TabKebab folder.</p>
+          <div id="drive-status" class="drive-status" role="status" aria-live="polite">Not connected</div>
+          <div class="toolbar settings-gap-top">
+            <button id="btn-connect-drive" class="action-btn">Connect Google Drive</button>
+            <button id="btn-sync-now" class="action-btn secondary" hidden>Sync Now</button>
+            <button id="btn-disconnect-drive" class="action-btn secondary drive-disconnect-btn" hidden>Disconnect</button>
           </div>
 
-          <div id="keep-awake-suggestions" class="keep-awake-suggestions" hidden></div>
+          <div id="drive-settings-connected" class="drive-connected-settings" hidden>
+            <div class="setting-divider"></div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-autoExportSessionsToDrive">Auto-export sessions</label>
+                <span class="setting-hint">Push sessions to Drive on sync</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-autoExportSessionsToDrive" data-setting="autoExportSessionsToDrive">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-autoExportStashesToDrive">Auto-export stashes</label>
+                <span class="setting-hint">Push stashes to Drive on sync</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-autoExportStashesToDrive" data-setting="autoExportStashesToDrive">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label" for="setting-autoSyncToDriveIntervalHours">Auto-sync interval</label>
+                <span class="setting-hint">Hours between automatic Drive syncs (0 = manual)</span>
+              </div>
+              <div class="setting-number-unit">
+                <input type="number" id="setting-autoSyncToDriveIntervalHours" class="setting-number" data-setting="autoSyncToDriveIntervalHours" min="0" max="168">
+                <span class="setting-unit">hrs</span>
+              </div>
+            </div>
+            <button id="btn-undo-drive-settings" class="action-btn secondary settings-field-row" hidden>Undo Last Settings Import</button>
+
+            <details class="settings-subdetails" id="settings-drive-retention">
+              <summary>Retention and cleanup</summary>
+              <div class="setting-row" id="drive-retention-row">
+                <div class="setting-info">
+                  <label class="setting-label" for="setting-driveRetentionDays">Drive retention</label>
+                  <span class="setting-hint">Auto-delete Drive files older than this</span>
+                </div>
+                <div class="setting-number-unit">
+                  <input type="number" id="setting-driveRetentionDays" class="setting-number" data-setting="driveRetentionDays" min="1" max="365">
+                  <span class="setting-unit">days</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label class="setting-label" for="setting-neverDeleteFromDrive">Never delete from Drive</label>
+                  <span class="setting-hint">Override retention and keep all files forever</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="setting-neverDeleteFromDrive" data-setting="neverDeleteFromDrive">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <label class="input-label" for="drive-cleanup-days">Delete Drive files older than (days)</label>
+              <div class="toolbar">
+                <input type="number" id="drive-cleanup-days" class="setting-number drive-cleanup-days" value="30" min="1" max="365">
+                <button id="btn-clean-drive" class="action-btn secondary">Clean Drive Files</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Backup & restore ─── -->
+      <div class="settings-section settings-card" id="settings-backup-section">
+        <div class="settings-card-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <h3 class="settings-card-title">Backup &amp; restore</h3>
+        </div>
+        <div class="settings-card-body">
+          <p class="setting-section-desc">Save your settings to a JSON file, or load them from one. Export all data saves sessions, stashes and settings together, even for features switched off.</p>
+          <div class="toolbar">
+            <button id="btn-export-settings" class="action-btn secondary">Export Settings</button>
+            <button id="btn-export-all-data" type="button" class="action-btn secondary">Export all data</button>
+            <label class="action-btn secondary file-label">
+              Import Settings
+              <input type="file" id="btn-import-settings" accept=".json" hidden>
+            </label>
+          </div>
         </div>
       </div>
 
       <!-- ─── About ─── -->
       <div class="settings-section settings-card about-section">
-        <div class="settings-card-body" style="text-align:center; padding: 20px 16px;">
+        <div class="settings-card-body about-body">
           <svg class="about-logo" width="48" height="48" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect x="58" y="10" width="12" height="100" rx="6" fill="#404040"/>
             <polygon points="58,104 70,104 64,120" fill="#404040"/>
@@ -837,7 +996,7 @@
   </main>
 
   <div id="confirm-overlay" class="confirm-overlay" hidden></div>
-  <div id="toast-container" class="toast-container"></div>
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-relevant="additions"></div>
 
   <script type="module" src="panel.js"></script>
 </body>
