@@ -12,18 +12,25 @@ TabKebab collects zero data. No telemetry, no analytics, no tracking, no cookies
 
 DATA STORED LOCALLY:
 All extension data lives inside your browser profile:
+• Settings, including feature on/off switches — chrome.storage.local
 • Sessions (window/tab snapshots) — chrome.storage.local
 • Custom tab groups — chrome.storage.local
 • Keep-awake domain list — chrome.storage.local
-• AI settings and encrypted API keys — chrome.storage.local
+• Focus Mode preferences and history (last 50 sessions) — chrome.storage.local
+• Local bookmark snapshots (if chosen as destination) — chrome.storage.local
+• AI settings, encrypted API keys, and an AI response cache — chrome.storage.local
 • Stashed tabs — IndexedDB (TabKebabStash)
 • Decrypted API keys (temporary) — chrome.storage.session (wiped on restart)
 
-API keys are encrypted with AES-GCM 256-bit using PBKDF2 key derivation. Plaintext keys are never written to disk.
+The unlimitedStorage permission only lifts the local storage quota; it grants no access to other data.
+
+Incognito tabs are never written to sessions, stashes, or bookmark exports.
+
+API keys are encrypted with AES-GCM 256-bit using PBKDF2 key derivation (600,000 iterations for new keys). Plaintext keys are never written to disk.
 
 DATA THAT LEAVES YOUR DEVICE:
-• AI providers (opt-in only): If you enable AI features and provide an API key, tab titles and URLs are sent to your chosen provider (OpenAI, Anthropic, Google Gemini, or a custom endpoint). Chrome Built-in AI runs entirely on-device.
-• Google Drive sync (opt-in only): If you connect Google Drive, sessions, stashes, and groups are stored in a visible "TabKebab" folder on your Drive. The extension can only access files it created. Works across multiple computers.
+• AI providers (opt-in only; AI is off by default): If you choose a provider and use an AI feature, tab titles and simplified URLs or hostnames (and your command text, for natural-language commands) are sent to your chosen provider (OpenAI, Anthropic, Google Gemini, or a custom endpoint). Focus Mode AI Detection, if turned on, sends the hostname of a site you visit during a focus session. Page content, cookies, passwords, and browsing history are never sent. Chrome Built-in AI runs entirely on-device.
+• Google Drive sync (opt-in only): If you connect Google Drive, sync data, settings, sessions, stashes, and optional bookmark snapshots are stored in a visible "TabKebab" folder on your Drive. The extension can only access files it created. Retention cleanup moves old dated copies to your Drive trash instead of deleting them permanently. Works across multiple computers.
 • Export files: JSON files downloaded to your computer when you choose to export.
 
 No data is sent anywhere else. There is no analytics endpoint, error reporting service, or update mechanism that contacts any server.

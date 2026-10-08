@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** July 24, 2026
+**Last updated:** October 8, 2026
 
 ## The short version
 
@@ -25,10 +25,20 @@ All extension data lives inside your browser profile and never leaves it unless 
 | **Sessions** | Snapshots of your open windows, tabs (URL, title, favicon URL, pinned state), and tab group metadata (name, color) |
 | **Manual groups** | Custom tab groups you create (group name, color, tab URLs) |
 | **Keep-awake domains** | The list of domains you protect from tab sleep (e.g. `gmail.com`) |
+| **Settings** | Your preferences, including the Settings → Features on/off switches |
+| **Focus Mode** | The active focus session, per-profile preferences (allowed/blocked entries, categories), and a history of your last 50 focus sessions |
+| **Bookmark snapshots** | If you choose the Local Storage bookmark destination: up to 50 snapshots of tab URLs and titles; for Chrome bookmark exports, the ID of the TabKebab bookmark folder |
+| **Sync deletion records** | IDs and deletion times of sessions and custom groups you deleted, so the deletion carries over at the next Drive sync; they expire after 180 days |
 | **AI settings** | Your chosen provider, model, and encrypted API key (if AI features are enabled) |
 | **AI response cache** | A local LRU cache (max 200 entries, 24-hour expiry) of AI responses keyed by a SHA-256 request identity to avoid redundant API calls |
 | **Drive sync state** | Whether Google Drive sync is connected and last sync timestamp |
 | **Install ID** | A random UUID generated once per browser profile, used as a fallback encryption key if you don't set a passphrase |
+
+TabKebab requests the `unlimitedStorage` permission. It only lifts Chrome's 10 MB quota on this local storage so large session and stash histories are not lost; it does not give access to any additional data.
+
+### Incognito tabs
+
+Incognito (private) tabs are never written to sessions, stashes, or bookmark exports. TabKebab can only see incognito tabs at all if you allow the extension in incognito in `chrome://extensions`.
 
 ### Chrome session storage (`chrome.storage.session`)
 
@@ -42,7 +52,7 @@ When you open the stash list, each stash preview loads up to five stored favicon
 
 ### API key encryption
 
-If you use AI features, your API key is encrypted with AES-GCM (256-bit) using PBKDF2 key derivation (100,000 iterations, SHA-256). You can use a passphrase you know or device protection backed by the random per-profile install ID. Changing protection for stored keys requires entering every affected key so all ciphertext is replaced atomically. The plaintext key is never persisted to disk.
+If you use AI features, your API key is encrypted with AES-GCM (256-bit) using PBKDF2 key derivation (SHA-256; 600,000 iterations for keys saved by version 1.3.0 or later, while keys saved earlier with 100,000 iterations still decrypt). You can use a passphrase you know or device protection backed by the random per-profile install ID. Changing protection for stored keys requires entering every affected key so all ciphertext is replaced atomically. The plaintext key is never persisted to disk.
 
 Only a secret-free public projection of AI settings crosses ordinary runtime responses. A newly entered key and passphrase exist in one panel-to-worker save request solely so the worker can validate and encrypt them; neither value is echoed in a response or logged. The encrypted settings commit occurs once, and the session cache is updated only afterward. A session-cache failure leaves valid encrypted settings committed but locked.
 
@@ -52,17 +62,25 @@ Only a secret-free public projection of AI settings crosses ordinary runtime res
 
 ### AI providers (opt-in only)
 
-If — and only if — you enable AI features and use a network-backed provider, the extension sends requests to your chosen provider. OpenAI, Claude, and Gemini require an API key; a Custom endpoint may be configured with or without one:
+AI is off by default (the **AI provider** setting starts at **Off**). If — and only if — you choose a network-backed provider, the extension sends requests to it when you use an AI feature. OpenAI, Claude, and Gemini require your own API key; a Custom endpoint may be configured with or without one. The default models are OpenAI `gpt-6-luna`, Claude `claude-haiku-5-5`, and Gemini `gemini-3.8-flash`; you can pick another model in Settings.
 
 - **OpenAI** (`api.openai.com`)
 - **Anthropic Claude** (`api.anthropic.com`)
 - **Google Gemini** (`generativelanguage.googleapis.com`)
 - **Custom endpoint** (a remote HTTPS URL you configure, or an HTTP loopback development URL such as local Ollama)
-- **Chrome Built-in AI** — runs entirely on-device, nothing sent over the network
+- **Chrome Built-in AI** — runs entirely on-device, nothing sent over the network. Smart group can use it even when no provider is selected, if Chrome reports the on-device model as available.
 
-**What is sent:** A prompt containing tab titles, simplified URLs (hostname + path), and/or your natural-language command. When a key is configured, it is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
+**What is sent** depends on the feature you use:
 
-**What is NOT sent:** Browsing history, page content, cookies, passwords, form data, or any data beyond tab titles and URLs relevant to the specific AI request.
+- **Smart group, tab summaries, and keep-awake suggestions:** for each tab involved, its title (first 80 characters) and a simplified URL (hostname plus the first 50 characters of the path, without query string or fragment).
+- **Natural-language commands:** your command plus, for up to 200 open tabs, each tab's title (first 60 characters) and hostname.
+- **Focus Mode AI Detection** (only if you turn it on): the hostname of a site you navigate to during a focus session and the name of the focus profile.
+
+Incognito tabs are not included in sessions, stashes, or bookmarks, but if you allow TabKebab in incognito, their titles and URLs can be part of an AI request you start while they are open.
+
+When a key is configured, it is sent in a request header for authentication. Google Gemini uses the `x-goog-api-key` header; credentials are not placed in request URLs.
+
+**What is NOT sent:** Browsing history, page content, cookies, passwords, form data, or any data beyond the tab titles, URLs or hostnames, and command text described above.
 
 Each provider has its own privacy policy that governs how they handle the data you send them. We have no control over that.
 
@@ -70,9 +88,13 @@ Remote Custom endpoints must use HTTPS. HTTP is allowed only for loopback hosts;
 
 ### Google Drive sync (opt-in only)
 
-If you connect Google Drive, the extension creates a **TabKebab** folder in your Drive and may store sync data, settings, exported sessions and stashes, bookmark snapshots, portable exports, and optional bookmark HTML pages there. The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. The sync uses a `drive.file` OAuth scope — the extension can only access files it created, never any other file in your Drive. This also lets you sync across multiple computers logged into the same Google account.
+If you connect Google Drive, the extension creates a **TabKebab** folder in your Drive and may store sync data, settings, exported sessions and stashes, bookmark snapshots, portable exports, and optional bookmark HTML pages there. The folder is fully visible in your Drive — you can browse, back up, or delete the files yourself. When Drive retention cleans up old dated copies, TabKebab moves them to your Google Drive trash rather than deleting them permanently; Google Drive's own trash rules then apply. You can turn on **Never delete from Drive** to keep everything. Disconnecting does not delete any files. The sync uses a `drive.file` OAuth scope — the extension can only access files it created, never any other file in your Drive. This also lets you sync across multiple computers logged into the same Google account.
 
 Google's own privacy practices apply to data stored on Google Drive.
+
+### Chrome bookmarks
+
+If you choose Chrome Bookmarks as a bookmark destination, TabKebab creates ordinary bookmarks in a "TabKebab" folder in your bookmark bar. Like any Chrome bookmark, they are handled by Chrome, including Chrome Sync if you have bookmark sync turned on.
 
 ### Chrome itself
 
