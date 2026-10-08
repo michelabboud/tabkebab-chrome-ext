@@ -1,6 +1,6 @@
 // core/ai/provider-claude.js — Anthropic Claude API provider implementation
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError } from './provider.js';
 
 const BASE_URL = 'https://api.anthropic.com/v1';
 const API_VERSION = '2023-06-01';
@@ -117,7 +117,7 @@ export const ClaudeProvider = {
     }
     if (!response.ok) {
       const errText = await readErrorText(response, signal);
-      throw new AINetworkError(`Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
+      throw providerHttpError('Anthropic', response.status, errText);
     }
 
     const data = await abortAware(() => response.json(), signal);

@@ -1,7 +1,7 @@
 // core/ai/provider-custom.js — OpenAI-compatible custom provider
 // Works with: Ollama, LM Studio, vLLM, LocalAI, Together AI, Groq, etc.
 
-import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError } from './provider.js';
+import { AIAbortError, AIAuthError, AIRateLimitError, AINetworkError, providerHttpError } from './provider.js';
 
 function ensureNotAborted(signal) {
   if (signal?.aborted) throw new AIAbortError();
@@ -116,7 +116,7 @@ export const CustomProvider = {
     }
     if (!response.ok) {
       const text = await readErrorText(response, signal);
-      throw new AINetworkError(`API error ${response.status}: ${text.slice(0, 200)}`);
+      throw providerHttpError('Custom', response.status, text);
     }
 
     const data = await abortAware(() => response.json(), signal);

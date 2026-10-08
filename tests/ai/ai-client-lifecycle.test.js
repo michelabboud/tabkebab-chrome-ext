@@ -14,6 +14,7 @@ import {
 } from '../../core/ai/provider.js';
 import { CustomProvider } from '../../core/ai/provider-custom.js';
 import { deferred } from '../helpers/deferred.js';
+import { DEFAULT_TIMEOUT_CLEANUP_GRACE_MS } from '../../core/ai/request-lifecycle.js';
 
 function privateCustomSettings() {
   return {
@@ -63,7 +64,9 @@ function accelerateQueueDelays() {
 function triggerRequestTimeoutImmediately() {
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, delay, ...args) => {
-    if (Number(delay) > 0) {
+    // The post-timeout cleanup grace stays real so these tests can observe a
+    // cooperative provider's cleanup before the lifecycle rejects.
+    if (Number(delay) > 0 && delay !== DEFAULT_TIMEOUT_CLEANUP_GRACE_MS) {
       queueMicrotask(() => callback(...args));
       return 0;
     }

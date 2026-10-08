@@ -9,7 +9,17 @@ import { chromeAIBrokerClient } from './core/ai/chrome-ai-broker-client.js';
 import { CHROME_AI_PORT_NAME } from './core/ai/chrome-ai-protocol.js';
 import { ProviderId } from './core/ai/provider.js';
 import { Prompts } from './core/ai/prompts.js';
-import { filterTabs, executeNLAction, isValidTabFilter } from './core/nl-executor.js';
+import {
+  filterTabs,
+  executeNLAction,
+  isValidTabFilter,
+  NL_MUTATING_ACTIONS,
+  buildNLConfirmation,
+  nlActionRequiresConfirmation,
+  overBroadFilterReason,
+  sanitizeGroupColor,
+  sanitizeGroupName,
+} from './core/nl-executor.js';
 import { Storage } from './core/storage.js';
 import { saveStash, listStashes as listStashesDB, getStash, deleteStash as deleteStashDB, restoreStashTabs, importStashes as importStashesDB } from './core/stash-db.js';
 import { sanitizeCapturedGroupTitle, sanitizeCapturedTab } from './core/tab-restore.js';
@@ -1366,8 +1376,31 @@ function filterDestructiveTabs(tabs, filter) {
   return filterTabs(navigationSafeTabs, filter);
 }
 
-function isValidCloseConfirmation(parsedCommand) {
-  if (!isPlainRecord(parsedCommand) || parsedCommand.action !== 'close') return false;
+function filterNLMatches(action, tabs, filter) {
+  return action === 'close'
+    ? filterDestructiveTabs(tabs, filter)
+    : filterTabs(tabs, filter);
+}
+
+// Only fields the worker itself derived or validated are round-tripped to the
+// panel for confirmation. AI-authored prose (e.g. `confirmation`) is dropped.
+function buildConfirmableCommand(parsed, matchingTabs) {
+  const command = {
+    action: parsed.action,
+    filter: { ...parsed.filter },
+    tabIds: matchingTabs.map((tab) => tab.id),
+  };
+  if (parsed.action === 'group') {
+    command.groupName = sanitizeGroupName(parsed.groupName);
+    command.color = sanitizeGroupColor(parsed.color);
+  }
+  return command;
+}
+
+function isValidNLConfirmation(parsedCommand) {
+  if (!isPlainRecord(parsedCommand) || !NL_MUTATING_ACTIONS.includes(parsedCommand.action)) {
+    return false;
+  }
   if (!isValidTabFilter(parsedCommand.filter)) return false;
   if (!Array.isArray(parsedCommand.tabIds) || parsedCommand.tabIds.length === 0) return false;
   if (!parsedCommand.tabIds.every((tabId) => Number.isInteger(tabId) && tabId >= 0)) return false;
@@ -1806,42 +1839,48 @@ export async function handleMessage(msg, options = {}) {
         return { error: 'AI returned an invalid action' };
       }
       const liveTabs = await getAllTabs({ allWindows: true });
-      const matchingTabs = parsed.action === 'close'
-        ? filterDestructiveTabs(liveTabs, parsed.filter)
-        : filterTabs(liveTabs, parsed.filter);
+      const matchingTabs = filterNLMatches(parsed.action, liveTabs, parsed.filter);
 
       if (matchingTabs.length === 0) {
         return { error: 'No tabs matched that description' };
       }
 
-      // Destructive actions require confirmation
-      if (parsed.action === 'close') {
+      if (NL_MUTATING_ACTIONS.includes(parsed.action)) {
+        const broad = overBroadFilterReason(parsed.filter, matchingTabs.length, liveTabs.length);
+        if (broad) return { error: broad };
+      }
+
+      // Destructive and wide-reaching actions require confirmation. The text is
+      // derived from the live match set, never from AI-authored prose.
+      if (nlActionRequiresConfirmation(parsed.action, matchingTabs)) {
         return {
-          confirmation: parsed.confirmation || `Close ${matchingTabs.length} tab(s)?`,
-          parsedCommand: { ...parsed, tabIds: matchingTabs.map(t => t.id) },
+          confirmation: buildNLConfirmation(parsed.action, matchingTabs, parsed),
+          parsedCommand: buildConfirmableCommand(parsed, matchingTabs),
         };
       }
 
-      // Non-destructive actions execute immediately
+      // Small, single-window, non-destructive actions execute immediately
       return executeNLAction(parsed, matchingTabs);
     }
 
     case 'confirmNLCommand': {
       const { parsedCommand } = msg;
-      if (!isValidCloseConfirmation(parsedCommand)) {
+      if (!isValidNLConfirmation(parsedCommand)) {
         return { error: 'Invalid command confirmation' };
       }
 
       const approvedIds = new Set(parsedCommand.tabIds);
       const allTabs = await getAllTabs({ allWindows: true });
-      const matchingTabs = filterDestructiveTabs(allTabs, parsedCommand.filter)
+      const matchingTabs = filterNLMatches(parsedCommand.action, allTabs, parsedCommand.filter)
         .filter((tab) => approvedIds.has(tab.id));
       if (matchingTabs.length === 0) {
         return { error: 'No tabs matched that description' };
       }
 
       return executeNLAction({
-        ...parsedCommand,
+        action: parsedCommand.action,
+        groupName: parsedCommand.groupName,
+        color: parsedCommand.color,
         tabIds: matchingTabs.map((tab) => tab.id),
       }, matchingTabs);
     }
