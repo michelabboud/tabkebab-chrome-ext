@@ -463,6 +463,8 @@ export class GlobalSearch {
     if (!id) return null;
     const selector = `[data-restore-id="${String(id).replace(/["\\]/g, '')}"]`;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      // The panel may be torn down between retries.
+      if (typeof document === 'undefined') return null;
       const card = document.querySelector(selector);
       if (card) {
         card.scrollIntoView?.({ block: 'nearest' });

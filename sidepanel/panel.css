@@ -3486,11 +3486,6 @@ body.ai-available .ai-feature {
   text-shadow: 0 0 10px color-mix(in srgb, var(--focus-profile-color, var(--accent)) 30%, transparent);
 }
 
-.focus-end-early-btn {
-  font-size: var(--fs-xs);
-  padding: 4px 10px;
-}
-
 .focus-timer-display {
   margin-bottom: 16px;
 }

@@ -215,7 +215,9 @@ const focusPanel = new FocusPanel(document.getElementById('view-focus'), {
   // The global listener below routes the event once so component and shell
   // effects share one run-identity decision.
   listenForRuntimeEvents: false,
+  navigate: (target) => navigatePanel(target),
 });
+focusPanel.mountBanner(document.querySelector('.view-container'));
 
 function showFocusView() {
   showView('focus');
