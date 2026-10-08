@@ -163,6 +163,7 @@ describe('selectDriveRetentionDeletions', () => {
     expect(result.keptNewest.map(({ id }) => id)).toEqual([
       'sessions-newest-a',
       'sessions-newest-b',
+      'stashes-young',
       'stashes-newest',
     ]);
     expect(result.ignoredUndated).toEqual([]);
@@ -195,17 +196,23 @@ describe('selectDriveRetentionDeletions', () => {
     expect(result.deleteFiles).toEqual([files[0], files[1]]);
   });
 
-  test('bounds dynamic stash names into one category and keeps only the shared newest', async () => {
+  test('never prunes the only export of a stash: keeps the newest per stash name', async () => {
     const { selectDriveRetentionDeletions } = await retentionModule();
     const files = [
       file('alpha', 'stash-alpha-1780272000000.json', 'stashes', '2026-01-01T00:00:00.000Z'),
       file('beta', 'stash-beta-1780358400000.json', 'stashes', '2026-02-01T00:00:00.000Z'),
+      file('daily', 'stashes-2026-03-01.json', 'stashes', '2026-03-01T00:00:00.000Z'),
+      file('alpha-older', 'stash-alpha-1780000000000.json', 'stashes', '2025-12-01T00:00:00.000Z'),
+      file('archived-alpha', 'stash-alpha-1780272000000-2026-01-02T00-00-00.json', 'archive', '2026-01-02T00:00:00.000Z'),
+      file('archived-beta', 'stash-beta-1780358400000-2026-02-02T00-00-00.json', 'archive', '2026-02-02T00:00:00.000Z'),
     ];
 
     const result = selectDriveRetentionDeletions(files, Date.parse('2026-07-01T00:00:00.000Z'));
 
-    expect(result.deleteFiles).toEqual([files[0]]);
-    expect(result.keptNewest).toEqual([files[1]]);
+    expect(result.deleteFiles.map(({ id }) => id)).toEqual(['alpha-older']);
+    expect(result.keptNewest.map(({ id }) => id)).toEqual([
+      'alpha', 'beta', 'daily', 'archived-alpha', 'archived-beta',
+    ]);
   });
 
   test('computes newest ties independently for every bounded category', async () => {
@@ -215,7 +222,7 @@ describe('selectDriveRetentionDeletions', () => {
         'sessions-2026-01-01.json', 'sessions-2026-01-02.json', 'sessions-2026-01-03.json',
       ]],
       ['stashes', 'stashes', [
-        'stashes-2026-01-01.json', 'stash-alpha-1780272000000.json', 'stash-beta-1780358400000.json',
+        'stashes-2026-01-01.json', 'stashes-2026-01-02.json', 'stashes-2026-01-03.json',
       ]],
       ['bookmarks-json', 'bookmarks', [
         'bookmarks-2026-01-01.json', 'bookmarks-2026-01-02.json', 'bookmarks-2026-01-03-1780272000000.json',
@@ -236,7 +243,7 @@ describe('selectDriveRetentionDeletions', () => {
         'sessions-2025-12-01-2026-01-01T00-00-00.json', 'sessions-2025-12-02-2026-01-02T00-00-00.json', 'sessions-2025-12-03-2026-01-03T00-00-00.json',
       ]],
       ['archive-stashes', 'archive', [
-        'stashes-2025-12-01-2026-01-01T00-00-00.json', 'stash-alpha-1780272000000-2026-01-02T00-00-00.json', 'stash-beta-1780358400000-2026-01-03T00-00-00.json',
+        'stashes-2025-12-01-2026-01-01T00-00-00.json', 'stashes-2025-12-02-2026-01-02T00-00-00.json', 'stashes-2025-12-03-2026-01-03T00-00-00.json',
       ]],
       ['archive-bookmarks-json', 'archive', [
         'bookmarks-2025-12-01-2026-01-01T00-00-00.json', 'bookmarks-2025-12-02-2026-01-02T00-00-00.json', 'bookmarks-2025-12-03-1780272000000-2026-01-03T00-00-00.json',

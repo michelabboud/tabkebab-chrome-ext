@@ -153,6 +153,27 @@ function parseModifiedTime(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+const NAMED_STASH_EXPORT = /^stash-([A-Za-z0-9-]+)-\d{13}\.json$/;
+const ARCHIVED_NAMED_STASH_EXPORT = /^stash-([A-Za-z0-9-]+)-\d{13}-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/;
+
+/**
+ * Retention series a classified file belongs to. Each series keeps its newest
+ * copy forever. Per-stash exports (`stash-<name>-<ms>.json`) share the
+ * `stashes` category with daily snapshots, but each named stash is its own
+ * series so the only copy of an individually exported stash is never pruned.
+ */
+export function driveRetentionSeries(file, category) {
+  if (category === 'stashes' && file.scope === 'stashes') {
+    const match = file.name.match(NAMED_STASH_EXPORT);
+    if (match) return `stashes:named:${match[1]}`;
+  }
+  if (category === 'archive-stashes' && file.scope === 'archive') {
+    const match = file.name.match(ARCHIVED_NAMED_STASH_EXPORT);
+    if (match) return `archive-stashes:named:${match[1]}`;
+  }
+  return category;
+}
+
 function duplicateFingerprint(file) {
   return JSON.stringify([file?.name, file?.scope, file?.modifiedTime]);
 }
@@ -181,7 +202,7 @@ export function selectDriveRetentionDeletions(files, cutoffMs) {
   const keptCanonical = [];
   const ignoredUndated = [];
   const classifiedFiles = [];
-  const newestByCategory = new Map();
+  const newestBySeries = new Map();
   const processedIds = new Set();
 
   for (const file of files) {
@@ -201,10 +222,11 @@ export function selectDriveRetentionDeletions(files, cutoffMs) {
       continue;
     }
 
-    classifiedFiles.push({ file, category: classification.category, modifiedTime });
-    const newest = newestByCategory.get(classification.category);
+    const series = driveRetentionSeries(file, classification.category);
+    classifiedFiles.push({ file, series, modifiedTime });
+    const newest = newestBySeries.get(series);
     if (newest === undefined || modifiedTime > newest) {
-      newestByCategory.set(classification.category, modifiedTime);
+      newestBySeries.set(series, modifiedTime);
     }
   }
 
@@ -212,7 +234,7 @@ export function selectDriveRetentionDeletions(files, cutoffMs) {
   const keptNewest = [];
   const deleteIds = new Set();
   for (const entry of classifiedFiles) {
-    if (entry.modifiedTime === newestByCategory.get(entry.category)) {
+    if (entry.modifiedTime === newestBySeries.get(entry.series)) {
       keptNewest.push(entry.file);
       continue;
     }
